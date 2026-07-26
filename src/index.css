@@ -1,0 +1,150 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   Custom @theme tokens — these define the --color-* utilities
+   used by Tailwind classes like bg-background, text-foreground, etc.
+   ============================================================ */
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: #1a1a2e;
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-secondary: #06b6d4;
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius: 0.5rem;
+}
+
+/* ============================================================
+   CSS Custom Properties for shadcn/ui (DARK THEME ONLY)
+   Using the specified color scheme:
+     Background: #0a0a0f
+     Surface/cards: #1a1a2e
+     Borders: #2a2a3e
+     Primary: #7c3aed (violet)
+     Secondary: #06b6d4 (cyan)
+     Text primary: #f1f5f9, secondary: #94a3b8, muted: #64748b
+   ============================================================ */
+:root {
+  --background: #0a0a0f;
+  --foreground: #f1f5f9;
+  --card: #1a1a2e;
+  --card-foreground: #f1f5f9;
+  --popover: #1a1a2e;
+  --popover-foreground: #f1f5f9;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --secondary: #06b6d4;
+  --secondary-foreground: #ffffff;
+  --muted: #1a1a2e;
+  --muted-foreground: #64748b;
+  --accent: #7c3aed;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #2a2a3e;
+  --input: #2a2a3e;
+  --ring: #7c3aed;
+  --radius: 0.5rem;
+  --chart-1: #7c3aed;
+  --chart-2: #06b6d4;
+  --chart-3: #1a1a2e;
+  --chart-4: #f1f5f9;
+  --chart-5: #94a3b8;
+  --sidebar: #1a1a2e;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-primary: #7c3aed;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2a2a3e;
+  --sidebar-accent-foreground: #f1f5f9;
+  --sidebar-border: #2a2a3e;
+  --sidebar-ring: #7c3aed;
+}
+
+/* Override for dark class — same values since we only support dark mode */
+.dark {
+  --background: #0a0a0f;
+  --foreground: #f1f5f9;
+  --card: #1a1a2e;
+  --card-foreground: #f1f5f9;
+  --popover: #1a1a2e;
+  --popover-foreground: #f1f5f9;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --secondary: #06b6d4;
+  --secondary-foreground: #ffffff;
+  --muted: #1a1a2e;
+  --muted-foreground: #64748b;
+  --accent: #7c3aed;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #2a2a3e;
+  --input: #2a2a3e;
+  --ring: #7c3aed;
+  --radius: 0.5rem;
+  --chart-1: #7c3aed;
+  --chart-2: #06b6d4;
+  --chart-3: #1a1a2e;
+  --chart-4: #f1f5f9;
+  --chart-5: #94a3b8;
+  --sidebar: #1a1a2e;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-primary: #7c3aed;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #2a2a3e;
+  --sidebar-accent-foreground: #f1f5f9;
+  --sidebar-border: #2a2a3e;
+  --sidebar-ring: #7c3aed;
+}
+
+/* Base styles */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0;
+    padding: 0;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0f;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a3e;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
