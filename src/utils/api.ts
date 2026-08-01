@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ApiConfig } from "@/stores/chatStore";
 import type { ChatMessage } from "@/stores/chatStore";
+import type { ProviderId } from "@/utils/providers";
 
 export interface ApiResponse {
   content: string;
@@ -89,15 +90,26 @@ const TOOLS: Array<Record<string, unknown>> = [
 ];
 
 /**
- * List available models from an OpenAI-compatible `/models` endpoint.
+ * List available models from a `/models` endpoint (OpenAI-compatible shape,
+ * which Anthropic also uses).
  * Runs through Rust so the webview never hits CORS restrictions.
  *
  * @param baseUrl - The API base URL (e.g. https://opencode.ai/zen/v1).
+ * @param apiKey  - The API key, sent as the provider's auth header.
+ * @param provider - The provider id, which determines the endpoint & auth.
  * @returns The list of model IDs.
  */
-export async function listModels(baseUrl: string): Promise<string[]> {
+export async function listModels(
+  baseUrl: string,
+  apiKey = "",
+  provider: ProviderId = "zen",
+): Promise<string[]> {
   try {
-    return await invoke<string[]>("zen_list_models", { baseUrl });
+    return await invoke<string[]>("zen_list_models", {
+      baseUrl,
+      apiKey,
+      provider,
+    });
   } catch (err) {
     throw new Error(
       typeof err === "string" ? err : "Failed to load the model list.",
@@ -122,6 +134,26 @@ export async function fetchZenPricing(): Promise<ZenPricingEntry[]> {
 }
 
 /**
+ * Send a message to the configured LLM provider. Routes to the correct
+ * adapter based on `config.provider` (OpenAI-compatible or Anthropic).
+ *
+ * @param messages - The conversation history including the new user message.
+ * @param config   - API configuration (provider, baseUrl, apiKey, model, ...).
+ * @param systemPrompt - The system prompt to prepend (not included in messages array).
+ * @returns The assistant's reply content, or an error message.
+ */
+export async function sendMessage(
+  messages: ChatMessage[],
+  config: ApiConfig,
+  systemPrompt: string,
+): Promise<ApiResponse> {
+  if (config.provider === "anthropic") {
+    return sendAnthropicMessage(messages, config, systemPrompt);
+  }
+  return sendOpenAICompatMessage(messages, config, systemPrompt);
+}
+
+/**
  * Send a message to an OpenAI-compatible chat completions endpoint.
  * The request is executed by Rust, bypassing webview CORS restrictions.
  *
@@ -130,13 +162,8 @@ export async function fetchZenPricing(): Promise<ZenPricingEntry[]> {
  * fed back to the model, up to `MAX_TOOL_ROUNDS` rounds. If the model
  * rejects the `tools` field, the request is retried once without it and a
  * short note is prepended to the reply.
- *
- * @param messages - The conversation history including the new user message.
- * @param config   - API configuration (baseUrl, apiKey, model, thinkingBudget).
- * @param systemPrompt - The system prompt to prepend (not included in messages array).
- * @returns The assistant's reply content, or an error message.
  */
-export async function sendMessage(
+async function sendOpenAICompatMessage(
   messages: ChatMessage[],
   config: ApiConfig,
   systemPrompt: string,
@@ -193,6 +220,7 @@ export async function sendMessage(
       const data = await invoke<ChatResponse>("zen_chat", {
         baseUrl,
         apiKey,
+        provider: config.provider,
         payload,
       });
       return { data };
@@ -274,6 +302,233 @@ export async function sendMessage(
     error:
       "The model kept requesting web tools without producing a final answer. Please try again.",
   };
+}
+
+// ──────────────────────────────────────────────
+// Anthropic adapter (Messages API)
+// ──────────────────────────────────────────────
+
+/** A single content block in an Anthropic response. */
+interface AnthropicContentBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  content?: string;
+}
+
+interface AnthropicResponse {
+  content?: AnthropicContentBlock[];
+  stop_reason?: string;
+}
+
+type AnthropicContent = string | AnthropicContentBlock[];
+
+interface AnthropicHistoryMessage {
+  role: "user" | "assistant";
+  content: AnthropicContent;
+}
+
+/** Advertised max output tokens for Anthropic requests (required field). */
+const ANTHROPIC_MAX_TOKENS = 4096;
+/** Fallback model when none is configured. */
+const ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-5";
+
+/** Convert the OpenAI-shaped TOOLS list to Anthropic's `input_schema` format. */
+function toAnthropicTools(): Array<Record<string, unknown>> {
+  return TOOLS.map((tool) => {
+    const fn = tool.function as {
+      name: string;
+      description: string;
+      parameters: unknown;
+    };
+    return {
+      name: fn.name,
+      description: fn.description,
+      input_schema: fn.parameters,
+    };
+  });
+}
+
+/**
+ * Send a message to the Anthropic Messages API (`/v1/messages`).
+ * Runs a tool-calling loop like the OpenAI path, but with Anthropic's
+ * `tool_use` / `tool_result` content blocks.
+ */
+async function sendAnthropicMessage(
+  messages: ChatMessage[],
+  config: ApiConfig,
+  systemPrompt: string,
+): Promise<ApiResponse> {
+  const { baseUrl, apiKey, model } = config;
+
+  if (!apiKey) {
+    return { content: "", error: "API key is not configured." };
+  }
+
+  if (!baseUrl) {
+    return { content: "", error: "API base URL is not configured." };
+  }
+
+  // Clean text-only history; tool artifacts live in `toolContext` and are
+  // dropped entirely if the model rejects the tools field.
+  const history: AnthropicHistoryMessage[] = messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+  let toolContext: AnthropicHistoryMessage[] = [];
+
+  let useTools = true;
+
+  const runRound = async (
+    withTools: boolean,
+  ): Promise<{ data?: AnthropicResponse; error?: string }> => {
+    const payload: Record<string, unknown> = {
+      model: model || ANTHROPIC_DEFAULT_MODEL,
+      max_tokens: ANTHROPIC_MAX_TOKENS,
+      system: systemPrompt,
+      messages: [...history, ...toolContext],
+    };
+
+    if (withTools) {
+      payload["tools"] = toAnthropicTools();
+    }
+
+    try {
+      const data = await invoke<AnthropicResponse>("zen_chat", {
+        baseUrl,
+        apiKey,
+        provider: "anthropic",
+        payload,
+      });
+      return { data };
+    } catch (err) {
+      const message =
+        typeof err === "string" ? err : "An unknown error occurred.";
+      return { error: message };
+    }
+  };
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const { data, error } = await runRound(useTools);
+
+    if (error) {
+      // Some models reject the `tools` field; retry once without it.
+      if (useTools && /tool/i.test(error)) {
+        useTools = false;
+        toolContext = [];
+
+        const retry = await runRound(false);
+        if (retry.error) {
+          return { content: "", error: retry.error };
+        }
+        const text = textFromAnthropicBlocks(retry.data?.content);
+        if (text == null) {
+          return {
+            content: "",
+            error: "API response did not contain a message.",
+          };
+        }
+        return {
+          content: `[Web search unavailable — answering without it]\n\n${text}`,
+        };
+      }
+      return { content: "", error };
+    }
+
+    const blocks = data?.content ?? [];
+    const toolUses = blocks.filter((b) => b.type === "tool_use");
+
+    if (toolUses.length > 0) {
+      // Echo the assistant's full content blocks, then feed back the results.
+      toolContext.push({ role: "assistant", content: blocks });
+      const results: AnthropicContentBlock[] = [];
+      for (const call of toolUses) {
+        const result = await executeAnthropicTool(call);
+        results.push({
+          type: "tool_result",
+          tool_use_id: call.id,
+          content: result,
+        });
+      }
+      toolContext.push({ role: "user", content: results });
+      continue;
+    }
+
+    const text = textFromAnthropicBlocks(blocks);
+    if (text == null) {
+      return {
+        content: "",
+        error: "API response did not contain a message.",
+      };
+    }
+    return { content: text };
+  }
+
+  return {
+    content: "",
+    error:
+      "The model kept requesting web tools without producing a final answer. Please try again.",
+  };
+}
+
+/** Join all text blocks of an Anthropic response; null if there is no text. */
+function textFromAnthropicBlocks(
+  blocks?: AnthropicContentBlock[],
+): string | null {
+  if (!blocks) return null;
+  const text = blocks
+    .filter((b) => b.type === "text" && b.text)
+    .map((b) => b.text)
+    .join("");
+  return text || null;
+}
+
+/**
+ * Execute a single Anthropic tool_use block via the Rust backend and return
+ * its text result (either the formatted search results or the fetched page).
+ */
+async function executeAnthropicTool(
+  call: AnthropicContentBlock,
+): Promise<string> {
+  const name = call.name ?? "";
+  const args = call.input ?? {};
+  try {
+    if (name === "web_search") {
+      const query = String(args.query ?? "").trim();
+      if (!query) {
+        return "Error: web_search requires a 'query' string argument.";
+      }
+      const results = await invoke<WebResult[]>("zen_web_search", {
+        query,
+      });
+      if (!results || results.length === 0) {
+        return "The web search returned no results.";
+      }
+      return results
+        .map(
+          (r, i) =>
+            `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`,
+        )
+        .join("\n\n");
+    }
+
+    if (name === "fetch_page") {
+      const url = String(args.url ?? "").trim();
+      if (!url) {
+        return "Error: fetch_page requires a 'url' string argument.";
+      }
+      return await invoke<string>("zen_fetch_page", { url });
+    }
+
+    return `Error: unknown tool "${name}".`;
+  } catch (err) {
+    const message =
+      typeof err === "string" ? err : "unknown error";
+    return `Error while running ${name}: ${message}`;
+  }
 }
 
 /**

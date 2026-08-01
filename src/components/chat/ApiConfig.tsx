@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useChatStore, ZEN_DEFAULT_BASE_URL } from "@/stores/chatStore";
+import { useChatStore } from "@/stores/chatStore";
+import {
+  PROVIDERS,
+  getProvider,
+  detectProviderFromKey,
+  type ProviderId,
+} from "@/utils/providers";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +33,7 @@ import { saveJson, loadJson } from "@/utils/storage";
 import {
   Settings,
   RefreshCw,
+  RotateCcw,
   Loader2,
   CheckCircle2,
   XCircle,
@@ -49,9 +56,15 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
   const config = useChatStore((s) => s.config);
   const setConfig = useChatStore((s) => s.setConfig);
 
-  const [baseUrl, setBaseUrl] = useState(
-    config.baseUrl || ZEN_DEFAULT_BASE_URL,
+  const [provider, setProvider] = useState<ProviderId>(
+    config.provider ?? "zen",
   );
+  const [baseUrl, setBaseUrl] = useState(
+    config.baseUrl || getProvider(config.provider ?? "zen").defaultBaseUrl,
+  );
+  const [urlCustomized, setUrlCustomized] = useState(false);
+  const [detectedProvider, setDetectedProvider] =
+    useState<ProviderId | null>(null);
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [model] = useState(config.model || "");
   const [customModel, setCustomModel] = useState("");
@@ -95,40 +108,52 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
     [pricing],
   );
 
-  // Load the model list and current prices from the configured endpoint on mount
-  const loadModels = useCallback(async (url: string): Promise<boolean> => {
-    const target = url.trim() || ZEN_DEFAULT_BASE_URL;
-    setModelsLoading(true);
-    setModelsError(null);
-    setPricingStatus(null);
-    try {
-      const list = await listModels(target);
-      setModels(list);
-    } catch (err) {
-      setModels(null);
-      setModelsError(err instanceof Error ? err.message : String(err));
-    }
-    try {
-      const entries = await fetchZenPricing();
-      setPricing(entries);
-      setPricingStatus(`Prices imported for ${entries.length} models`);
-      await saveJson("zen-prices.json", entries);
-      return true;
-    } catch (err) {
-      setPricingStatus(err instanceof Error ? err.message : String(err));
-      return false;
-    } finally {
+  // Load the model list (and Zen prices when applicable) for a provider
+  const loadModels = useCallback(
+    async (
+      url: string,
+      p: ProviderId = provider,
+      key = apiKey.trim(),
+    ): Promise<boolean> => {
+      const target = url.trim() || getProvider(p).defaultBaseUrl;
+      setModelsLoading(true);
+      setModelsError(null);
+      setPricingStatus(null);
+      try {
+        const list = await listModels(target, key, p);
+        setModels(list);
+      } catch (err) {
+        setModels(null);
+        setModelsError(err instanceof Error ? err.message : String(err));
+      }
+      let pricesOk = false;
+      if (getProvider(p).hasZenPricing) {
+        try {
+          const entries = await fetchZenPricing();
+          setPricing(entries);
+          setPricingStatus(`Prices imported for ${entries.length} models`);
+          await saveJson("zen-prices.json", entries);
+          pricesOk = true;
+        } catch (err) {
+          setPricingStatus(err instanceof Error ? err.message : String(err));
+        }
+      }
       setModelsLoading(false);
-    }
-  }, []);
+      return pricesOk;
+    },
+    [apiKey, provider],
+  );
 
   useEffect(() => {
     let stale = false;
     void (async () => {
+      const initialProvider = config.provider ?? "zen";
       const pricesOk = await loadModels(
-        config.baseUrl || ZEN_DEFAULT_BASE_URL,
+        config.baseUrl || getProvider(initialProvider).defaultBaseUrl,
+        initialProvider,
       );
       if (stale || pricesOk) return;
+      if (!getProvider(initialProvider).hasZenPricing) return;
       const cached = await loadJson<ZenPricingEntry[]>("zen-prices.json");
       if (cached && cached.length > 0) {
         setPricing(cached);
@@ -143,11 +168,16 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
 
   const options = useMemo(() => {
     const list = [...(models ?? [])];
-    if (model && !list.includes(model) && selection !== CUSTOM_MODEL) {
+    if (
+      config.provider === provider &&
+      model &&
+      !list.includes(model) &&
+      selection !== CUSTOM_MODEL
+    ) {
       list.unshift(model);
     }
     return list;
-  }, [models, model, selection]);
+  }, [models, model, selection, provider, config.provider]);
 
   const resolvedModel =
     selection === CUSTOM_MODEL ? customModel.trim() : selection;
@@ -155,6 +185,26 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
   const canSave =
     apiKey.trim() !== "" &&
     (selection === CUSTOM_MODEL ? customModel.trim() !== "" : selection !== "");
+
+  /** Switch to a provider: fill its default URL + model and reload the list. */
+  const applyProvider = (p: ProviderId, keyOverride?: string) => {
+    setProvider(p);
+    const def = getProvider(p);
+    setBaseUrl(def.defaultBaseUrl);
+    setSelection(def.defaultModel);
+    setUrlCustomized(false);
+    const key = keyOverride ?? apiKey.trim();
+    void loadModels(def.defaultBaseUrl, p, key);
+  };
+
+  const handleApiKeyChange = (value: string) => {
+    setApiKey(value);
+    const detected = detectProviderFromKey(value);
+    setDetectedProvider(detected);
+    if (detected && detected !== provider && !urlCustomized) {
+      applyProvider(detected, value);
+    }
+  };
 
   const handleTest = async () => {
     if (!apiKey.trim()) {
@@ -165,7 +215,11 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
     setTestStatus("loading");
     setTestMessage("");
     try {
-      const list = await listModels(baseUrl.trim() || ZEN_DEFAULT_BASE_URL);
+      const list = await listModels(
+        baseUrl.trim() || getProvider(provider).defaultBaseUrl,
+        apiKey.trim(),
+        provider,
+      );
       setModels(list);
       setTestStatus("success");
       setTestMessage(`Connected — ${list.length} models available.`);
@@ -177,7 +231,8 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
 
   const handleSave = async () => {
     await setConfig({
-      baseUrl: baseUrl.trim() || ZEN_DEFAULT_BASE_URL,
+      provider,
+      baseUrl: baseUrl.trim() || getProvider(provider).defaultBaseUrl,
       apiKey: apiKey.trim(),
       model: resolvedModel,
       reasoningEffort: reasoningEffort.trim() !== "" ? reasoningEffort : null,
@@ -210,18 +265,63 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
             )}
           </div>
 
+          {/* Provider */}
+          <div className="space-y-1.5">
+            <Label className="text-text-secondary text-xs">Provider</Label>
+            <Select
+              value={provider}
+              onValueChange={(v) => applyProvider((v ?? "zen") as ProviderId)}
+            >
+              <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+                <SelectValue>
+                  {(v) => getProvider((v as ProviderId) || provider).label}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {PROVIDERS.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* API Base URL */}
           <div className="space-y-1.5">
             <Label className="text-text-secondary text-xs">API Base URL</Label>
-            <Input
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={ZEN_DEFAULT_BASE_URL}
-              className={inputClass}
-            />
+            <div className="flex gap-2">
+              <Input
+                value={baseUrl}
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  setUrlCustomized(true);
+                }}
+                placeholder={getProvider(provider).defaultBaseUrl}
+                className={inputClass}
+              />
+              <Button
+                variant="secondary"
+                size="icon-sm"
+                onClick={() => setBaseUrl(getProvider(provider).defaultBaseUrl)}
+                title="Reset to the provider's default URL"
+              >
+                <RotateCcw className="size-3.5" />
+              </Button>
+            </div>
             <p className="text-xs text-text-muted">
-              OpenCode Zen uses {ZEN_DEFAULT_BASE_URL}. Other
-              OpenAI-compatible endpoints also work.
+              {provider === "zen" ? (
+                <>
+                  OpenCode Zen uses {getProvider("zen").defaultBaseUrl}. Other
+                  OpenAI-compatible endpoints also work.
+                </>
+              ) : (
+                <>
+                  {getProvider(provider).label}'s default URL is filled in
+                  automatically when you switch providers. You can edit it for
+                  custom endpoints — Reset restores the default.
+                </>
+              )}
             </p>
           </div>
 
@@ -231,10 +331,25 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
             <Input
               type="password"
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-…"
+              onChange={(e) => handleApiKeyChange(e.target.value)}
+              placeholder={
+                getProvider(provider).keyPrefixes[0]
+                  ? `${getProvider(provider).keyPrefixes[0]}…`
+                  : "sk-…"
+              }
               className={inputClass}
             />
+            {detectedProvider && detectedProvider !== provider && (
+              <div className="flex items-center gap-1.5 text-xs text-text-muted">
+                Detected {getProvider(detectedProvider).label} key.
+                <button
+                  onClick={() => applyProvider(detectedProvider)}
+                  className="text-primary hover:text-primary/80 select-none"
+                >
+                  Switch provider
+                </button>
+              </div>
+            )}
             <Button
               variant="secondary"
               size="sm"
@@ -271,7 +386,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
                 onClick={() => loadModels(baseUrl)}
                 disabled={modelsLoading}
                 className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 disabled:opacity-50 select-none"
-                title="Reload the model list and import current prices"
+                title="Reload the model list"
               >
                 {modelsLoading ? (
                   <Loader2 className="size-3 animate-spin" />
@@ -294,10 +409,14 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
               </SelectTrigger>
               <SelectContent>
                 {options.map((id) => {
-                  const free = isFreeModel(id) || fetchedFree.has(id);
+                  const free =
+                    provider === "zen" &&
+                    (isFreeModel(id) || fetchedFree.has(id));
                   const price = free
                     ? "Free"
-                    : formatModelPrice(id, fetchedPrices);
+                    : provider === "zen"
+                      ? formatModelPrice(id, fetchedPrices)
+                      : null;
                   return (
                     <SelectItem key={id} value={id}>
                       <span className="flex items-center justify-between gap-3 flex-1">
@@ -350,20 +469,25 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
             )}
             {!modelsLoading && !modelsError && models && (
               <p className="text-xs text-text-muted">
-                {models.length} models available at this endpoint. Prices per
-                1M tokens are imported automatically from{" "}
-                <a
-                  href="https://opencode.ai/docs/zen"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary hover:text-primary/80"
-                >
-                  opencode.ai/docs/zen
-                </a>{" "}
-                every time you reload models — may change.
+                {models.length} models available at this endpoint.
+                {provider === "zen" && (
+                  <>
+                    {" "}
+                    Prices per 1M tokens are imported automatically from{" "}
+                    <a
+                      href="https://opencode.ai/docs/zen"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:text-primary/80"
+                    >
+                      opencode.ai/docs/zen
+                    </a>{" "}
+                    every time you reload models — may change.
+                  </>
+                )}
               </p>
             )}
-            {pricingStatus && (
+            {provider === "zen" && pricingStatus && (
               <p
                 className={
                   pricingStatus.startsWith("Prices imported") ||
@@ -378,39 +502,51 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
           </div>
 
           {/* Reasoning Effort */}
-          <div className="space-y-1.5">
-            <Label className="text-text-secondary text-xs">
-              Reasoning Effort
-            </Label>
-            <Select
-              value={reasoningEffort}
-              onValueChange={(v) => setReasoningEffort(v ?? "")}
-            >
-              <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
-                <SelectValue>
-                  {(v) =>
-                    v
-                      ? (REASONING_OPTIONS.find((o) => o.value === v)?.label ??
-                        v)
-                      : "Default"
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {REASONING_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value || "default"} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-text-muted">
-              How much the model should think before answering (like
-              opencode's reasoning levels). Support varies by model — if a
-              model rejects it, you'll see the error in chat. Default sends
-              nothing.
-            </p>
-          </div>
+          {provider !== "anthropic" ? (
+            <div className="space-y-1.5">
+              <Label className="text-text-secondary text-xs">
+                Reasoning Effort
+              </Label>
+              <Select
+                value={reasoningEffort}
+                onValueChange={(v) => setReasoningEffort(v ?? "")}
+              >
+                <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+                  <SelectValue>
+                    {(v) =>
+                      v
+                        ? (REASONING_OPTIONS.find((o) => o.value === v)?.label ??
+                          v)
+                        : "Default"
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {REASONING_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value || "default"} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-text-muted">
+                How much the model should think before answering (like
+                opencode's reasoning levels). Support varies by model — if a
+                model rejects it, you'll see the error in chat. Default sends
+                nothing.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label className="text-text-secondary text-xs">
+                Reasoning Effort
+              </Label>
+              <p className="text-xs text-text-muted">
+                Not configurable for Anthropic yet — Claude models handle
+                reasoning on their own.
+              </p>
+            </div>
+          )}
 
           {/* Chat Agent Prompt */}
           <div className="space-y-1.5">
