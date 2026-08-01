@@ -1,13 +1,16 @@
 {
   "name": "ai-application-support",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:arm64": "tauri build --target aarch64-pc-windows-msvc",
+    "build:x64": "tauri build --target x86_64-pc-windows-msvc",
+    "build:mac-arm64": "tauri build --target aarch64-apple-darwin"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
