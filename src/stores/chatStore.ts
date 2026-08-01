@@ -22,8 +22,10 @@ export interface ApiConfig {
   thinkingBudget: number | null;
 }
 
+export const ZEN_DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
+
 const defaultApiConfig: ApiConfig = {
-  baseUrl: "https://api.opencode.ai/v1",
+  baseUrl: ZEN_DEFAULT_BASE_URL,
   apiKey: "",
   model: "deepseek-v4-flash-free",
   thinkingBudget: null,
@@ -110,6 +112,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loadConfig: async () => {
     const data = await loadJson<ApiConfig>("config.json");
     if (data && data.apiKey) {
+      // Migrate the old, non-existent endpoint to the real OpenCode Zen URL
+      if (
+        data.baseUrl &&
+        data.baseUrl.includes("api.opencode.ai") &&
+        !data.baseUrl.includes("opencode.ai/zen")
+      ) {
+        data.baseUrl = ZEN_DEFAULT_BASE_URL;
+      }
       set({ config: data, configLoaded: true });
     } else {
       set({ config: { ...defaultApiConfig }, configLoaded: true });

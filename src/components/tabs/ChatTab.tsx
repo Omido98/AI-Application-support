@@ -8,6 +8,8 @@ import ApiConfig from "@/components/chat/ApiConfig";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
 import InjectProfileButton from "@/components/chat/InjectProfileButton";
+import { Button } from "@/components/ui/button";
+import { Settings } from "lucide-react";
 
 export default function ChatTab() {
   // ── Stores ──
@@ -27,6 +29,7 @@ export default function ChatTab() {
 
   // ── Input state ──
   const [inputValue, setInputValue] = useState("");
+  const [showConfig, setShowConfig] = useState(false);
 
   // ── Load on mount ──
   useEffect(() => {
@@ -111,9 +114,9 @@ export default function ChatTab() {
     );
   }
 
-  // ── Show API config if not yet configured ──
-  if (!config.apiKey) {
-    return <ApiConfig />;
+  // ── Show API config if not yet configured, or opened from settings ──
+  if (!config.apiKey || showConfig) {
+    return <ApiConfig onDone={() => setShowConfig(false)} />;
   }
 
   // ── Chat interface ──
@@ -122,7 +125,17 @@ export default function ChatTab() {
       {/* Header + Inject Profile */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
         <h2 className="text-base font-semibold text-text-primary">Chat</h2>
-        <InjectProfileButton onInject={handleInject} />
+        <div className="flex items-center gap-2">
+          <InjectProfileButton onInject={handleInject} />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setShowConfig(true)}
+            title="API settings"
+          >
+            <Settings className="size-4 text-text-secondary" />
+          </Button>
+        </div>
       </div>
 
       {/* Messages */}

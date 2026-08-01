@@ -1,110 +1,141 @@
-import { useState } from "react";
-import { useChatStore } from "@/stores/chatStore";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useChatStore, ZEN_DEFAULT_BASE_URL } from "@/stores/chatStore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings, Pencil } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { listModels } from "@/utils/api";
+import {
+  Settings,
+  RefreshCw,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  ArrowLeft,
+} from "lucide-react";
 
-export default function ApiConfig() {
+const CUSTOM_MODEL = "__custom__";
+const inputClass =
+  "bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30";
+
+export default function ApiConfig({ onDone }: { onDone?: () => void }) {
   const config = useChatStore((s) => s.config);
-  const configLoaded = useChatStore((s) => s.configLoaded);
   const setConfig = useChatStore((s) => s.setConfig);
-  const [baseUrl, setBaseUrl] = useState(config.baseUrl);
+
+  const [baseUrl, setBaseUrl] = useState(
+    config.baseUrl || ZEN_DEFAULT_BASE_URL,
+  );
   const [apiKey, setApiKey] = useState(config.apiKey);
-  const [model, setModel] = useState(config.model);
+  const [model] = useState(config.model || "");
+  const [customModel, setCustomModel] = useState("");
+  const [selection, setSelection] = useState<string>(model);
   const [thinkingBudget, setThinkingBudget] = useState(
     config.thinkingBudget?.toString() ?? "",
   );
-  const [editing, setEditing] = useState(!config.apiKey);
 
-  // Re-initialise local state when config loads from disk
-  if (configLoaded && !editing && !config.apiKey) {
-    // If loaded but no key, force edit mode
-    setTimeout(() => setEditing(true), 0);
-  }
+  const [models, setModels] = useState<string[] | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
+  const [testStatus, setTestStatus] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle");
+  const [testMessage, setTestMessage] = useState("");
+
+  // Load the model list from the configured endpoint on mount
+  const loadModels = useCallback(async (url: string) => {
+    const target = url.trim() || ZEN_DEFAULT_BASE_URL;
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const list = await listModels(target);
+      setModels(list);
+    } catch (err) {
+      setModels(null);
+      setModelsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setModelsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadModels(config.baseUrl || ZEN_DEFAULT_BASE_URL);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const options = useMemo(() => {
+    const list = [...(models ?? [])];
+    if (model && !list.includes(model) && selection !== CUSTOM_MODEL) {
+      list.unshift(model);
+    }
+    return list;
+  }, [models, model, selection]);
+
+  const resolvedModel =
+    selection === CUSTOM_MODEL ? customModel.trim() : selection;
+
+  const canSave =
+    apiKey.trim() !== "" &&
+    (selection === CUSTOM_MODEL ? customModel.trim() !== "" : selection !== "");
+
+  const handleTest = async () => {
+    if (!apiKey.trim()) {
+      setTestStatus("error");
+      setTestMessage("Enter your API key first.");
+      return;
+    }
+    setTestStatus("loading");
+    setTestMessage("");
+    try {
+      const list = await listModels(baseUrl.trim() || ZEN_DEFAULT_BASE_URL);
+      setModels(list);
+      setTestStatus("success");
+      setTestMessage(`Connected — ${list.length} models available.`);
+    } catch (err) {
+      setTestStatus("error");
+      setTestMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const handleSave = async () => {
     await setConfig({
-      baseUrl: baseUrl || "https://api.opencode.ai/v1",
-      apiKey,
-      model: model || "deepseek-v4-flash-free",
+      baseUrl: baseUrl.trim() || ZEN_DEFAULT_BASE_URL,
+      apiKey: apiKey.trim(),
+      model: resolvedModel,
       thinkingBudget:
         thinkingBudget.trim() !== "" ? Number(thinkingBudget) : null,
     });
-    setEditing(false);
+    onDone?.();
   };
-
-  // Mask the API key for display
-  const maskedKey =
-    config.apiKey.length > 8
-      ? config.apiKey.slice(0, 4) + "…" + config.apiKey.slice(-4)
-      : config.apiKey
-        ? "••••••••"
-        : "";
-
-  if (!editing && config.apiKey) {
-    return (
-      <div className="p-6">
-        <Card className="bg-surface border-border max-w-lg mx-auto transition-[border-color] hover:border-primary/20">
-          <CardContent className="pt-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Settings className="size-4 text-primary" />
-                <span className="text-sm font-medium text-text-primary">
-                  API Configuration
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setEditing(true)}
-                title="Edit configuration"
-              >
-                <Pencil className="size-4 text-text-secondary" />
-              </Button>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-xs text-text-muted">Endpoint</span>
-              <p className="text-sm text-text-primary">{config.baseUrl}</p>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-xs text-text-muted">API Key</span>
-              <p className="text-sm text-text-primary font-mono">{maskedKey}</p>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-xs text-text-muted">Model</span>
-              <p className="text-sm text-text-primary">{config.model}</p>
-            </div>
-
-            {config.thinkingBudget != null && config.thinkingBudget > 0 && (
-              <div className="space-y-1">
-                <span className="text-xs text-text-muted">
-                  Thinking Budget
-                </span>
-                <p className="text-sm text-text-primary">
-                  {config.thinkingBudget}
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="p-6">
       <Card className="bg-surface border-border max-w-lg mx-auto">
         <CardContent className="pt-4 space-y-4">
-          <div className="flex items-center gap-2">
-            <Settings className="size-4 text-primary" />
-            <span className="text-sm font-medium text-text-primary">
-              Configure API
-            </span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Settings className="size-4 text-primary" />
+              <span className="text-sm font-medium text-text-primary">
+                Configure API
+              </span>
+            </div>
+            {onDone && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={onDone}
+                title="Back to chat"
+              >
+                <ArrowLeft className="size-4 text-text-secondary" />
+              </Button>
+            )}
           </div>
 
           {/* API Base URL */}
@@ -113,9 +144,13 @@ export default function ApiConfig() {
             <Input
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://api.opencode.ai/v1"
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
+              placeholder={ZEN_DEFAULT_BASE_URL}
+              className={inputClass}
             />
+            <p className="text-xs text-text-muted">
+              OpenCode Zen uses {ZEN_DEFAULT_BASE_URL}. Other
+              OpenAI-compatible endpoints also work.
+            </p>
           </div>
 
           {/* API Key */}
@@ -126,19 +161,100 @@ export default function ApiConfig() {
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-…"
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
+              className={inputClass}
             />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleTest}
+              disabled={testStatus === "loading"}
+              className="mt-1"
+            >
+              {testStatus === "loading" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="size-3.5" />
+              )}
+              Test connection
+            </Button>
+            {testStatus === "success" && (
+              <div className="flex items-center gap-1.5 text-xs text-green-400">
+                <CheckCircle2 className="size-3.5" />
+                {testMessage}
+              </div>
+            )}
+            {testStatus === "error" && (
+              <div className="flex items-center gap-1.5 text-xs text-destructive">
+                <XCircle className="size-3.5" />
+                {testMessage}
+              </div>
+            )}
           </div>
 
           {/* Model */}
           <div className="space-y-1.5">
-            <Label className="text-text-secondary text-xs">Model</Label>
-            <Input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="e.g. deepseek-v4-flash-free"
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
-            />
+            <div className="flex items-center justify-between">
+              <Label className="text-text-secondary text-xs">Model</Label>
+              <button
+                onClick={() => loadModels(baseUrl)}
+                disabled={modelsLoading}
+                className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 disabled:opacity-50 select-none"
+                title="Reload the model list"
+              >
+                {modelsLoading ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3" />
+                )}
+                Reload models
+              </button>
+            </div>
+
+            <Select
+              value={selection}
+              onValueChange={(v) => setSelection(v ?? "")}
+              disabled={modelsLoading}
+            >
+              <SelectTrigger className="w-full bg-[#14141f] border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+                <SelectValue>
+                  {(v) => v ?? "Select a model…"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {id}
+                  </SelectItem>
+                ))}
+                <SelectItem value={CUSTOM_MODEL}>Custom model…</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {selection === CUSTOM_MODEL && (
+              <Input
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+                placeholder="e.g. deepseek-v4-flash-free"
+                className={inputClass}
+              />
+            )}
+
+            {modelsLoading && (
+              <p className="flex items-center gap-1.5 text-xs text-text-muted">
+                <Loader2 className="size-3 animate-spin" />
+                Loading models…
+              </p>
+            )}
+            {!modelsLoading && modelsError && (
+              <p className="text-xs text-destructive">
+                Could not load models: {modelsError}
+              </p>
+            )}
+            {!modelsLoading && !modelsError && models && (
+              <p className="text-xs text-text-muted">
+                {models.length} models available at this endpoint.
+              </p>
+            )}
           </div>
 
           {/* Thinking Budget */}
@@ -152,7 +268,7 @@ export default function ApiConfig() {
               onChange={(e) => setThinkingBudget(e.target.value)}
               placeholder="Optional"
               min={0}
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
+              className={inputClass}
             />
             <p className="text-xs text-text-muted">
               Only supported by some models (e.g., DeepSeek). Leave empty if
@@ -163,7 +279,7 @@ export default function ApiConfig() {
           <Button
             onClick={handleSave}
             className="w-full bg-primary hover:bg-primary/80 text-primary-foreground"
-            disabled={!apiKey.trim()}
+            disabled={!canSave}
           >
             Save &amp; Connect
           </Button>

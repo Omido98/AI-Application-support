@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { ApiConfig } from "@/stores/chatStore";
 import type { ChatMessage } from "@/stores/chatStore";
 
@@ -7,7 +8,25 @@ export interface ApiResponse {
 }
 
 /**
+ * List available models from an OpenAI-compatible `/models` endpoint.
+ * Runs through Rust so the webview never hits CORS restrictions.
+ *
+ * @param baseUrl - The API base URL (e.g. https://opencode.ai/zen/v1).
+ * @returns The list of model IDs.
+ */
+export async function listModels(baseUrl: string): Promise<string[]> {
+  try {
+    return await invoke<string[]>("zen_list_models", { baseUrl });
+  } catch (err) {
+    throw new Error(
+      typeof err === "string" ? err : "Failed to load the model list.",
+    );
+  }
+}
+
+/**
  * Send a message to an OpenAI-compatible chat completions endpoint.
+ * The request is executed by Rust, bypassing webview CORS restrictions.
  *
  * @param messages - The conversation history including the new user message.
  * @param config   - API configuration (baseUrl, apiKey, model, thinkingBudget).
@@ -31,7 +50,7 @@ export async function sendMessage(
 
   // Build the payload
   const payload: Record<string, unknown> = {
-    model: model || "gpt-4",
+    model: model || "deepseek-v4-flash-free",
     messages: [
       { role: "system", content: systemPrompt },
       ...messages.map((m) => ({
@@ -46,33 +65,10 @@ export async function sendMessage(
     payload["thinking_budget"] = thinkingBudget;
   }
 
-  // Normalise baseUrl — strip trailing slash and append path
-  const url = `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
-
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      let errorBody = "";
-      try {
-        errorBody = await response.text();
-      } catch {
-        errorBody = `HTTP ${response.status}`;
-      }
-      return {
-        content: "",
-        error: `API error (${response.status}): ${errorBody}`,
-      };
-    }
-
-    const data = await response.json();
+    const data = await invoke<{
+      choices?: Array<{ message?: { content?: string } }>;
+    }>("zen_chat", { baseUrl, apiKey, payload });
 
     const content = data?.choices?.[0]?.message?.content;
     if (content == null) {
@@ -85,7 +81,7 @@ export async function sendMessage(
     return { content };
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : "An unknown error occurred.";
-    return { content: "", error: `Network error: ${message}` };
+      typeof err === "string" ? err : "An unknown error occurred.";
+    return { content: "", error: message };
   }
 }
