@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -11,8 +12,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { listModels } from "@/utils/api";
-import { formatModelPrice, isFreeModel } from "@/utils/zenPricing";
+import {
+  listModels,
+  fetchZenPricing,
+  type ZenPricingEntry,
+} from "@/utils/api";
+import {
+  formatModelPrice,
+  isFreeModel,
+  type ModelPrice,
+} from "@/utils/zenPricing";
+import { getStandardPrompt } from "@/utils/systemPrompt";
+import { saveJson, loadJson } from "@/utils/storage";
 import {
   Settings,
   RefreshCw,
@@ -48,34 +59,85 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
   const [reasoningEffort, setReasoningEffort] = useState(
     config.reasoningEffort ?? "",
   );
+  const [promptMode, setPromptMode] = useState(
+    config.systemPromptMode ?? "standard",
+  );
+  const [customPrompt, setCustomPrompt] = useState(
+    config.customSystemPrompt ?? "",
+  );
 
   const [models, setModels] = useState<string[] | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
+
+  const [pricing, setPricing] = useState<ZenPricingEntry[]>([]);
+  const [pricingStatus, setPricingStatus] = useState<string | null>(null);
 
   const [testStatus, setTestStatus] = useState<
     "idle" | "loading" | "success" | "error"
   >("idle");
   const [testMessage, setTestMessage] = useState("");
 
-  // Load the model list from the configured endpoint on mount
-  const loadModels = useCallback(async (url: string) => {
+  const standardPrompt = useMemo(() => getStandardPrompt(), []);
+
+  const fetchedPrices = useMemo(() => {
+    const map: Record<string, ModelPrice> = {};
+    for (const entry of pricing) {
+      if (!entry.is_free && entry.input != null && entry.output != null) {
+        map[entry.id] = { input: entry.input, output: entry.output };
+      }
+    }
+    return map;
+  }, [pricing]);
+
+  const fetchedFree = useMemo(
+    () => new Set(pricing.filter((p) => p.is_free).map((p) => p.id)),
+    [pricing],
+  );
+
+  // Load the model list and current prices from the configured endpoint on mount
+  const loadModels = useCallback(async (url: string): Promise<boolean> => {
     const target = url.trim() || ZEN_DEFAULT_BASE_URL;
     setModelsLoading(true);
     setModelsError(null);
+    setPricingStatus(null);
     try {
       const list = await listModels(target);
       setModels(list);
     } catch (err) {
       setModels(null);
       setModelsError(err instanceof Error ? err.message : String(err));
+    }
+    try {
+      const entries = await fetchZenPricing();
+      setPricing(entries);
+      setPricingStatus(`Prices imported for ${entries.length} models`);
+      await saveJson("zen-prices.json", entries);
+      return true;
+    } catch (err) {
+      setPricingStatus(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setModelsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadModels(config.baseUrl || ZEN_DEFAULT_BASE_URL);
+    let stale = false;
+    void (async () => {
+      const pricesOk = await loadModels(
+        config.baseUrl || ZEN_DEFAULT_BASE_URL,
+      );
+      if (stale || pricesOk) return;
+      const cached = await loadJson<ZenPricingEntry[]>("zen-prices.json");
+      if (cached && cached.length > 0) {
+        setPricing(cached);
+        setPricingStatus(`Using ${cached.length} prices from a previous import`);
+      }
+    })();
+    return () => {
+      stale = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -119,6 +181,8 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
       apiKey: apiKey.trim(),
       model: resolvedModel,
       reasoningEffort: reasoningEffort.trim() !== "" ? reasoningEffort : null,
+      systemPromptMode: promptMode,
+      customSystemPrompt: customPrompt,
     });
     onDone?.();
   };
@@ -207,7 +271,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
                 onClick={() => loadModels(baseUrl)}
                 disabled={modelsLoading}
                 className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 disabled:opacity-50 select-none"
-                title="Reload the model list"
+                title="Reload the model list and import current prices"
               >
                 {modelsLoading ? (
                   <Loader2 className="size-3 animate-spin" />
@@ -230,7 +294,10 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
               </SelectTrigger>
               <SelectContent>
                 {options.map((id) => {
-                  const price = formatModelPrice(id);
+                  const free = isFreeModel(id) || fetchedFree.has(id);
+                  const price = free
+                    ? "Free"
+                    : formatModelPrice(id, fetchedPrices);
                   return (
                     <SelectItem key={id} value={id}>
                       <span className="flex items-center justify-between gap-3 flex-1">
@@ -239,14 +306,14 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
                           <span className="flex items-center gap-1.5 shrink-0">
                             <span
                               className={
-                                isFreeModel(id)
+                                free
                                   ? "text-xs text-green-400 font-medium"
                                   : "text-xs text-text-muted"
                               }
                             >
                               {price}
                             </span>
-                            {isFreeModel(id) && (
+                            {free && (
                               <span className="text-[10px] font-semibold text-green-400 bg-green-400/10 border border-green-400/30 rounded px-1 py-px uppercase tracking-wide">
                                 Free
                               </span>
@@ -283,8 +350,8 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
             )}
             {!modelsLoading && !modelsError && models && (
               <p className="text-xs text-text-muted">
-                {models.length} models available at this endpoint. Prices per 1M
-                tokens from{" "}
+                {models.length} models available at this endpoint. Prices per
+                1M tokens are imported automatically from{" "}
                 <a
                   href="https://opencode.ai/docs/zen"
                   target="_blank"
@@ -293,7 +360,19 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
                 >
                   opencode.ai/docs/zen
                 </a>{" "}
-                — may change.
+                every time you reload models — may change.
+              </p>
+            )}
+            {pricingStatus && (
+              <p
+                className={
+                  pricingStatus.startsWith("Prices imported") ||
+                  pricingStatus.startsWith("Using")
+                    ? "text-xs text-text-muted"
+                    : "text-xs text-destructive"
+                }
+              >
+                {pricingStatus}
               </p>
             )}
           </div>
@@ -331,6 +410,59 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
               model rejects it, you'll see the error in chat. Default sends
               nothing.
             </p>
+          </div>
+
+          {/* Chat Agent Prompt */}
+          <div className="space-y-1.5">
+            <Label className="text-text-secondary text-xs">
+              Chat Agent Prompt
+            </Label>
+            <Select
+              value={promptMode}
+              onValueChange={(v) => setPromptMode((v ?? "standard") as "standard" | "custom")}
+            >
+              <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+                <SelectValue>
+                  {(v) => (v === "custom" ? "Custom prompt" : "Standard prompt")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard prompt</SelectItem>
+                <SelectItem value="custom">Custom prompt</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-text-muted">
+              The standard prompt is the built-in instructions for the chat
+              agent (shown below, read-only). Your profile and application
+              context are always appended automatically, so the agent keeps
+              knowing who you are and what you're applying for. A custom prompt
+              replaces the built-in instructions only.
+            </p>
+
+            <Label className="text-text-secondary text-xs">
+              Standard prompt (read-only)
+            </Label>
+            <Textarea
+              readOnly
+              value={standardPrompt}
+              rows={8}
+              className="text-xs leading-relaxed bg-field border-border text-text-muted resize-y"
+            />
+
+            {promptMode === "custom" && (
+              <>
+                <Label className="text-text-secondary text-xs">
+                  Custom prompt
+                </Label>
+                <Textarea
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  placeholder="Write your own instructions for the chat agent…"
+                  rows={6}
+                  className="text-xs leading-relaxed bg-field border-border resize-y"
+                />
+              </>
+            )}
           </div>
 
           <Button

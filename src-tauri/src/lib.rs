@@ -265,6 +265,131 @@ async fn zen_fetch_page(url: String) -> Result<String, String> {
     Ok(text.chars().take(8000).collect())
 }
 
+/// A single Zen pricing entry scraped from https://opencode.ai/docs/zen.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ZenPricingEntry {
+    id: String,
+    input: Option<f64>,
+    output: Option<f64>,
+    is_free: bool,
+}
+
+/// Parse a pricing cell like "$0.30", "Free" or "-" into (price, is_free).
+fn parse_zen_price(text: &str) -> (Option<f64>, bool) {
+    let t = text.trim().to_lowercase();
+    if t == "free" {
+        return (None, true);
+    }
+    let cleaned = t.trim_start_matches('$').replace(',', "").replace(' ', "");
+    match cleaned.parse::<f64>() {
+        Ok(v) => (Some(v), false),
+        Err(_) => (None, false),
+    }
+}
+
+/// Fetch the OpenCode Zen pricing table from the docs page and return it as
+/// model-id → price entries. Display names are slugified to model IDs
+/// (lowercase, spaces to dashes); parenthetical price bands such as
+/// "(≤ 200K tokens)" are dropped, keeping the first (base) row per model.
+#[tauri::command]
+async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(BROWSER_USER_AGENT)
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
+    let response = client
+        .get("https://opencode.ai/docs/zen")
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Pricing page returned HTTP {}", response.status()));
+    }
+
+    let html = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read pricing page: {e}"))?;
+
+    let document = scraper::Html::parse_document(&html);
+    let table_selector =
+        Selector::parse("table").map_err(|e| format!("Bad selector: {e}"))?;
+    let row_selector = Selector::parse("tr").map_err(|e| format!("Bad selector: {e}"))?;
+    let cell_selector =
+        Selector::parse("th, td").map_err(|e| format!("Bad selector: {e}"))?;
+
+    let cell_text = |el: ElementRef| -> String {
+        el.text().collect::<String>().trim().to_string()
+    };
+
+    // Table helper: returns the table whose first-row cells contain all the
+    // given keywords (case-insensitive).
+    let find_table = |keywords: &[&str]| -> Option<ElementRef> {
+        document.select(&table_selector).find(|table| {
+            let header: String = table
+                .select(&cell_selector)
+                .take(6)
+                .map(cell_text)
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            keywords.iter().all(|k| header.contains(k))
+        })
+    };
+
+    // The endpoints table maps display names to official model IDs
+    // (e.g. "Claude Sonnet 4.5" -> "claude-sonnet-4-5").
+    let mut name_to_id: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    if let Some(endpoints) = find_table(&["model", "id"]) {
+        for row in endpoints.select(&row_selector) {
+            let cells: Vec<String> = row.select(&cell_selector).map(cell_text).collect();
+            if cells.len() >= 2 && !cells[0].is_empty() && !cells[1].is_empty() {
+                name_to_id.insert(cells[0].clone(), cells[1].clone());
+            }
+        }
+    }
+
+    let table = find_table(&["input", "output"])
+        .ok_or_else(|| "Could not find the pricing table on the Zen docs page.".to_string())?;
+
+    let mut entries: Vec<ZenPricingEntry> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for row in table.select(&row_selector) {
+        let cells: Vec<String> = row.select(&cell_selector).map(cell_text).collect();
+        if cells.len() < 3 {
+            continue;
+        }
+        // Strip price-band parentheticals, e.g. "Claude Sonnet 4.5 (≤ 200K tokens)".
+        let name = cells[0].split('(').next().unwrap_or("").trim();
+        let id = name_to_id
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_lowercase().replace(' ', "-"));
+        if id.is_empty() || id == "model" || seen.contains(&id) {
+            continue;
+        }
+        let (input, input_free) = parse_zen_price(&cells[1]);
+        let (output, output_free) = parse_zen_price(&cells[2]);
+        seen.insert(id.clone());
+        entries.push(ZenPricingEntry {
+            id,
+            input,
+            output,
+            is_free: input_free || output_free,
+        });
+    }
+
+    if entries.is_empty() {
+        return Err("No pricing rows found on the Zen docs page.".to_string());
+    }
+
+    Ok(entries)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -274,7 +399,8 @@ pub fn run() {
             zen_list_models,
             zen_chat,
             zen_web_search,
-            zen_fetch_page
+            zen_fetch_page,
+            zen_fetch_zen_pricing
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

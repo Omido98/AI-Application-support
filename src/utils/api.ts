@@ -14,6 +14,14 @@ interface WebResult {
   snippet: string;
 }
 
+/** A single Zen pricing entry scraped from the Zen docs page. */
+export interface ZenPricingEntry {
+  id: string;
+  input: number | null;
+  output: number | null;
+  is_free: boolean;
+}
+
 /** An OpenAI-shaped message used inside the tool-calling loop. */
 interface ApiMessage {
   role: string;
@@ -93,6 +101,22 @@ export async function listModels(baseUrl: string): Promise<string[]> {
   } catch (err) {
     throw new Error(
       typeof err === "string" ? err : "Failed to load the model list.",
+    );
+  }
+}
+
+/**
+ * Fetch the current OpenCode Zen pricing table from the official docs page.
+ * Runs through Rust so the webview never hits CORS restrictions.
+ *
+ * @returns The list of pricing entries (model id, input/output price, free flag).
+ */
+export async function fetchZenPricing(): Promise<ZenPricingEntry[]> {
+  try {
+    return await invoke<ZenPricingEntry[]>("zen_fetch_zen_pricing");
+  } catch (err) {
+    throw new Error(
+      typeof err === "string" ? err : "Failed to import model prices.",
     );
   }
 }

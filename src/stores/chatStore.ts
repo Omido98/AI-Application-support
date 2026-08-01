@@ -20,6 +20,10 @@ export interface ApiConfig {
   apiKey: string;
   model: string;
   reasoningEffort: string | null;
+  /** Which system prompt the chat agent uses. */
+  systemPromptMode: "standard" | "custom";
+  /** The user's custom prompt, used when systemPromptMode is "custom". */
+  customSystemPrompt: string;
 }
 
 export const ZEN_DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
@@ -29,6 +33,8 @@ const defaultApiConfig: ApiConfig = {
   apiKey: "",
   model: "deepseek-v4-flash-free",
   reasoningEffort: null,
+  systemPromptMode: "standard",
+  customSystemPrompt: "",
 };
 
 // ──────────────────────────────────────────────
@@ -103,7 +109,15 @@ export const useChatStore = create<ChatState>((set) => ({
       ) {
         data.baseUrl = ZEN_DEFAULT_BASE_URL;
       }
-      set({ config: { ...data, reasoningEffort: data.reasoningEffort ?? null }, configLoaded: true });
+      set({
+        config: {
+          ...data,
+          reasoningEffort: data.reasoningEffort ?? null,
+          systemPromptMode: data.systemPromptMode ?? "standard",
+          customSystemPrompt: data.customSystemPrompt ?? "",
+        },
+        configLoaded: true,
+      });
     } else {
       set({ config: { ...defaultApiConfig }, configLoaded: true });
     }

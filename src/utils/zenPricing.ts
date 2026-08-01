@@ -77,9 +77,12 @@ export function isFreeModel(id: string): boolean {
   return id.endsWith("-free") || FREE_MODEL_IDS.has(id);
 }
 
-export function formatModelPrice(id: string): string | null {
+export function formatModelPrice(
+  id: string,
+  overrides?: Record<string, ModelPrice> | null,
+): string | null {
   if (isFreeModel(id)) return "Free";
-  const price = ZEN_MODEL_PRICES[id];
+  const price = overrides?.[id] ?? ZEN_MODEL_PRICES[id];
   if (!price) return null;
   return `$${price.input} in / $${price.output} out per 1M`;
 }
