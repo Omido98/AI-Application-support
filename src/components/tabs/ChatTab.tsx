@@ -7,9 +7,17 @@ import { buildSystemPrompt } from "@/utils/systemPrompt";
 import ApiConfig from "@/components/chat/ApiConfig";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
-import InjectProfileButton from "@/components/chat/InjectProfileButton";
 import { Button } from "@/components/ui/button";
-import { Settings } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Settings, Trash2 } from "lucide-react";
 
 export default function ChatTab() {
   // ── Stores ──
@@ -17,9 +25,8 @@ export default function ChatTab() {
   const config = useChatStore((s) => s.config);
   const loadConfig = useChatStore((s) => s.loadConfig);
 
-  const historyLoaded = useChatStore((s) => s.historyLoaded);
-  const loadHistory = useChatStore((s) => s.loadHistory);
   const addMessage = useChatStore((s) => s.addMessage);
+  const clearMessages = useChatStore((s) => s.clearMessages);
   const isSending = useChatStore((s) => s.isSending);
   const setIsSending = useChatStore((s) => s.setIsSending);
   const setError = useChatStore((s) => s.setError);
@@ -30,17 +37,20 @@ export default function ChatTab() {
   // ── Input state ──
   const [inputValue, setInputValue] = useState("");
   const [showConfig, setShowConfig] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   // ── Load on mount ──
   useEffect(() => {
     if (!configLoaded) loadConfig();
-    if (!historyLoaded) loadHistory();
-  }, [configLoaded, historyLoaded, loadConfig, loadHistory]);
+  }, [configLoaded, loadConfig]);
 
-  // ── Handle inject profile ──
-  const handleInject = useCallback((json: string) => {
-    setInputValue((prev) => (prev ? prev + "\n\n" + json : json));
-  }, []);
+  // ── Handle reset chat ──
+  const handleReset = useCallback(() => {
+    clearMessages();
+    setError(null);
+    setInputValue("");
+    setConfirmReset(false);
+  }, [clearMessages, setError]);
 
   // ── Handle send ──
   const handleSend = useCallback(async () => {
@@ -105,8 +115,8 @@ export default function ChatTab() {
     setError,
   ]);
 
-  // ── Show loading state while restoring ──
-  if (!configLoaded || !historyLoaded) {
+  // ── Show loading state while restoring config ──
+  if (!configLoaded) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <p className="text-text-muted">Loading chat…</p>
@@ -122,11 +132,44 @@ export default function ChatTab() {
   // ── Chat interface ──
   return (
     <div className="flex flex-col h-full">
-      {/* Header + Inject Profile */}
+      {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
         <h2 className="text-base font-semibold text-text-primary">Chat</h2>
         <div className="flex items-center gap-2">
-          <InjectProfileButton onInject={handleInject} />
+          <Dialog open={confirmReset} onOpenChange={setConfirmReset}>
+            <DialogTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Reset chat"
+                  disabled={isSending}
+                >
+                  <Trash2 className="size-4 text-text-secondary" />
+                </Button>
+              }
+            />
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Reset chat?</DialogTitle>
+                <DialogDescription>
+                  This will delete the current conversation and start fresh. It
+                  cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmReset(false)}
+                >
+                  Cancel
+                </Button>
+                <Button variant="destructive" onClick={handleReset}>
+                  Reset Chat
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Button
             variant="ghost"
             size="icon-sm"

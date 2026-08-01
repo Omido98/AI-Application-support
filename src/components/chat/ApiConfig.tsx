@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { listModels } from "@/utils/api";
+import { formatModelPrice, isFreeModel } from "@/utils/zenPricing";
 import {
   Settings,
   RefreshCw,
@@ -22,6 +23,14 @@ import {
 } from "lucide-react";
 
 const CUSTOM_MODEL = "__custom__";
+const REASONING_OPTIONS = [
+  { value: "", label: "Default" },
+  { value: "none", label: "None" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "max", label: "Max" },
+];
 const inputClass =
   "bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30";
 
@@ -36,8 +45,8 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
   const [model] = useState(config.model || "");
   const [customModel, setCustomModel] = useState("");
   const [selection, setSelection] = useState<string>(model);
-  const [thinkingBudget, setThinkingBudget] = useState(
-    config.thinkingBudget?.toString() ?? "",
+  const [reasoningEffort, setReasoningEffort] = useState(
+    config.reasoningEffort ?? "",
   );
 
   const [models, setModels] = useState<string[] | null>(null);
@@ -109,8 +118,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
       baseUrl: baseUrl.trim() || ZEN_DEFAULT_BASE_URL,
       apiKey: apiKey.trim(),
       model: resolvedModel,
-      thinkingBudget:
-        thinkingBudget.trim() !== "" ? Number(thinkingBudget) : null,
+      reasoningEffort: reasoningEffort.trim() !== "" ? reasoningEffort : null,
     });
     onDone?.();
   };
@@ -221,11 +229,34 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {options.map((id) => (
-                  <SelectItem key={id} value={id}>
-                    {id}
-                  </SelectItem>
-                ))}
+                {options.map((id) => {
+                  const price = formatModelPrice(id);
+                  return (
+                    <SelectItem key={id} value={id}>
+                      <span className="flex items-center justify-between gap-3 flex-1">
+                        <span className="truncate">{id}</span>
+                        {price && (
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            <span
+                              className={
+                                isFreeModel(id)
+                                  ? "text-xs text-green-400 font-medium"
+                                  : "text-xs text-text-muted"
+                              }
+                            >
+                              {price}
+                            </span>
+                            {isFreeModel(id) && (
+                              <span className="text-[10px] font-semibold text-green-400 bg-green-400/10 border border-green-400/30 rounded px-1 py-px uppercase tracking-wide">
+                                Free
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
                 <SelectItem value={CUSTOM_MODEL}>Custom model…</SelectItem>
               </SelectContent>
             </Select>
@@ -252,27 +283,53 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
             )}
             {!modelsLoading && !modelsError && models && (
               <p className="text-xs text-text-muted">
-                {models.length} models available at this endpoint.
+                {models.length} models available at this endpoint. Prices per 1M
+                tokens from{" "}
+                <a
+                  href="https://opencode.ai/docs/zen"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary hover:text-primary/80"
+                >
+                  opencode.ai/docs/zen
+                </a>{" "}
+                — may change.
               </p>
             )}
           </div>
 
-          {/* Thinking Budget */}
+          {/* Reasoning Effort */}
           <div className="space-y-1.5">
             <Label className="text-text-secondary text-xs">
-              Thinking Budget
+              Reasoning Effort
             </Label>
-            <Input
-              type="number"
-              value={thinkingBudget}
-              onChange={(e) => setThinkingBudget(e.target.value)}
-              placeholder="Optional"
-              min={0}
-              className={inputClass}
-            />
+            <Select
+              value={reasoningEffort}
+              onValueChange={(v) => setReasoningEffort(v ?? "")}
+            >
+              <SelectTrigger className="w-full bg-[#14141f] border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+                <SelectValue>
+                  {(v) =>
+                    v
+                      ? (REASONING_OPTIONS.find((o) => o.value === v)?.label ??
+                        v)
+                      : "Default"
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {REASONING_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value || "default"} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <p className="text-xs text-text-muted">
-              Only supported by some models (e.g., DeepSeek). Leave empty if
-              unsure.
+              How much the model should think before answering (like
+              opencode's reasoning levels). Support varies by model — if a
+              model rejects it, you'll see the error in chat. Default sends
+              nothing.
             </p>
           </div>
 

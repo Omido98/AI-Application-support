@@ -38,7 +38,7 @@ export async function sendMessage(
   config: ApiConfig,
   systemPrompt: string,
 ): Promise<ApiResponse> {
-  const { baseUrl, apiKey, model, thinkingBudget } = config;
+  const { baseUrl, apiKey, model, reasoningEffort } = config;
 
   if (!apiKey) {
     return { content: "", error: "API key is not configured." };
@@ -60,9 +60,9 @@ export async function sendMessage(
     ],
   };
 
-  // Append thinking budget as a provider-specific field if set
-  if (thinkingBudget != null && thinkingBudget > 0) {
-    payload["thinking_budget"] = thinkingBudget;
+  // Append reasoning effort as an OpenAI-compatible field if set
+  if (reasoningEffort) {
+    payload["reasoning_effort"] = reasoningEffort;
   }
 
   try {

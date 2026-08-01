@@ -19,7 +19,7 @@ export interface ApiConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
-  thinkingBudget: number | null;
+  reasoningEffort: string | null;
 }
 
 export const ZEN_DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
@@ -28,7 +28,7 @@ const defaultApiConfig: ApiConfig = {
   baseUrl: ZEN_DEFAULT_BASE_URL,
   apiKey: "",
   model: "deepseek-v4-flash-free",
-  thinkingBudget: null,
+  reasoningEffort: null,
 };
 
 // ──────────────────────────────────────────────
@@ -38,8 +38,6 @@ const defaultApiConfig: ApiConfig = {
 interface ChatState {
   /** Chat messages */
   messages: ChatMessage[];
-  /** Whether history has been loaded from disk */
-  historyLoaded: boolean;
   /** Whether config has been loaded from disk */
   configLoaded: boolean;
   /** Whether the API is currently processing a request */
@@ -53,7 +51,6 @@ interface ChatState {
   // Message actions
   addMessage: (msg: ChatMessage) => void;
   clearMessages: () => void;
-  loadHistory: () => Promise<void>;
 
   // Config actions
   setConfig: (cfg: ApiConfig) => Promise<void>;
@@ -70,9 +67,8 @@ interface ChatState {
 // Store implementation
 // ──────────────────────────────────────────────
 
-export const useChatStore = create<ChatState>((set, get) => ({
+export const useChatStore = create<ChatState>((set) => ({
   messages: [],
-  historyLoaded: false,
   configLoaded: false,
   isSending: false,
   error: null,
@@ -83,23 +79,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   addMessage: (msg) => {
     set((s) => ({ messages: [...s.messages, msg] }));
-    // Auto-save history
-    const { messages } = get();
-    saveJson("chat_history.json", messages);
   },
 
   clearMessages: () => {
     set({ messages: [] });
-    saveJson("chat_history.json", []);
-  },
-
-  loadHistory: async () => {
-    const data = await loadJson<ChatMessage[]>("chat_history.json");
-    if (data) {
-      set({ messages: data, historyLoaded: true });
-    } else {
-      set({ historyLoaded: true });
-    }
   },
 
   // ── Config ──
@@ -120,12 +103,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ) {
         data.baseUrl = ZEN_DEFAULT_BASE_URL;
       }
-      set({ config: data, configLoaded: true });
+      set({ config: { ...data, reasoningEffort: data.reasoningEffort ?? null }, configLoaded: true });
     } else {
       set({ config: { ...defaultApiConfig }, configLoaded: true });
     }
   },
-
   resetConfig: () => {
     set({ config: { ...defaultApiConfig }, configLoaded: false });
   },
