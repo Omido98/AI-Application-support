@@ -8,9 +8,15 @@ export interface ApplicationContext {
   companyResearch: string;
 }
 
+function formatDate(month: string, year?: string): string {
+  return year ? `${month} ${year}` : month;
+}
+
 /**
  * Build the system prompt for the AI assistant.
- * Merges application context and candidate profile into a structured prompt.
+ * Merges application context and the FULL candidate profile
+ * (education, work experience incl. responsibilities/projects, skills,
+ * languages, and all previous cover letters) into a structured prompt.
  */
 export function buildSystemPrompt(
   application: ApplicationContext,
@@ -29,61 +35,91 @@ export function buildSystemPrompt(
     `- Application Requirements: ${requirements || "(not provided)"}`,
     `- Company Research (provided by user): ${companyResearch || "(not provided)"}`,
     "",
-    "Candidate Profile",
+    "Candidate Profile (complete)",
   ];
 
   if (profile) {
     if (profile.education.length > 0) {
-      sections.push("- Education: " +
-        profile.education
-          .map(
-            (e) =>
-              `${e.degree} in ${e.major} at ${e.school} (${e.startYear}–${e.endYear || "present"})`,
-          )
-          .join("; "));
+      sections.push("- Education:");
+      profile.education.forEach((e) => {
+        const eduEnd = e.endYear ? formatDate(e.endMonth, e.endYear) : "present";
+        const parts = [
+          `  * ${e.degree} in ${e.major} at ${e.school} (${formatDate(e.startMonth, e.startYear)} – ${eduEnd})`,
+        ];
+        if (e.programName) parts.push(`    Program: ${e.programName}`);
+        if (e.finalGrade) parts.push(`    Final grade: ${e.finalGrade}`);
+        if (e.thesisTitle) parts.push(`    Thesis: ${e.thesisTitle}`);
+        if (e.courses.length > 0) {
+          parts.push(`    Courses: ${e.courses.join(", ")}`);
+        }
+        sections.push(parts.join("\n"));
+      });
     }
     if (profile.workExperience.length > 0) {
-      sections.push("- Work Experience: " +
-        profile.workExperience
-          .map(
-            (w) =>
-              `${w.role} at ${w.company} (${w.startYear}–${w.isCurrent ? "present" : w.endYear})`,
-          )
-          .join("; "));
+      sections.push("- Work Experience:");
+      profile.workExperience.forEach((w) => {
+        const end = w.isCurrent
+          ? "present"
+          : `${formatDate(w.endMonth ?? "", w.endYear)}`;
+        const parts = [
+          `  * ${w.role} at ${w.company} (${formatDate(w.startMonth, w.startYear)} – ${end})`,
+        ];
+        if (w.jobDescription) {
+          parts.push(`    Responsibilities: ${w.jobDescription}`);
+        }
+        const projects = w.projects.filter((p) => p.trim().length > 0);
+        if (projects.length > 0) {
+          parts.push(`    Projects/Initiatives: ${projects.join(" | ")}`);
+        }
+        sections.push(parts.join("\n"));
+      });
     }
     if (profile.skills.length > 0) {
-      sections.push("- Skills: " +
-        profile.skills.map((s) => s.name).join(", "));
+      sections.push(
+        "- Skills: " + profile.skills.map((s) => s.name).join(", "),
+      );
     }
     if (profile.languages.length > 0) {
-      sections.push("- Languages: " +
-        profile.languages.map((l) => `${l.name} (${l.fluency})`).join(", "));
+      sections.push(
+        "- Languages: " +
+          profile.languages.map((l) => `${l.name} (${l.fluency})`).join(", "),
+      );
     }
     if (profile.coverLetters.length > 0) {
-      sections.push(
-        `- Previous Cover Letters: ${profile.coverLetters.length} saved (the user can share them on request)`,
-      );
+      sections.push("- Previous Cover Letters (full text):");
+      profile.coverLetters.forEach((cl, i) => {
+        const date = cl.addedAt
+          ? new Date(cl.addedAt).toLocaleDateString()
+          : "unknown date";
+        const target = cl.company ? `for ${cl.company}` : "(no company recorded)";
+        sections.push(`  [Cover Letter ${i + 1} — ${target}, added ${date}]`);
+        sections.push(cl.content.trim() || "(empty)");
+      });
     }
   } else {
     sections.push(
-      "The user has not yet injected their profile. They can do so via the \"Inject Profile\" button.",
+      "The user has not filled in their profile yet.",
     );
   }
 
   sections.push(
     "",
-    "The user has a full profile containing education, work experience, skills, languages, and previous cover letters. If you need details to tailor your advice, ask the user — they can inject relevant parts of their profile via the \"Inject Profile\" button.",
-    "",
     "Your Behavior Rules",
-    '- Before writing anything, ask clarifying questions about the application requirements and the user\'s approach. Be thorough.',
+    "- Before writing anything, ask clarifying questions about the application requirements and the user's approach. Be thorough.",
     "- Discuss different ways to structure/answer each part with the user before committing to a draft.",
     "- Use keywords that applicant tracking systems (ATS) look for, but write in a natural, human tone. Do not sound boastful or robotic.",
-    "- Learn from the user's previous cover letters and match their tone/style where appropriate. If you see a clear way to improve, suggest it.",
+    "- The user's complete profile — education, work experience (including responsibilities and projects), skills, languages, and every previous cover letter — is included above. Use it as your source of truth when tailoring your advice and drafts.",
+    "- Learn from the user's previous cover letters: match their tone and style, and pay attention to specific interests or themes they expressed in them. Reflect those themes again when they are relevant to the new role, but always write new content from scratch rather than copying or lightly editing an old letter.",
+    "- If you see a clear way to improve on a previous letter, suggest it.",
     "- For every section you write, explain WHY you chose specific words, phrases, or mentioned specific experiences.",
     "- If there are multiple application questions, handle them one at a time. Be thorough with each.",
-    '- When you feel ready to write the final draft, tell the user and ask if there\'s anything more they\'d like to discuss. Only write the final draft when the user explicitly tells you to proceed.',
+    "- When you feel ready to write the final draft, tell the user and ask if there's anything more they'd like to discuss. Only write the final draft when the user explicitly tells you to proceed.",
     "- Ask the user if there is a word count or character limit they need to stay within, and adhere to it.",
     "- Always write in the language specified in the Application Context.",
+    "- You have access to two tools: web_search(query) — search the web for current information — and fetch_page(url) — fetch a page and return its plain text content. Use them whenever you need up-to-date facts you are not certain of.",
+    "- Before advising on a company, run an initial research pass on it: its purpose, industry, and recent news or trends — especially when the Company Research field in the Application Context says \"(not provided)\". Search for the company name, then fetch its official pages (e.g. about, careers, news) to ground your advice in real, current information.",
+    "- When you used search results, cite what you found (page titles and sources) and clearly distinguish facts from your search results versus facts from your own training knowledge. Never fabricate details about the company.",
+    "- If a search or page fetch fails, tell the user and continue with what you already know.",
   );
 
   return sections.join("\n");

@@ -52,68 +52,80 @@ export default function ChatTab() {
     setConfirmReset(false);
   }, [clearMessages, setError]);
 
-  // ── Handle send ──
-  const handleSend = useCallback(async () => {
-    const text = inputValue.trim();
-    if (!text || isSending) return;
+  // ── Send a given text as a user message ──
+  const sendText = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || isSending) return;
 
-    // Clear input immediately
-    setInputValue("");
+      // Clear input immediately
+      setInputValue("");
 
-    // Add user message
-    const userMsg = {
-      role: "user" as const,
-      content: text,
-      timestamp: new Date().toISOString(),
-    };
-    addMessage(userMsg);
-
-    // Build system prompt
-    const appCtx = {
-      company: application.companyName,
-      jobDescription: application.jobDescription,
-      language: application.applicationLanguage,
-      requirements: application.requirements,
-      companyResearch: application.companyResearch,
-    };
-    const profileData = {
-      education: profile.education,
-      coverLetters: profile.coverLetters,
-      workExperience: profile.workExperience,
-      skills: profile.skills,
-      languages: profile.languages,
-    };
-    const systemPrompt = buildSystemPrompt(appCtx, profileData);
-
-    // Send to API
-    setIsSending(true);
-    setError(null);
-
-    const { messages } = useChatStore.getState();
-    const result = await sendMessage(messages, config, systemPrompt);
-
-    if (result.error) {
-      setError(result.error);
-      setIsSending(false);
-    } else {
-      const assistantMsg = {
-        role: "assistant" as const,
-        content: result.content,
+      // Add user message
+      const userMsg = {
+        role: "user" as const,
+        content: trimmed,
         timestamp: new Date().toISOString(),
       };
-      addMessage(assistantMsg);
-      setIsSending(false);
-    }
-  }, [
-    inputValue,
-    isSending,
-    addMessage,
-    application,
-    profile,
-    config,
-    setIsSending,
-    setError,
-  ]);
+      addMessage(userMsg);
+
+      // Build system prompt
+      const appCtx = {
+        company: application.companyName,
+        jobDescription: application.jobDescription,
+        language: application.applicationLanguage,
+        requirements: application.requirements,
+        companyResearch: application.companyResearch,
+      };
+      const profileData = {
+        education: profile.education,
+        coverLetters: profile.coverLetters,
+        workExperience: profile.workExperience,
+        skills: profile.skills,
+        languages: profile.languages,
+      };
+      const systemPrompt = buildSystemPrompt(appCtx, profileData);
+
+      // Send to API
+      setIsSending(true);
+      setError(null);
+
+      const { messages } = useChatStore.getState();
+      const result = await sendMessage(messages, config, systemPrompt);
+
+      if (result.error) {
+        setError(result.error);
+        setIsSending(false);
+      } else {
+        const assistantMsg = {
+          role: "assistant" as const,
+          content: result.content,
+          timestamp: new Date().toISOString(),
+        };
+        addMessage(assistantMsg);
+        setIsSending(false);
+      }
+    },
+    [
+      isSending,
+      addMessage,
+      application,
+      profile,
+      config,
+      setIsSending,
+      setError,
+    ],
+  );
+
+  // ── Handle send ──
+  const handleSend = useCallback(() => {
+    void sendText(inputValue);
+  }, [inputValue, sendText]);
+
+  // ── Starter button on empty chat ──
+  const handleStart = useCallback(() => {
+    void sendText("Help me answer my application");
+  }, [sendText]);
 
   // ── Show loading state while restoring config ──
   if (!configLoaded) {
@@ -182,7 +194,7 @@ export default function ChatTab() {
       </div>
 
       {/* Messages */}
-      <MessageList />
+      <MessageList onStart={handleStart} />
 
       {/* Input */}
       <MessageInput

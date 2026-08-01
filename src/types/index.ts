@@ -80,6 +80,8 @@ export interface Education {
 
 export interface CoverLetter {
   id: string;
+  /** Optional name of the company/organization the letter was written for */
+  company?: string;
   content: string;
   addedAt: string;
 }

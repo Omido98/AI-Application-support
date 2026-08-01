@@ -32,7 +32,7 @@ const REASONING_OPTIONS = [
   { value: "max", label: "Max" },
 ];
 const inputClass =
-  "bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30";
+  "bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30";
 
 export default function ApiConfig({ onDone }: { onDone?: () => void }) {
   const config = useChatStore((s) => s.config);
@@ -223,7 +223,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
               onValueChange={(v) => setSelection(v ?? "")}
               disabled={modelsLoading}
             >
-              <SelectTrigger className="w-full bg-[#14141f] border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+              <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
                 <SelectValue>
                   {(v) => v ?? "Select a model…"}
                 </SelectValue>
@@ -307,7 +307,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
               value={reasoningEffort}
               onValueChange={(v) => setReasoningEffort(v ?? "")}
             >
-              <SelectTrigger className="w-full bg-[#14141f] border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+              <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
                 <SelectValue>
                   {(v) =>
                     v

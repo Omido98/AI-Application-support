@@ -51,7 +51,7 @@ export default function MessageInput({
         placeholder="Type your message… (Enter to send, Shift+Enter for new line)"
         rows={1}
         disabled={disabled}
-        className="flex-1 resize-none rounded-lg border border-border bg-[#14141f] text-text-primary px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-primary/50 placeholder:text-text-muted disabled:opacity-50 max-h-[96px] hover:border-primary/30"
+        className="flex-1 resize-none rounded-lg border border-border bg-field text-text-primary px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-primary/50 placeholder:text-text-muted disabled:opacity-50 max-h-[96px] hover:border-primary/30"
       />
       <Button
         onClick={handleSend}

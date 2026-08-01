@@ -31,9 +31,9 @@ function createEmptyEducation(): Education {
 }
 
 const inputClass =
-  "bg-[#14141f] border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 h-9 transition-[border-color,box-shadow]";
+  "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 h-9 transition-[border-color,box-shadow]";
 const selectClass =
-  "bg-[#14141f] border border-border text-text-primary rounded-md px-3 py-1.5 text-sm appearance-none cursor-pointer transition-[border-color,box-shadow] hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary";
+  "bg-field border border-border text-text-primary rounded-md px-3 py-1.5 text-sm appearance-none cursor-pointer transition-[border-color,box-shadow] hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary";
 
 export default function EducationSection() {
   const education = useProfileStore((s) => s.education);
@@ -65,7 +65,7 @@ export default function EducationSection() {
         {education.map((edu) => (
           <Card
             key={edu.id}
-            className="bg-[#14141f] border-border relative overflow-visible transition-[border-color] hover:border-primary/20"
+            className="bg-field border-border relative overflow-visible transition-[border-color] hover:border-primary/20"
           >
             {/* Trash button — top right */}
             <button

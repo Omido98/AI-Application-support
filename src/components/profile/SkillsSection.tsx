@@ -10,7 +10,7 @@ function createEmptySkill(): Skill {
 }
 
 const inputClass =
-  "bg-[#14141f] border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 h-9 transition-[border-color,box-shadow]";
+  "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 h-9 transition-[border-color,box-shadow]";
 
 export default function SkillsSection() {
   const skills = useProfileStore((s) => s.skills);

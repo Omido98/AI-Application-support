@@ -59,7 +59,7 @@ export default function ApplicationTab() {
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
               placeholder="e.g., Acme Corp"
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
+              className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
             />
           </CardContent>
         </Card>
@@ -74,7 +74,7 @@ export default function ApplicationTab() {
               value={jobDescription}
               onChange={(e) => setJobDescription(e.target.value)}
               placeholder="Paste the full job description here..."
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 min-h-[200px] transition-[border-color,box-shadow] hover:border-primary/30"
+              className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[200px] transition-[border-color,box-shadow] hover:border-primary/30"
             />
           </CardContent>
         </Card>
@@ -89,7 +89,7 @@ export default function ApplicationTab() {
               value={applicationLanguage}
               onChange={(e) => setApplicationLanguage(e.target.value)}
               placeholder="e.g., English, Danish"
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
+              className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
             />
           </CardContent>
         </Card>
@@ -104,7 +104,7 @@ export default function ApplicationTab() {
               value={requirements}
               onChange={(e) => setRequirements(e.target.value)}
               placeholder="e.g., Cover letter, Answer to 3 specific questions..."
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 min-h-[150px] transition-[border-color,box-shadow] hover:border-primary/30"
+              className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[150px] transition-[border-color,box-shadow] hover:border-primary/30"
             />
           </CardContent>
         </Card>
@@ -119,7 +119,7 @@ export default function ApplicationTab() {
               value={companyResearch}
               onChange={(e) => setCompanyResearch(e.target.value)}
               placeholder="Paste any information you have about the company — website content, news articles, annual reports, etc. The AI will use this context to tailor your application."
-              className="bg-[#14141f] text-text-primary border-border focus-visible:ring-primary/50 min-h-[150px] transition-[border-color,box-shadow] hover:border-primary/30"
+              className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[150px] transition-[border-color,box-shadow] hover:border-primary/30"
             />
           </CardContent>
         </Card>

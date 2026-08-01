@@ -31,9 +31,11 @@ function createEmptyWorkExperience(): WorkExperience {
 }
 
 const inputClass =
-  "bg-[#14141f] border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 h-9 transition-[border-color,box-shadow]";
+  "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 h-9 transition-[border-color,box-shadow]";
 const selectClass =
-  "bg-[#14141f] border border-border text-text-primary rounded-md px-3 py-1.5 text-sm appearance-none cursor-pointer transition-[border-color,box-shadow] hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary";
+  "bg-field border border-border text-text-primary rounded-md px-3 py-1.5 text-sm appearance-none cursor-pointer transition-[border-color,box-shadow] hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary";
+const textareaClass =
+  "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 min-h-[100px] max-h-[200px] transition-[border-color,box-shadow] hover:border-primary/30";
 
 export default function WorkExperienceSection() {
   const workExperience = useProfileStore((s) => s.workExperience);
@@ -65,7 +67,7 @@ export default function WorkExperienceSection() {
         {workExperience.map((we) => (
           <Card
             key={we.id}
-            className="bg-[#14141f] border-border relative overflow-visible transition-[border-color] hover:border-primary/20"
+            className="bg-field border-border relative overflow-visible transition-[border-color] hover:border-primary/20"
           >
             {/* Trash button */}
             <button
@@ -189,7 +191,7 @@ export default function WorkExperienceSection() {
               <div className="grid gap-1.5">
                 <Label className="text-text-secondary text-xs">Job Description</Label>
                 <Textarea
-                  className="bg-[#14141f] border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 min-h-[100px] transition-[border-color,box-shadow] hover:border-primary/30"
+                  className={textareaClass}
                   value={we.jobDescription}
                   onChange={(e) =>
                     updateWorkExperience(we.id, {
@@ -221,16 +223,16 @@ export default function WorkExperienceSection() {
                   </Button>
                 </div>
                 {we.projects.map((proj, pi) => (
-                  <div key={pi} className="flex items-center gap-2">
-                    <Input
-                      className={inputClass + " flex-1"}
+                  <div key={pi} className="flex items-start gap-2">
+                    <Textarea
+                      className={textareaClass + " flex-1 resize-y"}
                       value={proj}
                       onChange={(e) => {
                         const next = [...we.projects];
                         next[pi] = e.target.value;
                         updateWorkExperience(we.id, { projects: next });
                       }}
-                      placeholder="Project / initiative name"
+                      placeholder="Describe the project / initiative — add as much detail as you like…"
                     />
                     <button
                       type="button"
@@ -238,10 +240,10 @@ export default function WorkExperienceSection() {
                         const next = we.projects.filter((_, i) => i !== pi);
                         updateWorkExperience(we.id, { projects: next });
                       }}
-                      className="text-destructive hover:text-red-400 transition-colors shrink-0"
+                      className="text-destructive hover:text-red-400 transition-colors shrink-0 mt-2"
                       title="Remove project"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 ))}

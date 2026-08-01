@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { useChatStore } from "@/stores/chatStore";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Sparkles } from "lucide-react";
 
 function LoadingDots() {
   return (
@@ -13,7 +15,7 @@ function LoadingDots() {
   );
 }
 
-export default function MessageList() {
+export default function MessageList({ onStart }: { onStart?: () => void }) {
   const messages = useChatStore((s) => s.messages);
   const isSending = useChatStore((s) => s.isSending);
   const error = useChatStore((s) => s.error);
@@ -27,11 +29,18 @@ export default function MessageList() {
   if (messages.length === 0 && !isSending) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-center max-w-md">
+        <div className="text-center max-w-md space-y-4">
           <p className="text-text-muted text-sm">
             Send a message to start the conversation. The AI will help you craft
             your job application.
           </p>
+          <Button
+            onClick={onStart}
+            className="bg-primary hover:bg-primary/80 text-primary-foreground"
+          >
+            <Sparkles className="size-4 mr-1.5" />
+            Help me answer my application
+          </Button>
         </div>
       </div>
     );
@@ -60,7 +69,7 @@ export default function MessageList() {
               {isUser ? (
                 <p>{msg.content}</p>
               ) : (
-                <div className="prose prose-invert prose-sm max-w-none">
+                <div className="prose prose-sm max-w-none dark:prose-invert">
                   <ReactMarkdown>{msg.content}</ReactMarkdown>
                 </div>
               )}
