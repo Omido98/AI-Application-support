@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-application-support"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "ego-tree",
  "reqwest 0.12.28",

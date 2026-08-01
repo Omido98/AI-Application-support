@@ -26,20 +26,47 @@ struct ModelEntry {
     id: String,
 }
 
-/// List available models from an OpenAI-compatible `/models` endpoint.
-/// Used to populate the model dropdown from OpenCode Zen.
+/// Build the full endpoint URL for the Anthropic API. Accepts the base URL
+/// with or without a trailing `/v1` and appends the given path.
+fn anthropic_endpoint(base: &str, path: &str) -> String {
+    let base = base.trim_end_matches('/');
+    let base = base.strip_suffix("/v1").unwrap_or(base);
+    format!("{base}/v1{path}")
+}
+
+/// List available models from a `/models` endpoint (OpenAI-compatible shape:
+/// `{ "data": [{ "id": "..." }] }`, which Anthropic also uses).
+/// Used to populate the model dropdown.
 #[tauri::command]
-async fn zen_list_models(base_url: String) -> Result<Vec<String>, String> {
+async fn zen_list_models(
+    base_url: String,
+    api_key: String,
+    provider: String,
+) -> Result<Vec<String>, String> {
     let base = base_url.trim_end_matches('/').to_string();
-    let url = format!("{base}/models");
+    let url = if provider == "anthropic" {
+        anthropic_endpoint(&base, "/models")
+    } else {
+        format!("{base}/models")
+    };
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    let response = client
-        .get(&url)
+    let mut request = client.get(&url);
+    if !api_key.is_empty() {
+        request = if provider == "anthropic" {
+            request
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+        } else {
+            request.bearer_auth(&api_key)
+        };
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| format!("Network error: {e}"))?;
@@ -56,26 +83,39 @@ async fn zen_list_models(base_url: String) -> Result<Vec<String>, String> {
     Ok(parsed.data.into_iter().map(|m| m.id).collect())
 }
 
-/// Forward a chat completions request to an OpenAI-compatible endpoint.
+/// Forward a chat request to the configured provider's endpoint.
+/// OpenAI-compatible providers use `/chat/completions` with a Bearer token;
+/// Anthropic uses `/v1/messages` with `x-api-key` + `anthropic-version`.
 /// Runs on the Rust side so the Tauri webview never hits CORS restrictions.
 #[tauri::command]
 async fn zen_chat(
     base_url: String,
     api_key: String,
+    provider: String,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let base = base_url.trim_end_matches('/').to_string();
-    let url = format!("{base}/chat/completions");
+    let url = if provider == "anthropic" {
+        anthropic_endpoint(&base, "/messages")
+    } else {
+        format!("{base}/chat/completions")
+    };
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(180))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    let response = client
-        .post(&url)
-        .bearer_auth(api_key)
-        .json(&payload)
+    let mut request = client.post(&url).json(&payload);
+    if provider == "anthropic" {
+        request = request
+            .header("x-api-key", &api_key)
+            .header("anthropic-version", "2023-06-01");
+    } else {
+        request = request.bearer_auth(api_key);
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| format!("Network error: {e}"))?;

@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import { saveJson, loadJson } from "@/utils/storage";
+import {
+  inferProviderFromBaseUrl,
+  isKnownProviderId,
+  type ProviderId,
+} from "@/utils/providers";
 
 // ──────────────────────────────────────────────
 // Chat message type (lighter than the full Message type)
@@ -16,6 +21,8 @@ export interface ChatMessage {
 // ──────────────────────────────────────────────
 
 export interface ApiConfig {
+  /** Which LLM provider this config targets (determines endpoint & auth). */
+  provider: ProviderId;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -29,6 +36,7 @@ export interface ApiConfig {
 export const ZEN_DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
 
 const defaultApiConfig: ApiConfig = {
+  provider: "zen",
   baseUrl: ZEN_DEFAULT_BASE_URL,
   apiKey: "",
   model: "deepseek-v4-flash-free",
@@ -108,6 +116,10 @@ export const useChatStore = create<ChatState>((set) => ({
         !data.baseUrl.includes("opencode.ai/zen")
       ) {
         data.baseUrl = ZEN_DEFAULT_BASE_URL;
+      }
+      // Infer the provider from the stored base URL when it's missing
+      if (!isKnownProviderId(data.provider)) {
+        data.provider = inferProviderFromBaseUrl(data.baseUrl);
       }
       set({
         config: {
