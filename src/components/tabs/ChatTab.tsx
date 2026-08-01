@@ -84,7 +84,10 @@ export default function ChatTab() {
         skills: profile.skills,
         languages: profile.languages,
       };
-      const systemPrompt = buildSystemPrompt(appCtx, profileData);
+      const systemPrompt = buildSystemPrompt(appCtx, profileData, {
+        mode: config.systemPromptMode ?? "standard",
+        customPrompt: config.customSystemPrompt ?? "",
+      });
 
       // Send to API
       setIsSending(true);
