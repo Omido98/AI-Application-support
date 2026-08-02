@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { exit } from "@tauri-apps/plugin-process";
 import { useAppStore } from "@/stores/useAppStore";
 import {
   useSettingsStore,
@@ -60,7 +61,12 @@ function App() {
             flushProfileSave(),
             flushChatSave(),
           ]);
-          await win.destroy();
+          try {
+            await win.destroy();
+          } catch {
+            // destroy can fail (e.g. denied permission); never strand the user
+            await exit(0);
+          }
         });
       } catch {
         // Not running inside Tauri (e.g. browser dev) — beforeunload covers it.
