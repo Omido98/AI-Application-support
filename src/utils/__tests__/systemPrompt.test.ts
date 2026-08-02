@@ -38,6 +38,11 @@ describe("getStandardPrompt", () => {
     expect(prompt).toContain("Your Behavior Rules");
     expect(prompt).toContain("web_search");
   });
+
+  it("limits research to one search and up to 5 page fetches per turn", () => {
+    const prompt = getStandardPrompt();
+    expect(prompt).toContain("one search and up to 5 page fetches per turn");
+  });
 });
 
 describe("buildSystemPrompt", () => {

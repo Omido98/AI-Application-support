@@ -31,6 +31,8 @@ export interface ApiConfig {
   apiKey: string;
   model: string;
   reasoningEffort: string | null;
+  /** Whether the chat agent may use web search / page fetch tools. */
+  webSearchEnabled: boolean;
   /** Which system prompt the chat agent uses. */
   systemPromptMode: "standard" | "custom";
   /** The user's custom prompt, used when systemPromptMode is "custom". */
@@ -45,6 +47,7 @@ const defaultApiConfig: ApiConfig = {
   apiKey: "",
   model: "deepseek-v4-flash-free",
   reasoningEffort: null,
+  webSearchEnabled: true,
   systemPromptMode: "standard",
   customSystemPrompt: "",
 };
@@ -208,6 +211,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...data,
           apiKey: keychainKey ?? data.apiKey ?? "",
           reasoningEffort: data.reasoningEffort ?? null,
+          webSearchEnabled: data.webSearchEnabled ?? true,
           systemPromptMode: data.systemPromptMode ?? "standard",
           customSystemPrompt: data.customSystemPrompt ?? "",
         },
