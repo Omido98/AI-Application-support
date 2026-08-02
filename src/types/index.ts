@@ -133,4 +133,29 @@ export interface ProfileData {
   certifications: Certification[];
   skills: Skill[];
   languages: Language[];
+  /** Public profile URL (e.g. LinkedIn) the AI can reference for extra context. */
+  linkedinUrl?: string;
+}
+
+export type ApplicationStatus =
+  | "wishlist"
+  | "applied"
+  | "interview"
+  | "offer"
+  | "rejected";
+
+/** A single tracked job application, with its own chat thread. */
+export interface JobApplication {
+  id: string;
+  companyName: string;
+  jobTitle: string;
+  applicationUrl: string;
+  status: ApplicationStatus;
+  jobDescription: string;
+  applicationLanguage: string;
+  requirements: string;
+  companyResearch: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
 }

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { saveJson, loadJson } from "@/utils/storage";
+import { saveJson, loadJson, deleteFile } from "@/utils/storage";
 import {
   inferProviderFromBaseUrl,
   isKnownProviderId,
@@ -46,11 +46,40 @@ const defaultApiConfig: ApiConfig = {
 };
 
 // ──────────────────────────────────────────────
+// Debounced thread save (per application)
+// ──────────────────────────────────────────────
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingThreadId: string | null = null;
+let pendingSnapshot: ChatMessage[] = [];
+
+/** Write the current thread to disk, debounced. */
+function scheduleThreadSave() {
+  const s = useChatStore.getState();
+  const threadId = s.activeThreadId;
+  if (!threadId) return;
+  pendingThreadId = threadId;
+  pendingSnapshot = [...s.messages];
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    await saveJson(`chat_${pendingThreadId}.json`, pendingSnapshot);
+  }, 400);
+}
+
+function cancelPendingSave() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+}
+
+// ──────────────────────────────────────────────
 // Store interface
 // ──────────────────────────────────────────────
 
 interface ChatState {
-  /** Chat messages */
+  /** Chat messages of the active thread */
   messages: ChatMessage[];
   /** Whether config has been loaded from disk */
   configLoaded: boolean;
@@ -62,9 +91,16 @@ interface ChatState {
   /** API configuration */
   config: ApiConfig;
 
+  /** Application whose chat thread is currently loaded (null = none) */
+  activeThreadId: string | null;
+  /** Whether the current thread has finished loading from disk */
+  threadLoaded: boolean;
+
   // Message actions
   addMessage: (msg: ChatMessage) => void;
-  clearMessages: () => void;
+  clearMessages: () => Promise<void>;
+  /** Load (or reset) the chat thread for an application */
+  switchThread: (applicationId: string | null) => Promise<void>;
 
   // Config actions
   setConfig: (cfg: ApiConfig) => Promise<void>;
@@ -81,7 +117,7 @@ interface ChatState {
 // Store implementation
 // ──────────────────────────────────────────────
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   configLoaded: false,
   isSending: false,
@@ -89,14 +125,38 @@ export const useChatStore = create<ChatState>((set) => ({
 
   config: { ...defaultApiConfig },
 
+  activeThreadId: null,
+  threadLoaded: true,
+
   // ── Messages ──
 
   addMessage: (msg) => {
     set((s) => ({ messages: [...s.messages, msg] }));
+    scheduleThreadSave();
   },
 
-  clearMessages: () => {
+  clearMessages: async () => {
+    cancelPendingSave();
     set({ messages: [] });
+    const threadId = get().activeThreadId;
+    if (threadId) {
+      await deleteFile(`chat_${threadId}.json`);
+    }
+  },
+
+  switchThread: async (applicationId) => {
+    const current = get();
+    if (current.activeThreadId === applicationId && current.threadLoaded) {
+      return;
+    }
+    cancelPendingSave();
+    if (!applicationId) {
+      set({ messages: [], activeThreadId: null, threadLoaded: true });
+      return;
+    }
+    set({ threadLoaded: false, activeThreadId: applicationId });
+    const data = await loadJson<ChatMessage[]>(`chat_${applicationId}.json`);
+    set({ messages: data ?? [], threadLoaded: true });
   },
 
   // ── Config ──

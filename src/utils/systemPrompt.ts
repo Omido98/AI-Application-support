@@ -32,6 +32,7 @@ const BEHAVIOR_RULES = [
   "- Before advising on a company, run an initial research pass on it: its purpose, industry, and recent news or trends — especially when the Company Research field in the Application Context says \"(not provided)\". Search for the company name, then fetch its official pages (e.g. about, careers, news) to ground your advice in real, current information.",
   "- When you used search results, cite what you found (page titles and sources) and clearly distinguish facts from your search results versus facts from your own training knowledge. Never fabricate details about the company.",
   "- If a search or page fetch fails, tell the user and continue with what you already know.",
+  "- The user may provide a LinkedIn profile URL in their profile. Use it to learn more about them when relevant — you may fetch the page for additional context, but never invent details that are not visible there.",
 ];
 
 /**
@@ -141,6 +142,9 @@ export function buildSystemPrompt(
         "- Languages: " +
           profile.languages.map((l) => `${l.name} (${l.fluency})`).join(", "),
       );
+    }
+    if (profile.linkedinUrl?.trim()) {
+      sections.push(`- LinkedIn: ${profile.linkedinUrl.trim()}`);
     }
     if (profile.coverLetters.length > 0) {
       sections.push("- Previous Cover Letters (full text):");

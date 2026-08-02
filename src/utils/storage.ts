@@ -1,4 +1,9 @@
-import { readTextFile, writeTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
+import {
+  readTextFile,
+  writeTextFile,
+  remove,
+  BaseDirectory,
+} from "@tauri-apps/plugin-fs";
 
 /**
  * Save a JSON-serializable value to a file inside the app's data directory.
@@ -33,5 +38,18 @@ export async function loadJson<T>(path: string): Promise<T | null> {
       }
     }
     return null;
+  }
+}
+
+/**
+ * Delete a file from the app's data directory.
+ * If the Tauri FS plugin is unavailable (e.g., in a browser), falls back to localStorage.
+ */
+export async function deleteFile(path: string): Promise<void> {
+  try {
+    await remove(path, { baseDir: BaseDirectory.AppData });
+  } catch {
+    // Fallback for non-Tauri environments (dev in browser)
+    localStorage.removeItem(`aas:${path}`);
   }
 }
