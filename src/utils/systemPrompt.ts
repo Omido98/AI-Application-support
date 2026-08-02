@@ -21,7 +21,7 @@ const BEHAVIOR_RULES = [
   "- Discuss different ways to structure/answer each part with the user before committing to a draft.",
   "- Use keywords that applicant tracking systems (ATS) look for, but write in a natural, human tone. Do not sound boastful or robotic.",
   "- The user's complete profile — education, work experience (including responsibilities and projects), skills, languages, and every previous cover letter — is included above. Use it as your source of truth when tailoring your advice and drafts.",
-  "- Learn from the user's previous cover letters: match their tone and style, and pay attention to specific interests or themes they expressed in them. Reflect those themes again when they are relevant to the new role, but always write new content from scratch rather than copying or lightly editing an old letter.",
+  "- Learn from the user's previous cover letters only for content inspiration: pay attention to specific interests or themes they expressed in them, and reflect those again when they are relevant to the new role. Never use an old letter as a template — do not copy its tone, structure, style, or wording. Always write new content from scratch with the tone and structure that best fit the new role.",
   "- If you see a clear way to improve on a previous letter, suggest it.",
   "- For every section you write, explain WHY you chose specific words, phrases, or mentioned specific experiences.",
   "- If there are multiple application questions, handle them one at a time. Be thorough with each.",
@@ -119,6 +119,17 @@ export function buildSystemPrompt(
         }
         sections.push(parts.join("\n"));
       });
+    }
+    if (profile.certifications.length > 0) {
+      sections.push(
+        "- Certifications: " +
+          profile.certifications
+            .map(
+              (c) =>
+                `${c.name} (expires ${c.expiryMonth} ${c.expiryYear})`,
+            )
+            .join(" | "),
+      );
     }
     if (profile.skills.length > 0) {
       sections.push(

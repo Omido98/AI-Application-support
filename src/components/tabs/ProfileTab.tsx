@@ -4,6 +4,7 @@ import { Separator } from "@/components/ui/separator";
 import EducationSection from "@/components/profile/EducationSection";
 import CoverLettersSection from "@/components/profile/CoverLettersSection";
 import WorkExperienceSection from "@/components/profile/WorkExperienceSection";
+import CertificationsSection from "@/components/profile/CertificationsSection";
 import SkillsSection from "@/components/profile/SkillsSection";
 import LanguagesSection from "@/components/profile/LanguagesSection";
 
@@ -35,6 +36,8 @@ export default function ProfileTab() {
         <CoverLettersSection />
         <Separator className="bg-border" />
         <WorkExperienceSection />
+        <Separator className="bg-border" />
+        <CertificationsSection />
         <Separator className="bg-border" />
         <SkillsSection />
         <Separator className="bg-border" />

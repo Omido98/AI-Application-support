@@ -104,6 +104,13 @@ export interface Skill {
   name: string;
 }
 
+export interface Certification {
+  id: string;
+  name: string;
+  expiryMonth: string;
+  expiryYear: string;
+}
+
 export type FluencyLevel =
   | "Beginner"
   | "Elementary"
@@ -123,6 +130,7 @@ export interface ProfileData {
   education: Education[];
   coverLetters: CoverLetter[];
   workExperience: WorkExperience[];
+  certifications: Certification[];
   skills: Skill[];
   languages: Language[];
 }

@@ -39,6 +39,14 @@ import {
   XCircle,
   ArrowLeft,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const CUSTOM_MODEL = "__custom__";
 const REASONING_OPTIONS = [
@@ -90,6 +98,9 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
     "idle" | "loading" | "success" | "error"
   >("idle");
   const [testMessage, setTestMessage] = useState("");
+
+  const [pendingSelection, setPendingSelection] = useState<string | null>(null);
+  const [confirmPaidOpen, setConfirmPaidOpen] = useState(false);
 
   const standardPrompt = useMemo(() => getStandardPrompt(), []);
 
@@ -176,8 +187,17 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
     ) {
       list.unshift(model);
     }
+    // Put free models first (Zen only — pricing is unknown elsewhere).
+    // Array.sort is stable, so relative order is preserved within groups.
+    if (provider === "zen") {
+      list.sort((a, b) => {
+        const freeA = isFreeModel(a) || fetchedFree.has(a);
+        const freeB = isFreeModel(b) || fetchedFree.has(b);
+        return Number(freeB) - Number(freeA);
+      });
+    }
     return list;
-  }, [models, model, selection, provider, config.provider]);
+  }, [models, model, selection, provider, config.provider, fetchedFree]);
 
   const resolvedModel =
     selection === CUSTOM_MODEL ? customModel.trim() : selection;
@@ -185,6 +205,33 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
   const canSave =
     apiKey.trim() !== "" &&
     (selection === CUSTOM_MODEL ? customModel.trim() !== "" : selection !== "");
+
+  /** Whether picking this model needs no confirmation (free or unknown). */
+  const isFreeChoice = (id: string): boolean => {
+    if (id === CUSTOM_MODEL) return true;
+    if (provider !== "zen") return true;
+    return isFreeModel(id) || fetchedFree.has(id);
+  };
+
+  const handleModelSelect = (id: string) => {
+    if (isFreeChoice(id)) {
+      setSelection(id);
+      return;
+    }
+    setPendingSelection(id);
+    setConfirmPaidOpen(true);
+  };
+
+  const confirmPaidSelection = () => {
+    if (pendingSelection) setSelection(pendingSelection);
+    setPendingSelection(null);
+    setConfirmPaidOpen(false);
+  };
+
+  const declinePaidSelection = () => {
+    setPendingSelection(null);
+    setConfirmPaidOpen(false);
+  };
 
   /** Switch to a provider: fill its default URL + model and reload the list. */
   const applyProvider = (p: ProviderId, keyOverride?: string) => {
@@ -399,7 +446,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
 
             <Select
               value={selection}
-              onValueChange={(v) => setSelection(v ?? "")}
+              onValueChange={(v) => handleModelSelect(v ?? "")}
               disabled={modelsLoading}
             >
               <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
@@ -585,20 +632,16 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
               className="text-xs leading-relaxed bg-field border-border text-text-muted resize-y"
             />
 
-            {promptMode === "custom" && (
-              <>
-                <Label className="text-text-secondary text-xs">
-                  Custom prompt
-                </Label>
-                <Textarea
-                  value={customPrompt}
-                  onChange={(e) => setCustomPrompt(e.target.value)}
-                  placeholder="Write your own instructions for the chat agent…"
-                  rows={6}
-                  className="text-xs leading-relaxed bg-field border-border resize-y"
-                />
-              </>
-            )}
+            <Label className="text-text-secondary text-xs">
+              Custom prompt
+            </Label>
+            <Textarea
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              placeholder="Write your own instructions for the chat agent…"
+              rows={6}
+              className="text-xs leading-relaxed bg-field border-border resize-y"
+            />
           </div>
 
           <Button
@@ -610,6 +653,44 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Paid model confirmation */}
+      <Dialog open={confirmPaidOpen} onOpenChange={setConfirmPaidOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>This model costs money</DialogTitle>
+            <DialogDescription>
+              {pendingSelection && (
+                <>
+                  <span className="text-text-primary font-medium">
+                    {pendingSelection}
+                  </span>{" "}
+                  is not a free model
+                  {provider === "zen" && (
+                    <>
+                      {" "}
+                      (
+                      {formatModelPrice(pendingSelection, fetchedPrices) ??
+                        "price not listed"}
+                      )
+                    </>
+                  )}
+                  . Using it will be billed to your account. Are you sure you
+                  want to use it?
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={declinePaidSelection}>
+              No, I want a free model
+            </Button>
+            <Button variant="default" onClick={confirmPaidSelection}>
+              Yes, I am sure
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

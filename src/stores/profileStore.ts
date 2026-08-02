@@ -4,6 +4,7 @@ import type {
   Education,
   CoverLetter,
   WorkExperience,
+  Certification,
   Skill,
   Language,
   ProfileData,
@@ -23,6 +24,7 @@ function debouncedSave() {
       education: s.education,
       coverLetters: s.coverLetters,
       workExperience: s.workExperience,
+      certifications: s.certifications,
       skills: s.skills,
       languages: s.languages,
     };
@@ -58,6 +60,12 @@ interface ProfileState extends ProfileData {
   updateWorkExperience: (id: string, patch: Partial<WorkExperience>) => void;
   removeWorkExperience: (id: string) => void;
 
+  // Certification actions
+  setCertifications: (items: Certification[]) => void;
+  addCertification: (item: Certification) => void;
+  updateCertification: (id: string, patch: Partial<Certification>) => void;
+  removeCertification: (id: string) => void;
+
   // Skill actions
   setSkills: (items: Skill[]) => void;
   addSkill: (item: Skill) => void;
@@ -80,6 +88,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
   education: [],
   coverLetters: [],
   workExperience: [],
+  certifications: [],
   skills: [],
   languages: [],
   isLoaded: false,
@@ -92,6 +101,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
         education: data.education ?? [],
         coverLetters: data.coverLetters ?? [],
         workExperience: data.workExperience ?? [],
+        certifications: data.certifications ?? [],
         skills: data.skills ?? [],
         languages: data.languages ?? [],
         isLoaded: true,
@@ -169,6 +179,30 @@ export const useProfileStore = create<ProfileState>((set) => ({
   removeWorkExperience: (id) => {
     set((s) => ({
       workExperience: s.workExperience.filter((w) => w.id !== id),
+    }));
+    debouncedSave();
+  },
+
+  // ── Certifications ──
+  setCertifications: (items) => {
+    set({ certifications: items });
+    debouncedSave();
+  },
+  addCertification: (item) => {
+    set((s) => ({ certifications: [...s.certifications, item] }));
+    debouncedSave();
+  },
+  updateCertification: (id, patch) => {
+    set((s) => ({
+      certifications: s.certifications.map((c) =>
+        c.id === id ? { ...c, ...patch } : c,
+      ),
+    }));
+    debouncedSave();
+  },
+  removeCertification: (id) => {
+    set((s) => ({
+      certifications: s.certifications.filter((c) => c.id !== id),
     }));
     debouncedSave();
   },
