@@ -47,7 +47,15 @@ interface ChatResponse {
   }>;
 }
 
-const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_ROUNDS = 15;
+
+/**
+ * Prefix prepended when the tool loop runs out of rounds (or repeats a call)
+ * but the model already drafted some text — the draft is still handed back
+ * instead of failing the whole message.
+ */
+const PARTIAL_ANSWER_NOTE =
+  "[The model kept researching and did not write a final answer. Here is what it drafted before stopping.]\n\n";
 
 /** Tools advertised to models that support function calling. */
 const TOOLS: Array<Record<string, unknown>> = [
@@ -185,8 +193,16 @@ async function sendOpenAICompatMessage(
   }));
 
   // Whether the current and future requests advertise tools. Set to false
-  // after a tools-related error so the retry works with plain models.
-  let useTools = true;
+  // after a tools-related error so the retry works with plain models, or
+  // from the start when the user disabled web search.
+  let useTools = config.webSearchEnabled !== false;
+
+  // Text the model drafted alongside tool calls; returned if the loop
+  // cannot finish (round cap or a repeated call).
+  let partialContent: string | null = null;
+
+  // Signatures of every tool call made so far, to detect looping models.
+  const seenCalls = new Set<string>();
 
   const runRound = async (
     withTools: boolean,
@@ -267,12 +283,35 @@ async function sendOpenAICompatMessage(
 
     const message = data?.choices?.[0]?.message;
     const toolCalls = message?.tool_calls;
+    const drafted = message?.content;
 
     if (toolCalls && toolCalls.length > 0) {
+      // Keep any text drafted alongside the tool calls: if the loop cannot
+      // finish, that draft is still returned instead of an error.
+      if (drafted && !partialContent) {
+        partialContent = drafted;
+      }
+
+      // If the model requests an identical tool call again, it is stuck in a
+      // loop — stop and hand back whatever it drafted.
+      const keys = toolCalls.map(
+        (call) => `${call.function.name}(${call.function.arguments})`,
+      );
+      if (keys.some((key) => seenCalls.has(key))) {
+        return partialContent
+          ? { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` }
+          : {
+              content: "",
+              error:
+                "The model got stuck repeating the same web request. Please try again.",
+            };
+      }
+      for (const key of keys) seenCalls.add(key);
+
       // Record the assistant's tool-call message, then feed back the results.
       history.push({
         role: "assistant",
-        content: message?.content ?? null,
+        content: drafted ?? null,
         tool_calls: toolCalls,
       });
 
@@ -287,16 +326,19 @@ async function sendOpenAICompatMessage(
       continue;
     }
 
-    const content = message?.content;
-    if (content == null) {
+    if (drafted == null) {
       return {
         content: "",
         error: "API response did not contain a message.",
       };
     }
-    return { content };
+    return { content: drafted };
   }
 
+  // Ran out of tool rounds: return the draft if there is one, otherwise fail.
+  if (partialContent) {
+    return { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` };
+  }
   return {
     content: "",
     error:
@@ -380,7 +422,17 @@ async function sendAnthropicMessage(
   }));
   let toolContext: AnthropicHistoryMessage[] = [];
 
-  let useTools = true;
+  // Whether the current and future requests advertise tools. Set to false
+  // after a tools-related error so the retry works with plain models, or
+  // from the start when the user disabled web search.
+  let useTools = config.webSearchEnabled !== false;
+
+  // Text the model drafted alongside tool_use blocks; returned if the loop
+  // cannot finish (round cap or a repeated call).
+  let partialContent: string | null = null;
+
+  // Signatures of every tool call made so far, to detect looping models.
+  const seenCalls = new Set<string>();
 
   const runRound = async (
     withTools: boolean,
@@ -442,6 +494,29 @@ async function sendAnthropicMessage(
     const toolUses = blocks.filter((b) => b.type === "tool_use");
 
     if (toolUses.length > 0) {
+      // Keep any text drafted alongside the tool calls: if the loop cannot
+      // finish, that draft is still returned instead of an error.
+      const drafted = textFromAnthropicBlocks(blocks);
+      if (drafted && !partialContent) {
+        partialContent = drafted;
+      }
+
+      // If the model requests an identical tool call again, it is stuck in a
+      // loop — stop and hand back whatever it drafted.
+      const keys = toolUses.map(
+        (call) => `${call.name}(${JSON.stringify(call.input ?? {})})`,
+      );
+      if (keys.some((key) => seenCalls.has(key))) {
+        return partialContent
+          ? { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` }
+          : {
+              content: "",
+              error:
+                "The model got stuck repeating the same web request. Please try again.",
+            };
+      }
+      for (const key of keys) seenCalls.add(key);
+
       // Echo the assistant's full content blocks, then feed back the results.
       toolContext.push({ role: "assistant", content: blocks });
       const results: AnthropicContentBlock[] = [];
@@ -467,6 +542,10 @@ async function sendAnthropicMessage(
     return { content: text };
   }
 
+  // Ran out of tool rounds: return the draft if there is one, otherwise fail.
+  if (partialContent) {
+    return { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` };
+  }
   return {
     content: "",
     error:

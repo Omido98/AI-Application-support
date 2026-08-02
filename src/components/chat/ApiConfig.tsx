@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -79,6 +80,9 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
   const [selection, setSelection] = useState<string>(model);
   const [reasoningEffort, setReasoningEffort] = useState(
     config.reasoningEffort ?? "",
+  );
+  const [webSearchEnabled, setWebSearchEnabled] = useState(
+    config.webSearchEnabled ?? true,
   );
   const [promptMode, setPromptMode] = useState(
     config.systemPromptMode ?? "standard",
@@ -283,6 +287,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
       apiKey: apiKey.trim(),
       model: resolvedModel,
       reasoningEffort: reasoningEffort.trim() !== "" ? reasoningEffort : null,
+      webSearchEnabled,
       systemPromptMode: promptMode,
       customSystemPrompt: customPrompt,
     });
@@ -595,6 +600,31 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
               </p>
             </div>
           )}
+
+          {/* Web Search */}
+          <div className="space-y-1.5">
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="web-search-enabled"
+                checked={webSearchEnabled}
+                onCheckedChange={(checked) => setWebSearchEnabled(checked === true)}
+                className="mt-0.5"
+              />
+              <div className="space-y-1">
+                <Label
+                  htmlFor="web-search-enabled"
+                  className="text-text-secondary text-xs cursor-pointer"
+                >
+                  Web search
+                </Label>
+                <p className="text-xs text-text-muted">
+                  Let the chat agent search the web and fetch pages to research
+                  the company (up to 5 pages per turn). Turn it off if your
+                  model keeps requesting web tools without answering.
+                </p>
+              </div>
+            </div>
+          </div>
 
           {/* Chat Agent Prompt */}
           <div className="space-y-1.5">
