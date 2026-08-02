@@ -7,6 +7,7 @@ import WorkExperienceSection from "@/components/profile/WorkExperienceSection";
 import CertificationsSection from "@/components/profile/CertificationsSection";
 import SkillsSection from "@/components/profile/SkillsSection";
 import LanguagesSection from "@/components/profile/LanguagesSection";
+import LinksSection from "@/components/profile/LinksSection";
 
 export default function ProfileTab() {
   const isLoaded = useProfileStore((s) => s.isLoaded);
@@ -32,6 +33,8 @@ export default function ProfileTab() {
         <h1 className="text-2xl font-bold text-text-primary">Profile</h1>
 
         <EducationSection />
+        <Separator className="bg-border" />
+        <LinksSection />
         <Separator className="bg-border" />
         <CoverLettersSection />
         <Separator className="bg-border" />

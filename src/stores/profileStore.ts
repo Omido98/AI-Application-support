@@ -27,6 +27,7 @@ function debouncedSave() {
       certifications: s.certifications,
       skills: s.skills,
       languages: s.languages,
+      linkedinUrl: s.linkedinUrl,
     };
     await saveJson("profile.json", data);
   }, 500);
@@ -41,6 +42,9 @@ interface ProfileState extends ProfileData {
 
   /** Load profile.json from disk (or localStorage fallback) */
   loadProfile: () => Promise<void>;
+
+  /** Public profile URL (e.g. LinkedIn) for the AI to reference */
+  setLinkedinUrl: (value: string) => void;
 
   // Education actions
   setEducation: (items: Education[]) => void;
@@ -91,6 +95,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
   certifications: [],
   skills: [],
   languages: [],
+  linkedinUrl: "",
   isLoaded: false,
 
   // ── Load ──
@@ -104,11 +109,18 @@ export const useProfileStore = create<ProfileState>((set) => ({
         certifications: data.certifications ?? [],
         skills: data.skills ?? [],
         languages: data.languages ?? [],
+        linkedinUrl: data.linkedinUrl ?? "",
         isLoaded: true,
       });
     } else {
       set({ isLoaded: true });
     }
+  },
+
+  // ── Linkedin ──
+  setLinkedinUrl: (value) => {
+    set({ linkedinUrl: value });
+    debouncedSave();
   },
 
   // ── Education ──

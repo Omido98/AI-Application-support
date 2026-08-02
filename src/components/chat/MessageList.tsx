@@ -1,9 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useChatStore } from "@/stores/chatStore";
+import { useApplicationStore } from "@/stores/applicationStore";
+import { useProfileStore } from "@/stores/profileStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Sparkles } from "lucide-react";
+import { Copy, Check, BookmarkPlus, Sparkles } from "lucide-react";
 
 function LoadingDots() {
   return (
@@ -21,10 +23,64 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
   const error = useChatStore((s) => s.error);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const applications = useApplicationStore((s) => s.applications);
+  const selectedId = useApplicationStore((s) => s.selectedApplicationId);
+  const addCoverLetter = useProfileStore((s) => s.addCoverLetter);
+
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const company =
+    applications.find((a) => a.id === selectedId)?.companyName ?? "";
+
+  const messageKey = (msg: { timestamp: string; content: string }) =>
+    msg.timestamp + msg.content.slice(0, 40);
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isSending]);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    };
+  }, []);
+
+  const flashFeedback = (id: string, setter: (v: string | null) => void) => {
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    setter(id);
+    feedbackTimer.current = setTimeout(() => {
+      setter(null);
+      feedbackTimer.current = null;
+    }, 1500);
+  };
+
+  const handleCopy = async (msgId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch {
+      // Clipboard unavailable — fall back to a textarea selection trick
+      const ta = document.createElement("textarea");
+      ta.value = content;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    flashFeedback(msgId, setCopiedId);
+  };
+
+  const handleSaveAsCoverLetter = (msgId: string, content: string) => {
+    addCoverLetter({
+      id: crypto.randomUUID(),
+      company: company || undefined,
+      content,
+      addedAt: new Date().toISOString(),
+    });
+    flashFeedback(msgId, setSavedId);
+  };
 
   if (messages.length === 0 && !isSending) {
     return (
@@ -50,9 +106,16 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       {messages.map((msg) => {
         const isUser = msg.role === "user";
+        const key = messageKey(msg);
+        const feedback =
+          copiedId === key
+            ? "copied"
+            : savedId === key
+              ? "saved"
+              : null;
         return (
           <div
-            key={msg.timestamp + msg.content.slice(0, 40)}
+            key={key}
             className={cn(
               "flex",
               isUser ? "justify-end" : "justify-start",
@@ -74,6 +137,39 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
                 </div>
               )}
             </div>
+
+            {!isUser && (
+              <div className="flex flex-col gap-1 pl-2 justify-start">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(key, msg.content)}
+                  className="text-text-muted hover:text-text-primary transition-colors"
+                  title={feedback === "copied" ? "Copied!" : "Copy"}
+                >
+                  {feedback === "copied" ? (
+                    <Check className="size-3.5 text-green-400" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveAsCoverLetter(key, msg.content)}
+                  className="text-text-muted hover:text-text-primary transition-colors"
+                  title={
+                    feedback === "saved"
+                      ? "Saved to Profile"
+                      : "Save as cover letter"
+                  }
+                >
+                  {feedback === "saved" ? (
+                    <Check className="size-3.5 text-green-400" />
+                  ) : (
+                    <BookmarkPlus className="size-3.5" />
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         );
       })}

@@ -4,3 +4,4 @@ export { default as WorkExperienceSection } from "./WorkExperienceSection";
 export { default as CertificationsSection } from "./CertificationsSection";
 export { default as SkillsSection } from "./SkillsSection";
 export { default as LanguagesSection } from "./LanguagesSection";
+export { default as LinksSection } from "./LinksSection";
