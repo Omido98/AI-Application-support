@@ -8,15 +8,29 @@ import type { JobApplication } from "@/types";
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+function writeSnapshot() {
+  const s = useApplicationStore.getState();
+  return saveJson("applications.json", {
+    applications: s.applications,
+    selectedApplicationId: s.selectedApplicationId,
+  });
+}
+
 function debouncedSave() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    const s = useApplicationStore.getState();
-    await saveJson("applications.json", {
-      applications: s.applications,
-      selectedApplicationId: s.selectedApplicationId,
-    });
+    saveTimer = null;
+    await writeSnapshot();
   }, 500);
+}
+
+/** Flush any pending debounced save immediately (called on window close). */
+export async function flushApplicationSave(): Promise<void> {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await writeSnapshot();
+  }
 }
 
 // ──────────────────────────────────────────────

@@ -163,9 +163,33 @@ export default function ChatTab() {
     );
   }
 
-  // ── Show API config if not yet configured, or opened from settings ──
-  if (!config.apiKey || showConfig) {
+  // ── Show API config when explicitly opened, or when not yet configured ──
+  if (showConfig) {
     return <ApiConfig onDone={() => setShowConfig(false)} />;
+  }
+
+  // ── No API key yet: explain and offer to configure ──
+  if (!config.apiKey) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+        <p className="text-text-primary text-lg font-semibold">
+          Connect your AI provider
+        </p>
+        <p className="text-text-muted text-sm mt-2 max-w-md">
+          The chat assistant needs an API key to work. You can use OpenCode
+          Zen, Anthropic, OpenAI, or any OpenAI-compatible endpoint. Your key
+          is stored securely in your system&apos;s keychain and never leaves
+          your computer.
+        </p>
+        <Button
+          className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
+          onClick={() => setShowConfig(true)}
+        >
+          <Settings className="size-4 mr-1.5" />
+          Configure API
+        </Button>
+      </div>
+    );
   }
 
   // ── Applications still loading ──
@@ -250,6 +274,7 @@ export default function ChatTab() {
                   variant="ghost"
                   size="icon-sm"
                   title="Reset chat"
+                  aria-label="Reset chat"
                   disabled={isSending}
                 >
                   <Trash2 className="size-4 text-text-secondary" />
@@ -277,14 +302,15 @@ export default function ChatTab() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => setShowConfig(true)}
-            title="API settings"
-          >
-            <Settings className="size-4 text-text-secondary" />
-          </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setShowConfig(true)}
+                title="API settings"
+                aria-label="API settings"
+              >
+                <Settings className="size-4 text-text-secondary" />
+              </Button>
         </div>
       </div>
 

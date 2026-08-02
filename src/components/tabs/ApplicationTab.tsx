@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, Trash2, MessageSquare } from "lucide-react";
+import {
+  Plus,
+  Search,
+  Trash2,
+  MessageSquare,
+  ExternalLink,
+} from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useAppStore } from "@/stores/useAppStore";
 import type { ApplicationStatus } from "@/types";
@@ -43,6 +50,15 @@ function StatusBadge({ status }: { status: ApplicationStatus }) {
   );
 }
 
+async function openInBrowser(url: string) {
+  try {
+    await openUrl(url);
+  } catch {
+    // Not running inside Tauri — fall back to a plain browser tab.
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
 export default function ApplicationTab() {
   const isLoaded = useApplicationStore((s) => s.isLoaded);
   const loadApplications = useApplicationStore((s) => s.loadApplications);
@@ -57,6 +73,9 @@ export default function ApplicationTab() {
   const setActiveTab = useAppStore((s) => s.setActiveTab);
 
   const [filter, setFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ApplicationStatus | null>(
+    null,
+  );
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -72,15 +91,29 @@ export default function ApplicationTab() {
     [applications],
   );
 
+  const statusCounts = useMemo(() => {
+    const counts: Record<ApplicationStatus, number> = {
+      wishlist: 0,
+      applied: 0,
+      interview: 0,
+      offer: 0,
+      rejected: 0,
+    };
+    for (const app of applications) counts[app.status] += 1;
+    return counts;
+  }, [applications]);
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return sorted;
-    return sorted.filter(
-      (a) =>
+    return sorted.filter((a) => {
+      if (statusFilter && a.status !== statusFilter) return false;
+      if (!q) return true;
+      return (
         a.companyName.toLowerCase().includes(q) ||
-        a.jobTitle.toLowerCase().includes(q),
-    );
-  }, [sorted, filter]);
+        a.jobTitle.toLowerCase().includes(q)
+      );
+    });
+  }, [sorted, filter, statusFilter]);
 
   const selected = applications.find((a) => a.id === selectedId) ?? null;
   const pendingDelete = applications.find((a) => a.id === pendingDeleteId) ?? null;
@@ -129,6 +162,7 @@ export default function ApplicationTab() {
             size="icon-sm"
             onClick={() => addApplication()}
             title="New application"
+            aria-label="New application"
           >
             <Plus className="size-4" />
           </Button>
@@ -141,9 +175,45 @@ export default function ApplicationTab() {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Search…"
+              aria-label="Search applications"
               className="bg-field text-text-primary border-border h-8 pl-8 text-xs placeholder:text-text-muted focus-visible:ring-primary/50"
             />
           </div>
+        </div>
+
+        {/* Status filter */}
+        <div className="px-3 py-1.5 flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setStatusFilter(null)}
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors select-none",
+              statusFilter === null
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-surface text-text-secondary border-border hover:text-text-primary",
+            )}
+            aria-pressed={statusFilter === null}
+          >
+            All ({applications.length})
+          </button>
+          {STATUS_ORDER.map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() =>
+                setStatusFilter(statusFilter === status ? null : status)
+              }
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors select-none",
+                statusFilter === status
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-surface text-text-secondary border-border hover:text-text-primary",
+              )}
+              aria-pressed={statusFilter === status}
+            >
+              {STATUS_LABELS[status]} ({statusCounts[status]})
+            </button>
+          ))}
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -183,6 +253,7 @@ export default function ApplicationTab() {
                   onClick={() => setPendingDeleteId(app.id)}
                   className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
                   title="Delete application"
+                  aria-label={`Delete ${app.companyName.trim() || "application"}`}
                 >
                   <Trash2 className="size-3.5" />
                 </button>
@@ -222,6 +293,7 @@ export default function ApplicationTab() {
                 size="icon-sm"
                 onClick={() => setPendingDeleteId(selected.id)}
                 title="Delete application"
+                aria-label="Delete application"
               >
                 <Trash2 className="size-4 text-text-secondary" />
               </Button>
@@ -301,16 +373,28 @@ export default function ApplicationTab() {
                 <Label className="text-text-secondary text-sm font-medium">
                   Application URL
                 </Label>
-                <Input
-                  value={selected.applicationUrl}
-                  onChange={(e) =>
-                    updateApplication(selected.id, {
-                      applicationUrl: e.target.value,
-                    })
-                  }
-                  placeholder="https://…"
-                  className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    value={selected.applicationUrl}
+                    onChange={(e) =>
+                      updateApplication(selected.id, {
+                        applicationUrl: e.target.value,
+                      })
+                    }
+                    placeholder="https://…"
+                    className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon-sm"
+                    title="Open in browser"
+                    aria-label="Open application URL in browser"
+                    disabled={!selected.applicationUrl.trim()}
+                    onClick={() => void openInBrowser(selected.applicationUrl.trim())}
+                  >
+                    <ExternalLink className="size-3.5" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 

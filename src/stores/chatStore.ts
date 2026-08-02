@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { saveJson, loadJson, deleteFile } from "@/utils/storage";
 import {
+  loadApiKeyFromKeychain,
+  saveApiKeyToKeychain,
+} from "@/utils/keychain";
+import {
   inferProviderFromBaseUrl,
   isKnownProviderId,
   type ProviderId,
@@ -71,6 +75,17 @@ function cancelPendingSave() {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
+  }
+}
+
+/** Flush any pending debounced thread save immediately (called on window close). */
+export async function flushChatSave(): Promise<void> {
+  if (saveTimer && pendingThreadId) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    const threadId = pendingThreadId;
+    pendingThreadId = null;
+    await saveJson(`chat_${threadId}.json`, pendingSnapshot);
   }
 }
 
@@ -163,12 +178,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setConfig: async (cfg) => {
     set({ config: cfg });
-    await saveJson("config.json", cfg);
+    // Prefer the OS keychain; only fall back to config.json when unavailable.
+    const keyInKeychain = await saveApiKeyToKeychain(cfg.apiKey);
+    await saveJson("config.json", {
+      ...cfg,
+      apiKey: keyInKeychain ? "" : cfg.apiKey,
+    });
   },
 
   loadConfig: async () => {
     const data = await loadJson<ApiConfig>("config.json");
-    if (data && data.apiKey) {
+    // Prefer a key stored in the OS keychain over the one in the file.
+    const keychainKey = await loadApiKeyFromKeychain();
+    if (data) {
       // Migrate the old, non-existent endpoint to the real OpenCode Zen URL
       if (
         data.baseUrl &&
@@ -184,6 +206,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({
         config: {
           ...data,
+          apiKey: keychainKey ?? data.apiKey ?? "",
           reasoningEffort: data.reasoningEffort ?? null,
           systemPromptMode: data.systemPromptMode ?? "standard",
           customSystemPrompt: data.customSystemPrompt ?? "",
@@ -191,7 +214,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         configLoaded: true,
       });
     } else {
-      set({ config: { ...defaultApiConfig }, configLoaded: true });
+      set({
+        config: { ...defaultApiConfig, apiKey: keychainKey ?? "" },
+        configLoaded: true,
+      });
     }
   },
   resetConfig: () => {

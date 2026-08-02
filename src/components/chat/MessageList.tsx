@@ -145,6 +145,7 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
                   onClick={() => handleCopy(key, msg.content)}
                   className="text-text-muted hover:text-text-primary transition-colors"
                   title={feedback === "copied" ? "Copied!" : "Copy"}
+                  aria-label="Copy message"
                 >
                   {feedback === "copied" ? (
                     <Check className="size-3.5 text-green-400" />
@@ -161,6 +162,7 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
                       ? "Saved to Profile"
                       : "Save as cover letter"
                   }
+                  aria-label="Save as cover letter"
                 >
                   {feedback === "saved" ? (
                     <Check className="size-3.5 text-green-400" />

@@ -300,7 +300,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
                 Configure API
               </span>
             </div>
-            {onDone && (
+            {onDone && config.apiKey && (
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -352,6 +352,7 @@ export default function ApiConfig({ onDone }: { onDone?: () => void }) {
                 size="icon-sm"
                 onClick={() => setBaseUrl(getProvider(provider).defaultBaseUrl)}
                 title="Reset to the provider's default URL"
+                aria-label="Reset base URL"
               >
                 <RotateCcw className="size-3.5" />
               </Button>

@@ -16,21 +16,35 @@ import type {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+function writeSnapshot() {
+  const s = useProfileStore.getState();
+  const data: ProfileData = {
+    education: s.education,
+    coverLetters: s.coverLetters,
+    workExperience: s.workExperience,
+    certifications: s.certifications,
+    skills: s.skills,
+    languages: s.languages,
+    linkedinUrl: s.linkedinUrl,
+  };
+  return saveJson("profile.json", data);
+}
+
 function debouncedSave() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    const s = useProfileStore.getState();
-    const data: ProfileData = {
-      education: s.education,
-      coverLetters: s.coverLetters,
-      workExperience: s.workExperience,
-      certifications: s.certifications,
-      skills: s.skills,
-      languages: s.languages,
-      linkedinUrl: s.linkedinUrl,
-    };
-    await saveJson("profile.json", data);
+    saveTimer = null;
+    await writeSnapshot();
   }, 500);
+}
+
+/** Flush any pending debounced save immediately (called on window close). */
+export async function flushProfileSave(): Promise<void> {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await writeSnapshot();
+  }
 }
 
 // ──────────────────────────────────────────────

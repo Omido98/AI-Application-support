@@ -1,7 +1,11 @@
 ﻿use ego_tree::NodeRef;
+use keyring::Entry;
 use scraper::{ElementRef, Node, Selector};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+/// Service name under which API keys are stored in the OS keychain.
+const KEYCHAIN_SERVICE: &str = "com.ai-application-support.app";
 
 /// Browser-like user agent so DuckDuckGo and typical websites serve normal
 /// HTML instead of bot-blocking pages.
@@ -430,17 +434,57 @@ async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
     Ok(entries)
 }
 
+/// Get a secret (e.g. the API key) from the OS keychain.
+/// Returns `null` when no entry exists. Errors if the keychain is unusable,
+/// so the frontend can fall back to storing secrets in config.json.
+#[tauri::command]
+fn keyring_get(key: String) -> Result<Option<String>, String> {
+    let entry =
+        Entry::new(KEYCHAIN_SERVICE, &key).map_err(|e| format!("Keychain unavailable: {e}"))?;
+    match entry.get_password() {
+        Ok(password) => Ok(Some(password)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Keychain error: {e}")),
+    }
+}
+
+/// Store a secret in the OS keychain (overwrites any existing value).
+#[tauri::command]
+fn keyring_set(key: String, value: String) -> Result<(), String> {
+    let entry =
+        Entry::new(KEYCHAIN_SERVICE, &key).map_err(|e| format!("Keychain unavailable: {e}"))?;
+    entry.set_password(&value).map_err(|e| format!("Keychain error: {e}"))
+}
+
+/// Delete a secret from the OS keychain. Missing entries are not an error.
+#[tauri::command]
+fn keyring_delete(key: String) -> Result<(), String> {
+    let entry =
+        Entry::new(KEYCHAIN_SERVICE, &key).map_err(|e| format!("Keychain unavailable: {e}"))?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("Keychain error: {e}")),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             zen_list_models,
             zen_chat,
             zen_web_search,
             zen_fetch_page,
-            zen_fetch_zen_pricing
+            zen_fetch_zen_pricing,
+            keyring_get,
+            keyring_set,
+            keyring_delete
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
