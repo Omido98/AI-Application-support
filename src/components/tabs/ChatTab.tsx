@@ -81,6 +81,7 @@ export default function ChatTab() {
         education: profile.education,
         coverLetters: profile.coverLetters,
         workExperience: profile.workExperience,
+        certifications: profile.certifications,
         skills: profile.skills,
         languages: profile.languages,
       };
