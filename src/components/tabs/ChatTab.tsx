@@ -42,6 +42,7 @@ export default function ChatTab() {
     applications.find((a) => a.id === selectedId) ?? null;
 
   const profile = useProfileStore();
+  const loadProfile = useProfileStore((s) => s.loadProfile);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
 
   // ── Input state ──
@@ -92,14 +93,21 @@ export default function ChatTab() {
         requirements: application.requirements,
         companyResearch: application.companyResearch,
       };
+
+      // Make sure the profile has been loaded from disk before it is sent.
+      // App startup loads it too; this covers sends racing that load.
+      if (!profile.isLoaded) {
+        await loadProfile();
+      }
+      const freshProfile = useProfileStore.getState();
       const profileData = {
-        education: profile.education,
-        coverLetters: profile.coverLetters,
-        workExperience: profile.workExperience,
-        certifications: profile.certifications,
-        skills: profile.skills,
-        languages: profile.languages,
-        linkedinUrl: profile.linkedinUrl,
+        education: freshProfile.education,
+        coverLetters: freshProfile.coverLetters,
+        workExperience: freshProfile.workExperience,
+        certifications: freshProfile.certifications,
+        skills: freshProfile.skills,
+        languages: freshProfile.languages,
+        linkedinUrl: freshProfile.linkedinUrl,
       };
       const systemPrompt = buildSystemPrompt(appCtx, profileData, {
         mode: config.systemPromptMode ?? "standard",
@@ -138,6 +146,7 @@ export default function ChatTab() {
       addMessage,
       application,
       profile,
+      loadProfile,
       config,
       setIsSending,
       setError,

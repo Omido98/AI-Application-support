@@ -49,6 +49,24 @@ function formatDate(month: string, year?: string): string {
 }
 
 /**
+ * Whether the profile actually carries any content the agent can use.
+ * A non-null profile with every section empty is indistinguishable from
+ * "not filled in yet" — never claim it is complete in that case.
+ */
+function hasProfileContent(profile: ProfileData | null): boolean {
+  if (!profile) return false;
+  return (
+    profile.education.length > 0 ||
+    profile.workExperience.length > 0 ||
+    profile.certifications.length > 0 ||
+    profile.skills.length > 0 ||
+    profile.languages.length > 0 ||
+    (profile.linkedinUrl?.trim().length ?? 0) > 0 ||
+    profile.coverLetters.some((cl) => cl.content.trim().length > 0)
+  );
+}
+
+/**
  * Build the system prompt for the AI assistant.
  * Merges application context and the FULL candidate profile
  * (education, work experience incl. responsibilities/projects, skills,
@@ -74,6 +92,8 @@ export function buildSystemPrompt(
     ? [custom, ""]
     : [ROLE_LINE, ""];
 
+  const profileHasContent = hasProfileContent(profile);
+
   sections.push(
     "Application Context",
     `- Company: ${company || "(not provided)"}`,
@@ -82,10 +102,10 @@ export function buildSystemPrompt(
     `- Application Requirements: ${requirements || "(not provided)"}`,
     `- Company Research (provided by user): ${companyResearch || "(not provided)"}`,
     "",
-    "Candidate Profile (complete)",
+    profileHasContent ? "Candidate Profile (complete)" : "Candidate Profile",
   );
 
-  if (profile) {
+  if (profile && profileHasContent) {
     if (profile.education.length > 0) {
       sections.push("- Education:");
       profile.education.forEach((e) => {
