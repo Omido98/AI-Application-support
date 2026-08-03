@@ -66,6 +66,24 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("The user has not filled in their profile yet.");
   });
 
+  it("does not claim the profile is complete when it has no content", () => {
+    const profile = makeProfile();
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).not.toContain("Candidate Profile (complete)");
+    expect(prompt).toContain("The user has not filled in their profile yet.");
+  });
+
+  it("marks the profile as complete when it has content", () => {
+    const profile = makeProfile({
+      skills: [{ id: "s1", name: "Rust" }],
+    });
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).toContain("Candidate Profile (complete)");
+    expect(prompt).not.toContain(
+      "The user has not filled in their profile yet.",
+    );
+  });
+
   it("renders education, work experience, skills, languages and LinkedIn", () => {
     const profile = makeProfile({
       education: [

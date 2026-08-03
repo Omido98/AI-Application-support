@@ -8,7 +8,7 @@ import {
   getAccentForeground,
 } from "@/stores/settingsStore";
 import { flushApplicationSave } from "@/stores/applicationStore";
-import { flushProfileSave } from "@/stores/profileStore";
+import { flushProfileSave, useProfileStore } from "@/stores/profileStore";
 import { flushChatSave } from "@/stores/chatStore";
 import ApplicationTab from "@/components/tabs/ApplicationTab";
 import ChatTab from "@/components/tabs/ChatTab";
@@ -45,6 +45,12 @@ function App() {
   useEffect(() => {
     if (!settingsLoaded) loadSettings();
   }, [settingsLoaded, loadSettings]);
+
+  // Load the persisted profile on mount, so the chat agent always sees it
+  // even if the user never visits the Profile tab.
+  useEffect(() => {
+    void useProfileStore.getState().loadProfile();
+  }, []);
 
   // Flush debounced saves when the window closes, so the last edit is never lost
   useEffect(() => {
