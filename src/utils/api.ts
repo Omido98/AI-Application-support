@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import type { ApiConfig } from "@/stores/chatStore";
 import type { ChatMessage } from "@/stores/chatStore";
 import type { ProviderId } from "@/utils/providers";
@@ -6,7 +6,23 @@ import type { ProviderId } from "@/utils/providers";
 export interface ApiResponse {
   content: string;
   error?: string;
+  /** True when the user stopped generation; `content` holds the partial answer. */
+  stopped?: boolean;
 }
+
+/** Options for sendMessage: live text rendering and stop support. */
+export interface SendMessageOptions {
+  /** Called with each chunk of text as it streams in (live rendering). */
+  onDelta?: (text: string) => void;
+  /** Aborting the signal stops generation; whatever was streamed is returned. */
+  signal?: AbortSignal;
+}
+
+/** An event emitted by the Rust `zen_chat_stream` command. */
+type ChatStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; data: unknown }
+  | { type: "error"; message: string };
 
 /** A single web search result, as returned by the Rust `zen_web_search` command. */
 interface WebResult {
@@ -144,37 +160,117 @@ export async function fetchZenPricing(): Promise<ZenPricingEntry[]> {
 /**
  * Send a message to the configured LLM provider. Routes to the correct
  * adapter based on `config.provider` (OpenAI-compatible or Anthropic).
+ * Responses stream in chunk-by-chunk; each text chunk is forwarded to
+ * `options.onDelta` and the final answer is returned when the stream ends.
  *
  * @param messages - The conversation history including the new user message.
  * @param config   - API configuration (provider, baseUrl, apiKey, model, ...).
  * @param systemPrompt - The system prompt to prepend (not included in messages array).
+ * @param options  - Live-text callback and an optional AbortSignal to stop generation.
  * @returns The assistant's reply content, or an error message.
  */
 export async function sendMessage(
   messages: ChatMessage[],
   config: ApiConfig,
   systemPrompt: string,
+  options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   if (config.provider === "anthropic") {
-    return sendAnthropicMessage(messages, config, systemPrompt);
+    return sendAnthropicMessage(messages, config, systemPrompt, options);
   }
-  return sendOpenAICompatMessage(messages, config, systemPrompt);
+  return sendOpenAICompatMessage(messages, config, systemPrompt, options);
+}
+
+/**
+ * Stream a single chat-completions round through the Rust backend.
+ * Resolves when the stream ends (or is stopped); text chunks are forwarded
+ * to `onChunk` for live rendering.
+ */
+async function streamChat(
+  baseUrl: string,
+  apiKey: string,
+  provider: string,
+  payload: Record<string, unknown>,
+  options: SendMessageOptions,
+  onChunk: (text: string) => void,
+): Promise<{ data?: unknown; error?: string; stopped?: boolean }> {
+  if (options.signal?.aborted) {
+    return { stopped: true };
+  }
+
+  const channel = new Channel<ChatStreamEvent>();
+  let requestId = "";
+  try {
+    requestId = await invoke<string>("zen_chat_stream", {
+      baseUrl,
+      apiKey,
+      provider,
+      payload,
+      onEvent: channel,
+    });
+  } catch (err) {
+    return {
+      error: typeof err === "string" ? err : "An unknown error occurred.",
+    };
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    function cleanup() {
+      options.signal?.removeEventListener("abort", onAbort);
+    }
+
+    function onAbort() {
+      if (requestId) {
+        // Best-effort: tell Rust to close the HTTP connection.
+        void invoke("zen_chat_stream_cancel", { id: requestId }).catch(() => {});
+      }
+      finish({ stopped: true });
+    }
+
+    function finish(result: { data?: unknown; error?: string; stopped?: boolean }) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    }
+
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    channel.onmessage = (event: ChatStreamEvent) => {
+      switch (event.type) {
+        case "delta":
+          onChunk(event.text);
+          break;
+        case "done":
+          finish({ data: event.data });
+          break;
+        case "error":
+          finish({ error: event.message });
+          break;
+      }
+    };
+  });
 }
 
 /**
  * Send a message to an OpenAI-compatible chat completions endpoint.
  * The request is executed by Rust, bypassing webview CORS restrictions.
+ * Response text is streamed (SSE) and forwarded to `options.onDelta` so the
+ * chat UI can render it live; the full answer is returned when the stream ends.
  *
  * Runs a tool-calling loop: if the model requests `web_search` or
  * `fetch_page`, the tools are executed through Rust and their results are
  * fed back to the model, up to `MAX_TOOL_ROUNDS` rounds. If the model
  * rejects the `tools` field, the request is retried once without it and a
- * short note is prepended to the reply.
+ * short note is prepended to the reply. Providers that reject streaming
+ * fall back to one-shot requests automatically.
  */
 async function sendOpenAICompatMessage(
   messages: ChatMessage[],
   config: ApiConfig,
   systemPrompt: string,
+  options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   const { baseUrl, apiKey, model, reasoningEffort } = config;
 
@@ -197,16 +293,21 @@ async function sendOpenAICompatMessage(
   // from the start when the user disabled web search.
   let useTools = config.webSearchEnabled !== false;
 
+  // Whether responses are streamed. Set to false when the provider rejects
+  // streaming (the answer then appears all at once instead of live).
+  let useStream = true;
+
   // Text the model drafted alongside tool calls; returned if the loop
   // cannot finish (round cap or a repeated call).
   let partialContent: string | null = null;
 
+  // Text streamed so far; returned as the partial answer when the user stops.
+  let streamedContent = "";
+
   // Signatures of every tool call made so far, to detect looping models.
   const seenCalls = new Set<string>();
 
-  const runRound = async (
-    withTools: boolean,
-  ): Promise<{ data?: ChatResponse; error?: string }> => {
+  const buildPayload = (withTools: boolean, stream: boolean): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
       model: model || "deepseek-v4-flash-free",
       messages: [
@@ -232,12 +333,21 @@ async function sendOpenAICompatMessage(
       payload["reasoning_effort"] = reasoningEffort;
     }
 
+    if (stream) {
+      payload["stream"] = true;
+    }
+    return payload;
+  };
+
+  const runNonStreamingRound = async (
+    withTools: boolean,
+  ): Promise<{ data?: ChatResponse; error?: string; stopped?: boolean }> => {
     try {
       const data = await invoke<ChatResponse>("zen_chat", {
         baseUrl,
         apiKey,
         provider: config.provider,
-        payload,
+        payload: buildPayload(withTools, false),
       });
       return { data };
     } catch (err) {
@@ -248,39 +358,62 @@ async function sendOpenAICompatMessage(
   };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const { data, error } = await runRound(useTools);
-
-    if (error) {
-      // Some models reject the `tools` field; retry once without it.
-      if (useTools && /tool/i.test(error)) {
-        useTools = false;
-        // Drop tool artifacts from the history so plain models can parse it.
-        for (let i = history.length - 1; i >= 0; i--) {
-          if (history[i].role === "tool") {
-            history.splice(i, 1);
-          } else {
-            delete history[i].tool_calls;
-          }
-        }
-
-        const retry = await runRound(false);
-        if (retry.error) {
-          return { content: "", error: retry.error };
-        }
-        const content = retry.data?.choices?.[0]?.message?.content;
-        if (content == null) {
-          return {
-            content: "",
-            error: "API response did not contain a message.",
-          };
-        }
-        return {
-          content: `[Web search unavailable — answering without it]\n\n${content}`,
-        };
-      }
-      return { content: "", error };
+    if (options.signal?.aborted) {
+      return { content: streamedContent, stopped: true };
     }
 
+    let result = useStream
+      ? await streamChat(baseUrl, apiKey, config.provider, buildPayload(useTools, true), options, (text) => {
+          streamedContent += text;
+          options.onDelta?.(text);
+        })
+      : await runNonStreamingRound(useTools);
+
+    if (result.stopped) {
+      return { content: streamedContent, stopped: true };
+    }
+
+    if (result.error) {
+      // Some providers don't support SSE streaming; retry the round without
+      // it (the answer then appears all at once instead of live).
+      if (useStream && /stream|sse|chunk|event/i.test(result.error)) {
+        useStream = false;
+        result = await runNonStreamingRound(useTools);
+      }
+
+      if (result.error) {
+        // Some models reject the `tools` field; retry once without it.
+        if (useTools && /tool/i.test(result.error)) {
+          useTools = false;
+          // Drop tool artifacts from the history so plain models can parse it.
+          for (let i = history.length - 1; i >= 0; i--) {
+            if (history[i].role === "tool") {
+              history.splice(i, 1);
+            } else {
+              delete history[i].tool_calls;
+            }
+          }
+
+          const retry = await runNonStreamingRound(false);
+          if (retry.error) {
+            return { content: "", error: retry.error };
+          }
+          const content = retry.data?.choices?.[0]?.message?.content;
+          if (content == null) {
+            return {
+              content: "",
+              error: "API response did not contain a message.",
+            };
+          }
+          return {
+            content: `[Web search unavailable — answering without it]\n\n${content}`,
+          };
+        }
+        return { content: "", error: result.error };
+      }
+    }
+
+    const data = result.data as ChatResponse | undefined;
     const message = data?.choices?.[0]?.message;
     const toolCalls = message?.tool_calls;
     const drafted = message?.content;
@@ -396,13 +529,15 @@ function toAnthropicTools(): Array<Record<string, unknown>> {
 
 /**
  * Send a message to the Anthropic Messages API (`/v1/messages`).
- * Runs a tool-calling loop like the OpenAI path, but with Anthropic's
- * `tool_use` / `tool_result` content blocks.
+ * Response text is streamed (SSE) and forwarded to `options.onDelta` for
+ * live rendering. Runs a tool-calling loop like the OpenAI path, but with
+ * Anthropic's `tool_use` / `tool_result` content blocks.
  */
 async function sendAnthropicMessage(
   messages: ChatMessage[],
   config: ApiConfig,
   systemPrompt: string,
+  options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   const { baseUrl, apiKey, model } = config;
 
@@ -427,16 +562,21 @@ async function sendAnthropicMessage(
   // from the start when the user disabled web search.
   let useTools = config.webSearchEnabled !== false;
 
+  // Whether responses are streamed. Set to false when the provider rejects
+  // streaming (the answer then appears all at once instead of live).
+  let useStream = true;
+
   // Text the model drafted alongside tool_use blocks; returned if the loop
   // cannot finish (round cap or a repeated call).
   let partialContent: string | null = null;
 
+  // Text streamed so far; returned as the partial answer when the user stops.
+  let streamedContent = "";
+
   // Signatures of every tool call made so far, to detect looping models.
   const seenCalls = new Set<string>();
 
-  const runRound = async (
-    withTools: boolean,
-  ): Promise<{ data?: AnthropicResponse; error?: string }> => {
+  const buildPayload = (withTools: boolean, stream: boolean): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
       model: model || ANTHROPIC_DEFAULT_MODEL,
       max_tokens: ANTHROPIC_MAX_TOKENS,
@@ -448,12 +588,21 @@ async function sendAnthropicMessage(
       payload["tools"] = toAnthropicTools();
     }
 
+    if (stream) {
+      payload["stream"] = true;
+    }
+    return payload;
+  };
+
+  const runNonStreamingRound = async (
+    withTools: boolean,
+  ): Promise<{ data?: AnthropicResponse; error?: string; stopped?: boolean }> => {
     try {
       const data = await invoke<AnthropicResponse>("zen_chat", {
         baseUrl,
         apiKey,
         provider: "anthropic",
-        payload,
+        payload: buildPayload(withTools, false),
       });
       return { data };
     } catch (err) {
@@ -464,32 +613,55 @@ async function sendAnthropicMessage(
   };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const { data, error } = await runRound(useTools);
-
-    if (error) {
-      // Some models reject the `tools` field; retry once without it.
-      if (useTools && /tool/i.test(error)) {
-        useTools = false;
-        toolContext = [];
-
-        const retry = await runRound(false);
-        if (retry.error) {
-          return { content: "", error: retry.error };
-        }
-        const text = textFromAnthropicBlocks(retry.data?.content);
-        if (text == null) {
-          return {
-            content: "",
-            error: "API response did not contain a message.",
-          };
-        }
-        return {
-          content: `[Web search unavailable — answering without it]\n\n${text}`,
-        };
-      }
-      return { content: "", error };
+    if (options.signal?.aborted) {
+      return { content: streamedContent, stopped: true };
     }
 
+    let result = useStream
+      ? await streamChat(baseUrl, apiKey, "anthropic", buildPayload(useTools, true), options, (text) => {
+          streamedContent += text;
+          options.onDelta?.(text);
+        })
+      : await runNonStreamingRound(useTools);
+
+    if (result.stopped) {
+      return { content: streamedContent, stopped: true };
+    }
+
+    if (result.error) {
+      // Some providers don't support SSE streaming; retry the round without
+      // it (the answer then appears all at once instead of live).
+      if (useStream && /stream|sse|chunk|event/i.test(result.error)) {
+        useStream = false;
+        result = await runNonStreamingRound(useTools);
+      }
+
+      if (result.error) {
+        // Some models reject the `tools` field; retry once without it.
+        if (useTools && /tool/i.test(result.error)) {
+          useTools = false;
+          toolContext = [];
+
+          const retry = await runNonStreamingRound(false);
+          if (retry.error) {
+            return { content: "", error: retry.error };
+          }
+          const text = textFromAnthropicBlocks(retry.data?.content);
+          if (text == null) {
+            return {
+              content: "",
+              error: "API response did not contain a message.",
+            };
+          }
+          return {
+            content: `[Web search unavailable — answering without it]\n\n${text}`,
+          };
+        }
+        return { content: "", error: result.error };
+      }
+    }
+
+    const data = result.data as AnthropicResponse | undefined;
     const blocks = data?.content ?? [];
     const toolUses = blocks.filter((b) => b.type === "tool_use");
 

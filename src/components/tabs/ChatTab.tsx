@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useChatStore } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
@@ -34,6 +34,7 @@ export default function ChatTab() {
   const isSending = useChatStore((s) => s.isSending);
   const setIsSending = useChatStore((s) => s.setIsSending);
   const setError = useChatStore((s) => s.setError);
+  const setStreamingText = useChatStore((s) => s.setStreamingText);
 
   const applications = useApplicationStore((s) => s.applications);
   const applicationsLoaded = useApplicationStore((s) => s.isLoaded);
@@ -50,6 +51,9 @@ export default function ChatTab() {
   const [showConfig, setShowConfig] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  // Aborts the in-flight generation (used by the Stop button / Escape).
+  const controllerRef = useRef<AbortController | null>(null);
+
   // ── Load on mount ──
   useEffect(() => {
     if (!configLoaded) loadConfig();
@@ -57,8 +61,27 @@ export default function ChatTab() {
 
   // ── Load the selected application's thread ──
   useEffect(() => {
+    // Abort any generation still in flight for the previous thread.
+    controllerRef.current?.abort();
+    controllerRef.current = null;
     void switchThread(selectedId);
   }, [selectedId, switchThread]);
+
+  // ── Stop generation (Stop button / Escape key) ──
+  const handleStop = useCallback(() => {
+    controllerRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isSending) {
+        e.preventDefault();
+        handleStop();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isSending, handleStop]);
 
   // ── Handle reset chat ──
   const handleReset = useCallback(() => {
@@ -115,31 +138,58 @@ export default function ChatTab() {
       });
 
       // Send to API
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      setStreamingText("");
       setIsSending(true);
       setError(null);
 
       const threadAtSend = useChatStore.getState().activeThreadId;
       const { messages } = useChatStore.getState();
-      const result = await sendMessage(messages, config, systemPrompt);
+      const result = await sendMessage(messages, config, systemPrompt, {
+        signal: controller.signal,
+        onDelta: (chunk) => {
+          // Only render text while still in the thread it was sent from.
+          if (useChatStore.getState().activeThreadId === threadAtSend) {
+            setStreamingText((prev) => prev + chunk);
+          }
+        },
+      });
 
       // Drop the reply if the user switched applications while it was in flight
       if (useChatStore.getState().activeThreadId !== threadAtSend) {
         setIsSending(false);
+        setStreamingText("");
+        controllerRef.current = null;
         return;
       }
 
       if (result.error) {
         setError(result.error);
         setIsSending(false);
+        setStreamingText("");
+      } else if (result.stopped) {
+        // User stopped mid-answer: keep whatever was generated so far.
+        const partial = useChatStore.getState().streamingText;
+        if (partial.trim()) {
+          addMessage({
+            role: "assistant",
+            content: partial,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        setStreamingText("");
+        setIsSending(false);
       } else {
-        const assistantMsg = {
-          role: "assistant" as const,
+        addMessage({
+          role: "assistant",
           content: result.content,
           timestamp: new Date().toISOString(),
-        };
-        addMessage(assistantMsg);
+        });
+        setStreamingText("");
         setIsSending(false);
       }
+      controllerRef.current = null;
     },
     [
       isSending,
@@ -150,6 +200,7 @@ export default function ChatTab() {
       config,
       setIsSending,
       setError,
+      setStreamingText,
     ],
   );
 
@@ -331,6 +382,7 @@ export default function ChatTab() {
         value={inputValue}
         onChange={setInputValue}
         onSend={handleSend}
+        onStop={handleStop}
         disabled={isSending}
       />
     </div>

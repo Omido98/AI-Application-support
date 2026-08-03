@@ -20,6 +20,7 @@ function LoadingDots() {
 export default function MessageList({ onStart }: { onStart?: () => void }) {
   const messages = useChatStore((s) => s.messages);
   const isSending = useChatStore((s) => s.isSending);
+  const streamingText = useChatStore((s) => s.streamingText);
   const error = useChatStore((s) => s.error);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -37,10 +38,13 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
   const messageKey = (msg: { timestamp: string; content: string }) =>
     msg.timestamp + msg.content.slice(0, 40);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive. During live streaming,
+  // scroll instantly (no smooth animation) so every token is visible.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isSending]);
+    bottomRef.current?.scrollIntoView({
+      behavior: isSending ? "auto" : "smooth",
+    });
+  }, [messages, isSending, streamingText]);
 
   useEffect(() => {
     return () => {
@@ -176,13 +180,25 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
         );
       })}
 
-      {isSending && (
+      {isSending && streamingText ? (
+        <div className="flex justify-start">
+          <div className="max-w-[80%] rounded-xl px-4 py-2.5 text-sm leading-relaxed break-words bg-surface text-text-primary border border-border">
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown>{streamingText}</ReactMarkdown>
+            </div>
+            <span
+              className="inline-block w-2 h-4 align-middle bg-primary/70 animate-pulse ml-0.5"
+              aria-hidden="true"
+            />
+          </div>
+        </div>
+      ) : isSending ? (
         <div className="flex justify-start">
           <div className="max-w-[80%] rounded-xl bg-surface text-text-primary border border-border">
             <LoadingDots />
           </div>
         </div>
-      )}
+      ) : null}
 
       {error && (
         <div className="flex justify-center">

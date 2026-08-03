@@ -17,7 +17,11 @@ export async function loadApiKeyFromKeychain(): Promise<string | null> {
     return (await invoke<string | null>("keyring_get", {
       key: KEYCHAIN_ACCOUNT,
     })) ?? null;
-  } catch {
+  } catch (err) {
+    console.warn(
+      "Keychain read failed; falling back to config.json:",
+      typeof err === "string" ? err : err,
+    );
     return null;
   }
 }
@@ -26,7 +30,11 @@ export async function saveApiKeyToKeychain(value: string): Promise<boolean> {
   try {
     await invoke("keyring_set", { key: KEYCHAIN_ACCOUNT, value });
     return true;
-  } catch {
+  } catch (err) {
+    console.warn(
+      "Keychain write failed; the key is stored in config.json instead:",
+      typeof err === "string" ? err : err,
+    );
     return false;
   }
 }

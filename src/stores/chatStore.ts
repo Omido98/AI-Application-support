@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { saveJson, loadJson, deleteFile } from "@/utils/storage";
 import {
+  deleteApiKeyFromKeychain,
   loadApiKeyFromKeychain,
   saveApiKeyToKeychain,
 } from "@/utils/keychain";
@@ -105,6 +106,8 @@ interface ChatState {
   isSending: boolean;
   /** Last error message, if any */
   error: string | null;
+  /** Text of the assistant message currently being generated (live stream). */
+  streamingText: string;
 
   /** API configuration */
   config: ApiConfig;
@@ -129,6 +132,10 @@ interface ChatState {
   // Sending state
   setIsSending: (sending: boolean) => void;
   setError: (error: string | null) => void;
+  /** Set the live-streamed assistant text (string, or updater for appends). */
+  setStreamingText: (
+    updater: string | ((prev: string) => string),
+  ) => void;
 }
 
 // ──────────────────────────────────────────────
@@ -140,6 +147,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   configLoaded: false,
   isSending: false,
   error: null,
+  streamingText: "",
 
   config: { ...defaultApiConfig },
 
@@ -162,31 +170,45 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  switchThread: async (applicationId) => {
-    const current = get();
-    if (current.activeThreadId === applicationId && current.threadLoaded) {
-      return;
-    }
-    cancelPendingSave();
-    if (!applicationId) {
-      set({ messages: [], activeThreadId: null, threadLoaded: true });
-      return;
-    }
-    set({ threadLoaded: false, activeThreadId: applicationId });
-    const data = await loadJson<ChatMessage[]>(`chat_${applicationId}.json`);
-    set({ messages: data ?? [], threadLoaded: true });
-  },
+    switchThread: async (applicationId) => {
+      const current = get();
+      if (current.activeThreadId === applicationId && current.threadLoaded) {
+        return;
+      }
+      cancelPendingSave();
+      if (!applicationId) {
+        set({
+          messages: [],
+          activeThreadId: null,
+          threadLoaded: true,
+          streamingText: "",
+        });
+        return;
+      }
+      set({
+        threadLoaded: false,
+        activeThreadId: applicationId,
+        streamingText: "",
+      });
+      const data = await loadJson<ChatMessage[]>(`chat_${applicationId}.json`);
+      set({ messages: data ?? [], threadLoaded: true });
+    },
 
   // ── Config ──
 
   setConfig: async (cfg) => {
     set({ config: cfg });
-    // Prefer the OS keychain; only fall back to config.json when unavailable.
-    const keyInKeychain = await saveApiKeyToKeychain(cfg.apiKey);
-    await saveJson("config.json", {
-      ...cfg,
-      apiKey: keyInKeychain ? "" : cfg.apiKey,
-    });
+    // Store the key in BOTH the OS keychain and config.json, so the config
+    // survives even when the keychain is unavailable or fails to read back.
+    // The keychain is still preferred when loading (see loadConfig).
+    if (cfg.apiKey) {
+      await saveApiKeyToKeychain(cfg.apiKey);
+    } else {
+      // Key cleared: remove any stale keychain entry so an old key cannot
+      // resurface on the next launch.
+      await deleteApiKeyFromKeychain();
+    }
+    await saveJson("config.json", cfg);
   },
 
   loadConfig: async () => {
@@ -232,4 +254,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setIsSending: (sending) => set({ isSending: sending }),
   setError: (error) => set({ error }),
+  setStreamingText: (updater) =>
+    set((s) => ({
+      streamingText:
+        typeof updater === "function"
+          ? (updater as (prev: string) => string)(s.streamingText)
+          : updater,
+    })),
 }));
