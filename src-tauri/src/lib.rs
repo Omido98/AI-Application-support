@@ -1,8 +1,14 @@
 ﻿use ego_tree::NodeRef;
+use futures_util::StreamExt;
 use keyring::Entry;
 use scraper::{ElementRef, Node, Selector};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tauri::ipc::Channel;
+use tauri::State;
+use tokio_util::sync::CancellationToken;
 
 /// Service name under which API keys are stored in the OS keychain.
 const KEYCHAIN_SERVICE: &str = "com.ai-application-support.app";
@@ -136,6 +142,520 @@ async fn zen_chat(
     }
 
     serde_json::from_str(&text).map_err(|e| format!("Invalid response from API: {e}"))
+}
+
+// ──────────────────────────────────────────────
+// Streamed chat (SSE) with cancellation
+// ──────────────────────────────────────────────
+
+/// Registry of in-flight streaming requests, keyed by request id. Used so the
+/// frontend can cancel a stream mid-generation (see zen_chat_stream_cancel).
+#[derive(Clone, Default)]
+struct StreamState(Arc<Mutex<HashMap<String, CancellationToken>>>);
+
+/// Events emitted to the frontend while a chat response streams in.
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum ChatStreamEvent {
+    /// A chunk of answer text (rendered live by the chat UI).
+    Delta { text: String },
+    /// The stream finished: `data` is the fully assembled response JSON in
+    /// the same shape zen_chat returns (OpenAI or Anthropic).
+    Done { data: serde_json::Value },
+    /// The stream failed before completing.
+    Error { message: String },
+}
+
+/// A tool call being assembled from OpenAI streaming deltas.
+#[derive(Default)]
+struct OpenAIToolCallAcc {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+/// A content block being assembled from Anthropic streaming events.
+struct AnthropicBlockAcc {
+    block_type: String,
+    text: String,
+    id: Option<String>,
+    name: Option<String>,
+    input_json: String,
+}
+
+/// Accumulates SSE events for one streamed response, in either the OpenAI or
+/// the Anthropic wire format, and emits text deltas to the frontend.
+struct StreamAccumulator {
+    provider: String,
+    openai_content: String,
+    openai_tool_calls: Vec<OpenAIToolCallAcc>,
+    openai_finished: bool,
+    anthropic_blocks: Vec<AnthropicBlockAcc>,
+    anthropic_stop_reason: Option<String>,
+    anthropic_finished: bool,
+}
+
+impl StreamAccumulator {
+    fn new(provider: &str) -> Self {
+        Self {
+            provider: provider.to_string(),
+            openai_content: String::new(),
+            openai_tool_calls: Vec::new(),
+            openai_finished: false,
+            anthropic_blocks: Vec::new(),
+            anthropic_stop_reason: None,
+            anthropic_finished: false,
+        }
+    }
+
+    /// True once the response signals the end of the stream.
+    fn is_finished(&self) -> bool {
+        if self.provider == "anthropic" {
+            self.anthropic_finished
+        } else {
+            self.openai_finished
+        }
+    }
+
+    /// Process one SSE `data:` payload.
+    fn feed(
+        &mut self,
+        data: &str,
+        on_event: &Channel<ChatStreamEvent>,
+    ) -> Result<(), String> {
+        if data == "[DONE]" {
+            self.openai_finished = true;
+            return Ok(());
+        }
+        let parsed: serde_json::Value = serde_json::from_str(data)
+            .map_err(|e| format!("Failed to parse streamed event: {e}"))?;
+        if self.provider == "anthropic" {
+            self.feed_anthropic(&parsed, on_event)
+        } else {
+            self.feed_openai(&parsed, on_event)
+        }
+    }
+
+    fn feed_openai(
+        &mut self,
+        parsed: &serde_json::Value,
+        on_event: &Channel<ChatStreamEvent>,
+    ) -> Result<(), String> {
+        let Some(choice) = parsed.pointer("/choices/0") else {
+            return Ok(());
+        };
+        if let Some(reason) = choice.get("finish_reason") {
+            if !reason.is_null() {
+                self.openai_finished = true;
+            }
+        }
+        let Some(delta) = choice.get("delta") else {
+            return Ok(());
+        };
+
+        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+            if !content.is_empty() {
+                self.openai_content.push_str(content);
+                on_event
+                    .send(ChatStreamEvent::Delta {
+                        text: content.to_string(),
+                    })
+                    .map_err(|e| format!("Failed to send stream event: {e}"))?;
+            }
+        }
+
+        if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+            for call in tool_calls {
+                let index = call
+                    .get("index")
+                    .and_then(|i| i.as_u64())
+                    .unwrap_or(0) as usize;
+                while self.openai_tool_calls.len() <= index {
+                    self.openai_tool_calls
+                        .push(OpenAIToolCallAcc::default());
+                }
+                let acc = &mut self.openai_tool_calls[index];
+                if let Some(id) = call.get("id").and_then(|i| i.as_str()) {
+                    acc.id = Some(id.to_string());
+                }
+                if let Some(name) = call
+                    .pointer("/function/name")
+                    .and_then(|n| n.as_str())
+                {
+                    acc.name = Some(name.to_string());
+                }
+                if let Some(args) = call
+                    .pointer("/function/arguments")
+                    .and_then(|a| a.as_str())
+                {
+                    acc.arguments.push_str(args);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn feed_anthropic(
+        &mut self,
+        parsed: &serde_json::Value,
+        on_event: &Channel<ChatStreamEvent>,
+    ) -> Result<(), String> {
+        let event_type = parsed
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or("");
+        match event_type {
+            "content_block_start" => {
+                let block = parsed.get("content_block").cloned().unwrap_or_default();
+                let block_type = block
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("text")
+                    .to_string();
+                let mut acc = AnthropicBlockAcc {
+                    block_type,
+                    text: String::new(),
+                    id: block
+                        .get("id")
+                        .and_then(|i| i.as_str())
+                        .map(|s| s.to_string()),
+                    name: block
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .map(|s| s.to_string()),
+                    input_json: String::new(),
+                };
+                if acc.block_type != "tool_use" {
+                    acc.id = None;
+                    acc.name = None;
+                }
+                self.anthropic_blocks.push(acc);
+            }
+            "content_block_delta" => {
+                let delta = parsed.get("delta").cloned().unwrap_or_default();
+                match delta
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                {
+                    "text_delta" => {
+                        let text = delta
+                            .get("text")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("");
+                        if !text.is_empty() {
+                            if let Some(last) = self.anthropic_blocks.last_mut() {
+                                last.text.push_str(text);
+                            } else {
+                                self.anthropic_blocks.push(AnthropicBlockAcc {
+                                    block_type: "text".to_string(),
+                                    text: text.to_string(),
+                                    id: None,
+                                    name: None,
+                                    input_json: String::new(),
+                                });
+                            }
+                            on_event
+                                .send(ChatStreamEvent::Delta {
+                                    text: text.to_string(),
+                                })
+                                .map_err(|e| {
+                                    format!("Failed to send stream event: {e}")
+                                })?;
+                        }
+                    }
+                    "input_json_delta" => {
+                        let partial = delta
+                            .get("partial_json")
+                            .and_then(|p| p.as_str())
+                            .unwrap_or("");
+                        if let Some(last) = self.anthropic_blocks.last_mut() {
+                            last.input_json.push_str(partial);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            "message_delta" => {
+                if let Some(stop) = parsed
+                    .pointer("/delta/stop_reason")
+                    .and_then(|r| r.as_str())
+                {
+                    self.anthropic_stop_reason = Some(stop.to_string());
+                }
+            }
+            "message_stop" => {
+                self.anthropic_finished = true;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Assemble the final response JSON in the same shape the non-streaming
+    /// zen_chat command returns.
+    fn finish(&self) -> serde_json::Value {
+        if self.provider == "anthropic" {
+            let content: Vec<serde_json::Value> = self
+                .anthropic_blocks
+                .iter()
+                .map(|block| {
+                    if block.block_type == "tool_use" {
+                        let input: serde_json::Value =
+                            serde_json::from_str(&block.input_json)
+                                .unwrap_or_else(|_| serde_json::json!({}));
+                        serde_json::json!({
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": input,
+                        })
+                    } else {
+                        serde_json::json!({ "type": "text", "text": block.text })
+                    }
+                })
+                .collect();
+            serde_json::json!({
+                "content": content,
+                "stop_reason": self.anthropic_stop_reason,
+            })
+        } else {
+            let content = if self.openai_content.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::Value::String(self.openai_content.clone())
+            };
+            let tool_calls: Vec<serde_json::Value> = self
+                .openai_tool_calls
+                .iter()
+                .filter(|c| c.id.is_some() && c.name.is_some())
+                .map(|c| {
+                    serde_json::json!({
+                        "id": c.id,
+                        "type": "function",
+                        "function": { "name": c.name, "arguments": c.arguments },
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": content,
+                        "tool_calls": if tool_calls.is_empty() {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::Value::Array(tool_calls)
+                        },
+                    }
+                }]
+            })
+        }
+    }
+}
+
+/// Read an SSE response body chunk-by-chunk, feed events into the
+/// accumulator (emitting text deltas as they arrive), and finish with the
+/// fully assembled response. When `token` is cancelled, the HTTP connection
+/// is dropped and whatever text was accumulated so far is still delivered.
+async fn stream_sse(
+    response: reqwest::Response,
+    provider: &str,
+    on_event: &Channel<ChatStreamEvent>,
+    token: &CancellationToken,
+) -> Result<(), String> {
+    let mut stream = response.bytes_stream();
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut event_data = String::new();
+    let mut acc = StreamAccumulator::new(provider);
+
+    let consume = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk
+                .map_err(|e| format!("Failed to read response stream: {e}"))?;
+            buffer.extend_from_slice(&chunk);
+            loop {
+                let Some(pos) = buffer.iter().position(|&b| b == b'\n') else {
+                    break;
+                };
+                let line: Vec<u8> = buffer.drain(..=pos).collect();
+                let line = String::from_utf8_lossy(&line);
+                let line = line.trim_end_matches(['\r', '\n']);
+                if line.is_empty() {
+                    if !event_data.is_empty() {
+                        acc.feed(&event_data, on_event)?;
+                        event_data.clear();
+                        if acc.is_finished() {
+                            return Ok::<(), String>(());
+                        }
+                    }
+                } else if let Some(data) = line.strip_prefix("data:") {
+                    if !event_data.is_empty() {
+                        event_data.push('\n');
+                    }
+                    event_data.push_str(data.trim_start());
+                }
+                // "event:", "id:" and "retry:" lines are ignored.
+            }
+        }
+        // A trailing event that was not terminated by a blank line.
+        if !event_data.is_empty() {
+            acc.feed(&event_data, on_event)?;
+        }
+        Ok::<(), String>(())
+    };
+
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => {}
+        result = consume => result?,
+    }
+
+    on_event
+        .send(ChatStreamEvent::Done {
+            data: acc.finish(),
+        })
+        .map_err(|e| format!("Failed to send stream event: {e}"))
+}
+
+/// Send a chat request with `stream: true` and forward the response to the
+/// frontend via `on_event`. Returns the fully assembled response JSON in the
+/// same shape zen_chat returns (works for providers that ignore streaming
+/// and reply with a plain JSON body).
+async fn run_stream(
+    base_url: &str,
+    api_key: &str,
+    provider: &str,
+    payload: &serde_json::Value,
+    on_event: &Channel<ChatStreamEvent>,
+    token: &CancellationToken,
+) -> Result<(), String> {
+    let base = base_url.trim_end_matches('/').to_string();
+    let url = if provider == "anthropic" {
+        anthropic_endpoint(&base, "/messages")
+    } else {
+        format!("{base}/chat/completions")
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
+    let mut request = client.post(&url).json(payload);
+    if provider == "anthropic" {
+        request = request
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01");
+    } else {
+        request = request.bearer_auth(api_key);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let text = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response: {e}"))?;
+        let snippet: String = text.chars().take(500).collect();
+        return Err(format!("API error ({status}): {snippet}"));
+    }
+
+    // Providers that ignore `stream: true` answer with a plain JSON body;
+    // treat anything that is not text/event-stream as such.
+    let is_sse = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.contains("text/event-stream"))
+        .unwrap_or(true);
+
+    if is_sse {
+        return stream_sse(response, provider, on_event, token).await;
+    }
+
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+    let data: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Invalid response from API: {e}"))?;
+    on_event
+        .send(ChatStreamEvent::Done { data })
+        .map_err(|e| format!("Failed to send stream event: {e}"))
+}
+
+/// Unique ids for in-flight streaming requests.
+static STREAM_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+fn stream_request_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!(
+        "{nanos}-{}",
+        STREAM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
+/// Start a streamed chat request. Returns a request id immediately; response
+/// chunks arrive as events on `on_event` (`delta` / `done` / `error`).
+#[tauri::command]
+fn zen_chat_stream(
+    base_url: String,
+    api_key: String,
+    provider: String,
+    payload: serde_json::Value,
+    on_event: Channel<ChatStreamEvent>,
+    state: State<'_, StreamState>,
+) -> Result<String, String> {
+    let id = stream_request_id();
+    let token = CancellationToken::new();
+    state
+        .0
+        .lock()
+        .map_err(|e| format!("Stream registry lock poisoned: {e}"))?
+        .insert(id.clone(), token.clone());
+
+    let registry = state.inner().clone();
+    let task_id = id.clone();
+    tauri::async_runtime::spawn(async move {
+        let result =
+            run_stream(&base_url, &api_key, &provider, &payload, &on_event, &token).await;
+        if let Err(message) = result {
+            let _ = on_event.send(ChatStreamEvent::Error { message });
+        }
+        if let Ok(mut map) = registry.0.lock() {
+            map.remove(&task_id);
+        }
+    });
+
+    Ok(id)
+}
+
+/// Cancel an in-flight streaming request started by zen_chat_stream. The
+/// HTTP connection is closed and any text accumulated so far is delivered as
+/// a final `done` event. No-op when the request already finished.
+#[tauri::command]
+fn zen_chat_stream_cancel(
+    id: String,
+    state: State<'_, StreamState>,
+) -> Result<(), String> {
+    if let Some(token) = state
+        .0
+        .lock()
+        .map_err(|e| format!("Stream registry lock poisoned: {e}"))?
+        .remove(&id)
+    {
+        token.cancel();
+    }
+    Ok(())
 }
 
 /// Search the web via DuckDuckGo's HTML endpoint and return the top ~5 results,
@@ -471,6 +991,7 @@ fn keyring_delete(key: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(StreamState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -479,6 +1000,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             zen_list_models,
             zen_chat,
+            zen_chat_stream,
+            zen_chat_stream_cancel,
             zen_web_search,
             zen_fetch_page,
             zen_fetch_zen_pricing,

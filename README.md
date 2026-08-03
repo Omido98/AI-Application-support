@@ -78,6 +78,14 @@ Useful commands:
 - `npm run build:arm64` / `npm run build:x64` — Windows ARM64 / x64 Tauri bundles
 - `npm run build:mac-arm64` — macOS ARM64 bundle
 
+## Installing
+
+Installers and the macOS `.app.tar.gz` (no-install app bundle) are
+available on the [GitHub Releases
+page](https://github.com/Omido98/AI-Application-support/releases/latest).
+If you are installing on a managed/work laptop, see
+[docs/installing-on-work-laptops.md](docs/installing-on-work-laptops.md).
+
 ## Release process
 
 Releases are built by CI (`.github/workflows/release.yml`) when a `v*` tag is
