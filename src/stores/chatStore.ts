@@ -109,6 +109,10 @@ interface ChatState {
   /** Text of the assistant message currently being generated (live stream). */
   streamingText: string;
 
+  /** Unsent message drafts, keyed by thread (application) id. Kept in
+   * memory so switching tabs does not wipe what the user is typing. */
+  drafts: Record<string, string>;
+
   /** API configuration */
   config: ApiConfig;
 
@@ -136,6 +140,8 @@ interface ChatState {
   setStreamingText: (
     updater: string | ((prev: string) => string),
   ) => void;
+  /** Save the unsent message draft for the current thread. */
+  setDraft: (value: string) => void;
 }
 
 // ──────────────────────────────────────────────
@@ -148,6 +154,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isSending: false,
   error: null,
   streamingText: "",
+  drafts: {},
 
   config: { ...defaultApiConfig },
 
@@ -166,6 +173,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ messages: [] });
     const threadId = get().activeThreadId;
     if (threadId) {
+      set((s) => {
+        const drafts = { ...s.drafts };
+        delete drafts[threadId];
+        return { drafts };
+      });
       await deleteFile(`chat_${threadId}.json`);
     }
   },
@@ -260,5 +272,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         typeof updater === "function"
           ? (updater as (prev: string) => string)(s.streamingText)
           : updater,
+    })),
+  setDraft: (value) =>
+    set((s) => ({
+      drafts: {
+        ...s.drafts,
+        [get().activeThreadId ?? ""]: value,
+      },
     })),
 }));
