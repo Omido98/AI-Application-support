@@ -35,6 +35,10 @@ export default function ChatTab() {
   const setIsSending = useChatStore((s) => s.setIsSending);
   const setError = useChatStore((s) => s.setError);
   const setStreamingText = useChatStore((s) => s.setStreamingText);
+  const inputValue = useChatStore(
+    (s) => s.drafts[s.activeThreadId ?? ""] ?? "",
+  );
+  const setDraft = useChatStore((s) => s.setDraft);
 
   const applications = useApplicationStore((s) => s.applications);
   const applicationsLoaded = useApplicationStore((s) => s.isLoaded);
@@ -47,7 +51,6 @@ export default function ChatTab() {
   const setActiveTab = useAppStore((s) => s.setActiveTab);
 
   // ── Input state ──
-  const [inputValue, setInputValue] = useState("");
   const [showConfig, setShowConfig] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -87,9 +90,9 @@ export default function ChatTab() {
   const handleReset = useCallback(() => {
     clearMessages();
     setError(null);
-    setInputValue("");
+    setDraft("");
     setConfirmReset(false);
-  }, [clearMessages, setError]);
+  }, [clearMessages, setError, setDraft]);
 
   // ── Send a given text as a user message ──
   const sendText = useCallback(
@@ -98,7 +101,7 @@ export default function ChatTab() {
       if (!trimmed || isSending || !application) return;
 
       // Clear input immediately
-      setInputValue("");
+      setDraft("");
 
       // Add user message
       const userMsg = {
@@ -201,6 +204,7 @@ export default function ChatTab() {
       setIsSending,
       setError,
       setStreamingText,
+      setDraft,
     ],
   );
 
@@ -380,7 +384,7 @@ export default function ChatTab() {
       {/* Input */}
       <MessageInput
         value={inputValue}
-        onChange={setInputValue}
+        onChange={setDraft}
         onSend={handleSend}
         onStop={handleStop}
         disabled={isSending}
