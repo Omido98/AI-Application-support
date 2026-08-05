@@ -74,7 +74,7 @@ export default function BioSection() {
             hasContent
               ? "Clear the bio to regenerate a draft"
               : !hasApiKey
-                ? "Connect an API key in the Chat tab to use this"
+                ? "Connect an API key in Settings to use this"
                 : "Generate a draft bio"
           }
         >
@@ -85,7 +85,7 @@ export default function BioSection() {
       <CardContent className="space-y-3">
         <p className="text-xs text-text-muted">
           A short introduction about yourself for your CV. The AI can help you
-          draft one if you have connected an API key in the Chat tab.
+          draft one if you have connected an API key in Settings.
         </p>
         <Textarea
           className={textareaClass}

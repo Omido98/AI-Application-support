@@ -128,7 +128,8 @@ interface ChatState {
   switchThread: (applicationId: string | null) => Promise<void>;
 
   // Config actions
-  setConfig: (cfg: ApiConfig) => Promise<void>;
+  /** Merge the given fields into the stored config and persist the result. */
+  setConfig: (cfg: Partial<ApiConfig>) => Promise<void>;
   loadConfig: () => Promise<void>;
   /** Mark config as not yet configured (e.g. user clicks Edit) */
   resetConfig: () => void;
@@ -209,7 +210,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Config ──
 
   setConfig: async (cfg) => {
-    set({ config: cfg });
+    const next = { ...get().config, ...cfg };
+    set({ config: next });
     // Store the key in BOTH the OS keychain and config.json, so the config
     // survives even when the keychain is unavailable or fails to read back.
     // The keychain is still preferred when loading (see loadConfig).
@@ -220,7 +222,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // resurface on the next launch.
       await deleteApiKeyFromKeychain();
     }
-    await saveJson("config.json", cfg);
+    await saveJson("config.json", next);
   },
 
   loadConfig: async () => {
