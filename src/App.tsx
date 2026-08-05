@@ -20,7 +20,7 @@ type TabId = "application" | "chat" | "profile";
 
 const tabs: { id: TabId; label: string }[] = [
   { id: "application", label: "Application" },
-  { id: "chat", label: "Chat" },
+  { id: "chat", label: "Cover Letter Developer" },
   { id: "profile", label: "Profile" },
 ];
 
@@ -112,7 +112,7 @@ function App() {
       case "application":
         return <ApplicationTab />;
       case "chat":
-        return <ChatTab />;
+        return <ChatTab onOpenSettings={() => setShowSettings(true)} />;
       case "profile":
         return <ProfileTab />;
       default:

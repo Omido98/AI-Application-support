@@ -5,7 +5,7 @@ import { useProfileStore } from "@/stores/profileStore";
 import { useAppStore } from "@/stores/useAppStore";
 import { sendMessage } from "@/utils/api";
 import { buildSystemPrompt } from "@/utils/systemPrompt";
-import ApiConfig from "@/components/chat/ApiConfig";
+import ChatSettings from "@/components/chat/ChatSettings";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,12 @@ import {
 } from "@/components/ui/dialog";
 import { Settings, Trash2 } from "lucide-react";
 
-export default function ChatTab() {
+interface ChatTabProps {
+  /** Opens the general Settings dialog (used to configure the API). */
+  onOpenSettings: () => void;
+}
+
+export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   // ── Stores ──
   const configLoaded = useChatStore((s) => s.configLoaded);
   const config = useChatStore((s) => s.config);
@@ -233,9 +238,14 @@ export default function ChatTab() {
     );
   }
 
-  // ── Show API config when explicitly opened, or when not yet configured ──
+  // ── Show chat agent settings (web search + prompt) when explicitly opened ──
   if (showConfig) {
-    return <ApiConfig onDone={() => setShowConfig(false)} />;
+    return (
+      <ChatSettings
+        onDone={() => setShowConfig(false)}
+        onOpenSettings={onOpenSettings}
+      />
+    );
   }
 
   // ── No API key yet: explain and offer to configure ──
@@ -253,7 +263,7 @@ export default function ChatTab() {
         </p>
         <Button
           className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
-          onClick={() => setShowConfig(true)}
+          onClick={onOpenSettings}
         >
           <Settings className="size-4 mr-1.5" />
           Configure API
@@ -376,8 +386,8 @@ export default function ChatTab() {
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => setShowConfig(true)}
-                title="API settings"
-                aria-label="API settings"
+                title="Chat agent settings"
+                aria-label="Chat agent settings"
               >
                 <Settings className="size-4 text-text-secondary" />
               </Button>

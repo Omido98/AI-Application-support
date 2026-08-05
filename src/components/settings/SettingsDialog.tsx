@@ -16,6 +16,7 @@ import {
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
+import ApiConfigForm from "./ApiConfigForm";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -172,12 +173,12 @@ export default function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Customize the appearance of the app, manage your data, and update
-            the app.
+            Customize the appearance of the app, configure your AI provider,
+            manage your data, and update the app.
           </DialogDescription>
         </DialogHeader>
 
@@ -299,6 +300,14 @@ export default function SettingsDialog({
             {backupStatus && (
               <p className="text-xs text-text-muted">{backupStatus}</p>
             )}
+          </div>
+
+          {/* API configuration */}
+          <div className="space-y-2">
+            <Label className="text-text-secondary text-xs">
+              API configuration
+            </Label>
+            <ApiConfigForm />
           </div>
 
           {/* Updates */}
