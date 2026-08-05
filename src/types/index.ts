@@ -69,15 +69,28 @@ export interface Language {
   fluency: FluencyLevel;
 }
 
+export interface Interest {
+  id: string;
+  name: string;
+}
+
 export interface ProfileData {
+  /** Basic contact / header details used in the CV and for personalising letters. */
+  fullName: string;
+  email: string;
+  city: string;
+  country: string;
+  /** Public profile URL (e.g. LinkedIn) the AI can reference for extra context. */
+  linkedinUrl: string;
+  /** Short CV intro written by the user (or AI-generated). */
+  bio: string;
+  interests: Interest[];
   education: Education[];
   coverLetters: CoverLetter[];
   workExperience: WorkExperience[];
   certifications: Certification[];
   skills: Skill[];
   languages: Language[];
-  /** Public profile URL (e.g. LinkedIn) the AI can reference for extra context. */
-  linkedinUrl?: string;
 }
 
 export type ApplicationStatus =

@@ -7,6 +7,7 @@ import type {
   Certification,
   Skill,
   Language,
+  Interest,
   ProfileData,
 } from "@/types";
 
@@ -19,13 +20,19 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 function writeSnapshot() {
   const s = useProfileStore.getState();
   const data: ProfileData = {
+    fullName: s.fullName,
+    email: s.email,
+    city: s.city,
+    country: s.country,
+    linkedinUrl: s.linkedinUrl,
+    bio: s.bio,
+    interests: s.interests,
     education: s.education,
     coverLetters: s.coverLetters,
     workExperience: s.workExperience,
     certifications: s.certifications,
     skills: s.skills,
     languages: s.languages,
-    linkedinUrl: s.linkedinUrl,
   };
   return saveJson("profile.json", data);
 }
@@ -57,8 +64,15 @@ interface ProfileState extends ProfileData {
   /** Load profile.json from disk (or localStorage fallback) */
   loadProfile: () => Promise<void>;
 
-  /** Public profile URL (e.g. LinkedIn) for the AI to reference */
-  setLinkedinUrl: (value: string) => void;
+  /** Set the personal details (name, contact, location, linkedin URL) */
+  setPersonalDetails: (
+    patch: Partial<
+      Pick<ProfileData, "fullName" | "email" | "city" | "country" | "linkedinUrl">
+    >,
+  ) => void;
+
+  /** Set the CV bio text */
+  setBio: (value: string) => void;
 
   // Education actions
   setEducation: (items: Education[]) => void;
@@ -90,6 +104,12 @@ interface ProfileState extends ProfileData {
   updateSkill: (id: string, patch: Partial<Skill>) => void;
   removeSkill: (id: string) => void;
 
+  // Interest actions
+  setInterests: (items: Interest[]) => void;
+  addInterest: (item: Interest) => void;
+  updateInterest: (id: string, patch: Partial<Interest>) => void;
+  removeInterest: (id: string) => void;
+
   // Language actions
   setLanguages: (items: Language[]) => void;
   addLanguage: (item: Language) => void;
@@ -103,13 +123,19 @@ interface ProfileState extends ProfileData {
 
 export const useProfileStore = create<ProfileState>((set) => ({
   // ── Data ──
+  fullName: "",
+  email: "",
+  city: "",
+  country: "",
+  linkedinUrl: "",
+  bio: "",
+  interests: [],
   education: [],
   coverLetters: [],
   workExperience: [],
   certifications: [],
   skills: [],
   languages: [],
-  linkedinUrl: "",
   isLoaded: false,
 
   // ── Load ──
@@ -117,13 +143,19 @@ export const useProfileStore = create<ProfileState>((set) => ({
     const data = await loadJson<ProfileData>("profile.json");
     if (data) {
       set({
+        fullName: data.fullName ?? "",
+        email: data.email ?? "",
+        city: data.city ?? "",
+        country: data.country ?? "",
+        linkedinUrl: data.linkedinUrl ?? "",
+        bio: data.bio ?? "",
+        interests: data.interests ?? [],
         education: data.education ?? [],
         coverLetters: data.coverLetters ?? [],
         workExperience: data.workExperience ?? [],
         certifications: data.certifications ?? [],
         skills: data.skills ?? [],
         languages: data.languages ?? [],
-        linkedinUrl: data.linkedinUrl ?? "",
         isLoaded: true,
       });
     } else {
@@ -131,9 +163,15 @@ export const useProfileStore = create<ProfileState>((set) => ({
     }
   },
 
-  // ── Linkedin ──
-  setLinkedinUrl: (value) => {
-    set({ linkedinUrl: value });
+  // ── Personal details ──
+  setPersonalDetails: (patch) => {
+    set(patch);
+    debouncedSave();
+  },
+
+  // ── Bio ──
+  setBio: (value) => {
+    set({ bio: value });
     debouncedSave();
   },
 
@@ -253,6 +291,30 @@ export const useProfileStore = create<ProfileState>((set) => ({
   removeSkill: (id) => {
     set((s) => ({
       skills: s.skills.filter((sk) => sk.id !== id),
+    }));
+    debouncedSave();
+  },
+
+  // ── Interests ──
+  setInterests: (items) => {
+    set({ interests: items });
+    debouncedSave();
+  },
+  addInterest: (item) => {
+    set((s) => ({ interests: [...s.interests, item] }));
+    debouncedSave();
+  },
+  updateInterest: (id, patch) => {
+    set((s) => ({
+      interests: s.interests.map((it) =>
+        it.id === id ? { ...it, ...patch } : it,
+      ),
+    }));
+    debouncedSave();
+  },
+  removeInterest: (id) => {
+    set((s) => ({
+      interests: s.interests.filter((it) => it.id !== id),
     }));
     debouncedSave();
   },
