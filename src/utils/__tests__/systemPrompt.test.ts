@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, getStandardPrompt } from "@/utils/systemPrompt";
+import {
+  buildSystemPrompt,
+  buildBioPrompt,
+  getStandardPrompt,
+} from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
 import type { ProfileData } from "@/types";
 
@@ -21,6 +25,13 @@ const emptyApplication: ApplicationContext = {
 
 function makeProfile(overrides: Partial<ProfileData> = {}): ProfileData {
   return {
+    fullName: "",
+    email: "",
+    city: "",
+    country: "",
+    linkedinUrl: "",
+    bio: "",
+    interests: [],
     education: [],
     coverLetters: [],
     workExperience: [],
@@ -128,6 +139,26 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("linkedin.com/in/test");
   });
 
+  it("renders personal details, bio and interests", () => {
+    const profile = makeProfile({
+      fullName: "Jane Doe",
+      email: "jane@example.com",
+      city: "Copenhagen",
+      country: "Denmark",
+      linkedinUrl: "https://linkedin.com/in/jane",
+      bio: "I am a developer who loves Rust.",
+      interests: [{ id: "i1", name: "Trail running" }],
+    });
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).toContain("- Personal Details:");
+    expect(prompt).toContain("name: Jane Doe");
+    expect(prompt).toContain("email: jane@example.com");
+    expect(prompt).toContain("location: Copenhagen, Denmark");
+    expect(prompt).toContain("LinkedIn: https://linkedin.com/in/jane");
+    expect(prompt).toContain("- Bio: I am a developer who loves Rust.");
+    expect(prompt).toContain("- Interests: Trail running");
+  });
+
   it("includes previous cover letters when present", () => {
     const profile = makeProfile({
       coverLetters: [
@@ -180,5 +211,49 @@ describe("buildSystemPrompt", () => {
       customPrompt: "   ",
     });
     expect(prompt).toContain("Your Behavior Rules");
+  });
+});
+
+describe("buildBioPrompt", () => {
+  it("includes the writing instructions and style rules", () => {
+    const prompt = buildBioPrompt(makeProfile());
+    expect(prompt).toContain("roughly 50-100 words");
+    expect(prompt).toContain("first person");
+    expect(prompt).toContain("Never invent facts");
+    expect(prompt).toContain("Never use em dashes");
+    expect(prompt).toContain("Output only the bio text");
+  });
+
+  it("includes the candidate's profile data", () => {
+    const profile = makeProfile({
+      fullName: "Jane Doe",
+      city: "Copenhagen",
+      country: "Denmark",
+      workExperience: [
+        {
+          id: "w1",
+          company: "Startup A",
+          role: "Developer",
+          startMonth: "July",
+          startYear: "2022",
+          isCurrent: true,
+          jobDescription: "",
+          projects: [],
+        },
+      ],
+      skills: [{ id: "s1", name: "TypeScript" }],
+      interests: [{ id: "i1", name: "Trail running" }],
+    });
+    const prompt = buildBioPrompt(profile);
+    expect(prompt).toContain("Jane Doe");
+    expect(prompt).toContain("Copenhagen, Denmark");
+    expect(prompt).toContain("Developer at Startup A");
+    expect(prompt).toContain("TypeScript");
+    expect(prompt).toContain("Trail running");
+  });
+
+  it("handles an empty profile gracefully", () => {
+    const prompt = buildBioPrompt(makeProfile());
+    expect(prompt).toContain("has not filled in their profile yet");
   });
 });

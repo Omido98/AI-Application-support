@@ -1,13 +1,15 @@
 import { useEffect } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Separator } from "@/components/ui/separator";
+import PersonalDetailsSection from "@/components/profile/PersonalDetailsSection";
+import BioSection from "@/components/profile/BioSection";
 import EducationSection from "@/components/profile/EducationSection";
 import CoverLettersSection from "@/components/profile/CoverLettersSection";
 import WorkExperienceSection from "@/components/profile/WorkExperienceSection";
 import CertificationsSection from "@/components/profile/CertificationsSection";
 import SkillsSection from "@/components/profile/SkillsSection";
+import InterestsSection from "@/components/profile/InterestsSection";
 import LanguagesSection from "@/components/profile/LanguagesSection";
-import LinksSection from "@/components/profile/LinksSection";
 
 export default function ProfileTab() {
   const isLoaded = useProfileStore((s) => s.isLoaded);
@@ -32,9 +34,11 @@ export default function ProfileTab() {
       <div className="max-w-4xl mx-auto space-y-8">
         <h1 className="text-2xl font-bold text-text-primary">Profile</h1>
 
-        <EducationSection />
+        <PersonalDetailsSection />
         <Separator className="bg-border" />
-        <LinksSection />
+        <BioSection />
+        <Separator className="bg-border" />
+        <EducationSection />
         <Separator className="bg-border" />
         <CoverLettersSection />
         <Separator className="bg-border" />
@@ -43,6 +47,8 @@ export default function ProfileTab() {
         <CertificationsSection />
         <Separator className="bg-border" />
         <SkillsSection />
+        <Separator className="bg-border" />
+        <InterestsSection />
         <Separator className="bg-border" />
         <LanguagesSection />
       </div>

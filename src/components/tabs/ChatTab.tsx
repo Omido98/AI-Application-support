@@ -127,13 +127,19 @@ export default function ChatTab() {
       }
       const freshProfile = useProfileStore.getState();
       const profileData = {
+        fullName: freshProfile.fullName,
+        email: freshProfile.email,
+        city: freshProfile.city,
+        country: freshProfile.country,
+        linkedinUrl: freshProfile.linkedinUrl,
+        bio: freshProfile.bio,
+        interests: freshProfile.interests,
         education: freshProfile.education,
         coverLetters: freshProfile.coverLetters,
         workExperience: freshProfile.workExperience,
         certifications: freshProfile.certifications,
         skills: freshProfile.skills,
         languages: freshProfile.languages,
-        linkedinUrl: freshProfile.linkedinUrl,
       };
       const systemPrompt = buildSystemPrompt(appCtx, profileData, {
         mode: config.systemPromptMode ?? "standard",
