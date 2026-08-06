@@ -4,6 +4,7 @@ import type {
   Education,
   CoverLetter,
   WorkExperience,
+  OtherEngagement,
   Certification,
   Skill,
   Language,
@@ -30,6 +31,7 @@ function writeSnapshot() {
     education: s.education,
     coverLetters: s.coverLetters,
     workExperience: s.workExperience,
+    otherEngagements: s.otherEngagements,
     certifications: s.certifications,
     skills: s.skills,
     languages: s.languages,
@@ -92,6 +94,12 @@ interface ProfileState extends ProfileData {
   updateWorkExperience: (id: string, patch: Partial<WorkExperience>) => void;
   removeWorkExperience: (id: string) => void;
 
+  // OtherEngagement actions
+  setOtherEngagements: (items: OtherEngagement[]) => void;
+  addOtherEngagement: (item: OtherEngagement) => void;
+  updateOtherEngagement: (id: string, patch: Partial<OtherEngagement>) => void;
+  removeOtherEngagement: (id: string) => void;
+
   // Certification actions
   setCertifications: (items: Certification[]) => void;
   addCertification: (item: Certification) => void;
@@ -133,6 +141,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
   education: [],
   coverLetters: [],
   workExperience: [],
+  otherEngagements: [],
   certifications: [],
   skills: [],
   languages: [],
@@ -153,6 +162,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
         education: data.education ?? [],
         coverLetters: data.coverLetters ?? [],
         workExperience: data.workExperience ?? [],
+        otherEngagements: data.otherEngagements ?? [],
         certifications: data.certifications ?? [],
         skills: data.skills ?? [],
         languages: data.languages ?? [],
@@ -243,6 +253,30 @@ export const useProfileStore = create<ProfileState>((set) => ({
   removeWorkExperience: (id) => {
     set((s) => ({
       workExperience: s.workExperience.filter((w) => w.id !== id),
+    }));
+    debouncedSave();
+  },
+
+  // ── Other Engagements ──
+  setOtherEngagements: (items) => {
+    set({ otherEngagements: items });
+    debouncedSave();
+  },
+  addOtherEngagement: (item) => {
+    set((s) => ({ otherEngagements: [...s.otherEngagements, item] }));
+    debouncedSave();
+  },
+  updateOtherEngagement: (id, patch) => {
+    set((s) => ({
+      otherEngagements: s.otherEngagements.map((e) =>
+        e.id === id ? { ...e, ...patch } : e,
+      ),
+    }));
+    debouncedSave();
+  },
+  removeOtherEngagement: (id) => {
+    set((s) => ({
+      otherEngagements: s.otherEngagements.filter((e) => e.id !== id),
     }));
     debouncedSave();
   },

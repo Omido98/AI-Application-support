@@ -42,6 +42,20 @@ export interface WorkExperience {
   projects: string[];
 }
 
+/** A private/non-employment engagement, e.g. volunteering, civil society work, merits. */
+export interface OtherEngagement {
+  id: string;
+  organization: string;
+  role: string;
+  startMonth: string;
+  startYear: string;
+  isCurrent: boolean;
+  endMonth?: string;
+  endYear?: string;
+  description: string;
+  achievements: string[];
+}
+
 export interface Skill {
   id: string;
   name: string;
@@ -88,6 +102,7 @@ export interface ProfileData {
   education: Education[];
   coverLetters: CoverLetter[];
   workExperience: WorkExperience[];
+  otherEngagements: OtherEngagement[];
   certifications: Certification[];
   skills: Skill[];
   languages: Language[];

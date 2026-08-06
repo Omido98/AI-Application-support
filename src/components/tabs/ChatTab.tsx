@@ -142,6 +142,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         education: freshProfile.education,
         coverLetters: freshProfile.coverLetters,
         workExperience: freshProfile.workExperience,
+        otherEngagements: freshProfile.otherEngagements,
         certifications: freshProfile.certifications,
         skills: freshProfile.skills,
         languages: freshProfile.languages,
