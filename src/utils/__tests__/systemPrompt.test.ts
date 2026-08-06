@@ -35,6 +35,7 @@ function makeProfile(overrides: Partial<ProfileData> = {}): ProfileData {
     education: [],
     coverLetters: [],
     workExperience: [],
+    otherEngagements: [],
     certifications: [],
     skills: [],
     languages: [],
@@ -137,6 +138,28 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("- Skills: TypeScript");
     expect(prompt).toContain("- Languages: English (Fluent)");
     expect(prompt).toContain("linkedin.com/in/test");
+  });
+
+  it("renders other engagements with description and achievements", () => {
+    const profile = makeProfile({
+      otherEngagements: [
+        {
+          id: "oe1",
+          organization: "Red Cross",
+          role: "Volunteer Coordinator",
+          startMonth: "January",
+          startYear: "2023",
+          isCurrent: true,
+          description: "Coordinate local volunteer teams.",
+          achievements: ["Organized 20+ drives"],
+        },
+      ],
+    });
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).toContain("- Other Engagements:");
+    expect(prompt).toContain("Volunteer Coordinator at Red Cross");
+    expect(prompt).toContain("Description: Coordinate local volunteer teams.");
+    expect(prompt).toContain("Achievements/Merits: Organized 20+ drives");
   });
 
   it("renders personal details, bio and interests", () => {

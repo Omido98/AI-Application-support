@@ -33,7 +33,7 @@ const BEHAVIOR_RULES = [
   "- Never use em dashes (—) in your output; use commas, parentheses, or regular dashes instead.",
   "",
   "What to rely on:",
-  "- The user's complete profile — education, work experience (including responsibilities and projects), skills, languages, and every previous cover letter — is included above. Use it as your source of truth when tailoring your advice and drafts.",
+  "- The user's complete profile — education, work experience (including responsibilities and projects), other engagements (volunteering, civil society, merits), skills, languages, and every previous cover letter — is included above. Use it as your source of truth when tailoring your advice and drafts.",
   "- Learn from the user's previous cover letters only for content inspiration: pay attention to specific interests or themes they expressed in them, and reflect those again when they are relevant to the new role. Never use an old letter as a template — do not copy its tone, structure, style, or wording. Always write new content from scratch with the tone and structure that best fit the new role.",
   "- If you see a clear way to improve on a previous letter, suggest it.",
   "- The user may provide a LinkedIn profile URL in their profile. Use it to learn more about them when relevant — you may fetch the page for additional context, but never invent details that are not visible there.",
@@ -75,6 +75,7 @@ function hasProfileContent(profile: ProfileData | null): boolean {
     profile.interests.length > 0 ||
     profile.education.length > 0 ||
     profile.workExperience.length > 0 ||
+    profile.otherEngagements.length > 0 ||
     profile.certifications.length > 0 ||
     profile.skills.length > 0 ||
     profile.languages.length > 0 ||
@@ -172,6 +173,25 @@ export function buildSystemPrompt(
         const projects = w.projects.filter((p) => p.trim().length > 0);
         if (projects.length > 0) {
           parts.push(`    Projects/Initiatives: ${projects.join(" | ")}`);
+        }
+        sections.push(parts.join("\n"));
+      });
+    }
+    if (profile.otherEngagements.length > 0) {
+      sections.push("- Other Engagements:");
+      profile.otherEngagements.forEach((oe) => {
+        const end = oe.isCurrent
+          ? "present"
+          : `${formatDate(oe.endMonth ?? "", oe.endYear)}`;
+        const parts = [
+          `  * ${oe.role} at ${oe.organization} (${formatDate(oe.startMonth, oe.startYear)} – ${end})`,
+        ];
+        if (oe.description) {
+          parts.push(`    Description: ${oe.description}`);
+        }
+        const achievements = oe.achievements.filter((a) => a.trim().length > 0);
+        if (achievements.length > 0) {
+          parts.push(`    Achievements/Merits: ${achievements.join(" | ")}`);
         }
         sections.push(parts.join("\n"));
       });
@@ -276,6 +296,14 @@ export function buildBioPrompt(profile: ProfileData): string {
         "- Work Experience: " +
           profile.workExperience
             .map((w) => `${w.role} at ${w.company}`)
+            .join(" | "),
+      );
+    }
+    if (profile.otherEngagements.length > 0) {
+      sections.push(
+        "- Other Engagements: " +
+          profile.otherEngagements
+            .map((oe) => `${oe.role} at ${oe.organization}`)
             .join(" | "),
       );
     }
