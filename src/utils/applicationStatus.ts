@@ -1,4 +1,4 @@
-import type { ApplicationStatus } from "@/types";
+import type { ApplicationStatus, JobApplication } from "@/types";
 
 export const STATUS_ORDER: ApplicationStatus[] = [
   "wishlist",
@@ -7,6 +7,12 @@ export const STATUS_ORDER: ApplicationStatus[] = [
   "offer",
   "rejected",
 ];
+
+/** Statuses that live in the archive instead of the active list. */
+export const ARCHIVED_STATUSES: ApplicationStatus[] = ["offer", "rejected"];
+
+export const isArchivedStatus = (status: ApplicationStatus): boolean =>
+  ARCHIVED_STATUSES.includes(status);
 
 export const STATUS_LABELS: Record<ApplicationStatus, string> = {
   wishlist: "Wishlist",
@@ -26,3 +32,19 @@ export const STATUS_BADGE_CLASSES: Record<ApplicationStatus, string> = {
   offer: "bg-green-500/15 text-green-600 border-green-500/30 dark:text-green-400",
   rejected: "bg-destructive/15 text-destructive border-destructive/30",
 };
+
+/**
+ * Sort by status rank (Wishlist first, Rejected last), then alphabetically by
+ * company name (case-insensitive) within each status group.
+ */
+export function sortApplications(
+  applications: JobApplication[],
+): JobApplication[] {
+  return [...applications].sort((a, b) => {
+    const byStatus = STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
+    if (byStatus !== 0) return byStatus;
+    return a.companyName.localeCompare(b.companyName, undefined, {
+      sensitivity: "base",
+    });
+  });
+}

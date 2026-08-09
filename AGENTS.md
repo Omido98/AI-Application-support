@@ -49,9 +49,22 @@ Safety notes:
 - `npm install` then `npm run tauri dev` for the dev app.
 - This laptop is Windows on ARM: `npm run build:arm64` produces a native
   ARM64 build; `npm run build:x64` produces an x64 build.
-- When the user asks to install locally, MOVE the NSIS installer produced by
-  `npm run build:arm64` out of the tauri build output
-  (`src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/`) into the
-  Downloads folder (`C:\Users\omido\Downloads`). Never leave the installer in
-  the build output and never just copy it; the user's Windows Search finds it
-  in Downloads, and the build output must stay clean.
+
+## Run / install locally (no GitHub needed)
+
+- "run the app (locally)" / "open the app" = `npm run tauri dev`
+  — dev build of current source with hot reload, not installed.
+- "install the app locally" = `npm run build:arm64` (native ARM64, this
+  laptop; `npm run build:x64` for a Windows x64 build). Then MOVE the fresh
+  installer out of `src-tauri\target\aarch64-pc-windows-msvc\release\bundle\`
+  into the user's Downloads folder (GitHub-style filename,
+  `AI.Application.Support_<version>_arm64-setup.exe`), so the installer
+  exists ONLY in Downloads. The next build regenerates a fresh one in the
+  bundle folder, which is moved the same way again. If a `.msi` is produced
+  alongside the `.exe`, move it too.
+- Nothing is ever cleaned up automatically: the user deletes old installers
+  from Downloads when done, and `src-tauri\target\` is a git-ignored build
+  cache (~15 GB) that can be deleted freely anytime — it is rebuilt on the
+  next run/build.
+- Prefer these over pushing release tags until the user wants a bulk
+  release to users.

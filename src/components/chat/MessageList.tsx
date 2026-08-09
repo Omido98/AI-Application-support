@@ -5,7 +5,7 @@ import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, BookmarkPlus, Sparkles } from "lucide-react";
+import { Copy, Check, BookmarkPlus, Sparkles, ArrowDown } from "lucide-react";
 
 function LoadingDots() {
   return (
@@ -22,7 +22,12 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
   const isSending = useChatStore((s) => s.isSending);
   const streamingText = useChatStore((s) => s.streamingText);
   const error = useChatStore((s) => s.error);
+  const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastMessageRef = useRef<{ role: "user" | "assistant"; timestamp: string } | null>(
+    null,
+  );
+  const [stickyToBottom, setStickyToBottom] = useState(true);
 
   const applications = useApplicationStore((s) => s.applications);
   const selectedId = useApplicationStore((s) => s.selectedApplicationId);
@@ -38,13 +43,32 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
   const messageKey = (msg: { timestamp: string; content: string }) =>
     msg.timestamp + msg.content.slice(0, 40);
 
-  // Auto-scroll to bottom when new messages arrive. During live streaming,
-  // scroll instantly (no smooth animation) so every token is visible.
+  // Auto-scroll to the bottom only while the user is already near the bottom,
+  // so scrolling up to read is never hijacked — even during live streaming.
+  // A newly sent user message always jumps to the bottom.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: isSending ? "auto" : "smooth",
-    });
-  }, [messages, isSending, streamingText]);
+    const last = messages[messages.length - 1] ?? null;
+    const isNewUserMessage =
+      last?.role === "user" && lastMessageRef.current?.timestamp !== last.timestamp;
+    lastMessageRef.current = last;
+
+    if (isNewUserMessage || stickyToBottom) {
+      bottomRef.current?.scrollIntoView({
+        behavior: isSending ? "auto" : "smooth",
+      });
+    }
+  }, [messages, isSending, streamingText, stickyToBottom]);
+
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    setStickyToBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
+  };
+
+  const jumpToBottom = () => {
+    setStickyToBottom(true);
+    bottomRef.current?.scrollIntoView({ behavior: "auto" });
+  };
 
   useEffect(() => {
     return () => {
@@ -107,7 +131,11 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
+    >
       {messages.map((msg) => {
         const isUser = msg.role === "user";
         const key = messageKey(msg);
@@ -209,6 +237,19 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
       )}
 
       <div ref={bottomRef} />
+
+      {!stickyToBottom && (
+        <button
+          type="button"
+          onClick={jumpToBottom}
+          className="sticky bottom-0 mx-auto w-fit z-10 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary shadow-sm hover:text-text-primary transition-colors flex items-center gap-1.5"
+          title="Jump to latest message"
+          aria-label="Jump to latest message"
+        >
+          <ArrowDown className="size-3.5" />
+          Latest
+        </button>
+      )}
     </div>
   );
 }
