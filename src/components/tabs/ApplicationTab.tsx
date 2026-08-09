@@ -5,6 +5,7 @@ import {
   Trash2,
   MessageSquare,
   ExternalLink,
+  Archive,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useApplicationStore } from "@/stores/applicationStore";
@@ -15,6 +16,9 @@ import {
   STATUS_LABELS,
   STATUS_ORDER,
   STATUS_BADGE_CLASSES,
+  ARCHIVED_STATUSES,
+  isArchivedStatus,
+  sortApplications,
 } from "@/utils/applicationStatus";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -59,6 +63,11 @@ async function openInBrowser(url: string) {
   }
 }
 
+/** Statuses that appear in the active (non-archive) list. */
+const ACTIVE_STATUSES = STATUS_ORDER.filter(
+  (status) => !isArchivedStatus(status),
+);
+
 export default function ApplicationTab() {
   const isLoaded = useApplicationStore((s) => s.isLoaded);
   const loadApplications = useApplicationStore((s) => s.loadApplications);
@@ -77,19 +86,37 @@ export default function ApplicationTab() {
     null,
   );
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"active" | "archived">("active");
 
   useEffect(() => {
     if (!isLoaded) loadApplications();
   }, [isLoaded, loadApplications]);
 
-  const sorted = useMemo(
-    () =>
-      [...applications].sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-      ),
-    [applications],
+  // Sort by status rank (Wishlist first, Rejected last), then alphabetically
+  // by company within each status group.
+  const sorted = useMemo(() => sortApplications(applications), [applications]);
+
+  const activeApps = useMemo(
+    () => sorted.filter((a) => !isArchivedStatus(a.status)),
+    [sorted],
   );
+  const archiveApps = useMemo(
+    () => sorted.filter((a) => isArchivedStatus(a.status)),
+    [sorted],
+  );
+
+  const visibleApps = viewMode === "active" ? activeApps : archiveApps;
+  const visibleStatuses =
+    viewMode === "active" ? ACTIVE_STATUSES : ARCHIVED_STATUSES;
+
+  const toggleViewMode = (mode: "active" | "archived") => {
+    setViewMode(mode);
+    const validForView =
+      mode === "active" ? ACTIVE_STATUSES : ARCHIVED_STATUSES;
+    if (statusFilter && !validForView.includes(statusFilter)) {
+      setStatusFilter(null);
+    }
+  };
 
   const statusCounts = useMemo(() => {
     const counts: Record<ApplicationStatus, number> = {
@@ -99,13 +126,13 @@ export default function ApplicationTab() {
       offer: 0,
       rejected: 0,
     };
-    for (const app of applications) counts[app.status] += 1;
+    for (const app of visibleApps) counts[app.status] += 1;
     return counts;
-  }, [applications]);
+  }, [visibleApps]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return sorted.filter((a) => {
+    return visibleApps.filter((a) => {
       if (statusFilter && a.status !== statusFilter) return false;
       if (!q) return true;
       return (
@@ -113,7 +140,7 @@ export default function ApplicationTab() {
         a.jobTitle.toLowerCase().includes(q)
       );
     });
-  }, [sorted, filter, statusFilter]);
+  }, [visibleApps, filter, statusFilter]);
 
   const selected = applications.find((a) => a.id === selectedId) ?? null;
   const pendingDelete = applications.find((a) => a.id === pendingDeleteId) ?? null;
@@ -181,6 +208,51 @@ export default function ApplicationTab() {
           </div>
         </div>
 
+        {/* Active / Archive toggle */}
+        <div className="px-3 py-1.5">
+          <div className="flex rounded-lg bg-border/40 p-0.5 gap-1">
+            <button
+              type="button"
+              onClick={() => toggleViewMode("active")}
+              className={cn(
+                "flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors select-none",
+                viewMode === "active"
+                  ? "bg-surface text-text-primary shadow-sm"
+                  : "text-text-secondary hover:text-text-primary",
+              )}
+              aria-pressed={viewMode === "active"}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleViewMode("archived")}
+              className={cn(
+                "flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors select-none flex items-center justify-center gap-1",
+                viewMode === "archived"
+                  ? "bg-surface text-text-primary shadow-sm"
+                  : "text-text-secondary hover:text-text-primary",
+              )}
+              aria-pressed={viewMode === "archived"}
+            >
+              <Archive className="size-3" />
+              Archive
+              {archiveApps.length > 0 && (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 text-[10px] leading-4",
+                    viewMode === "archived"
+                      ? "bg-primary/15 text-primary"
+                      : "bg-border/60 text-text-secondary",
+                  )}
+                >
+                  {archiveApps.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
         {/* Status filter */}
         <div className="px-3 py-1.5 flex flex-wrap gap-1.5">
           <button
@@ -194,9 +266,9 @@ export default function ApplicationTab() {
             )}
             aria-pressed={statusFilter === null}
           >
-            All ({applications.length})
+            All ({visibleApps.length})
           </button>
-          {STATUS_ORDER.map((status) => (
+          {visibleStatuses.map((status) => (
             <button
               key={status}
               type="button"
@@ -219,7 +291,11 @@ export default function ApplicationTab() {
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {filtered.length === 0 && (
             <p className="text-xs text-text-muted text-center py-4">
-              No applications match.
+              {viewMode === "active"
+                ? activeApps.length === 0 && archiveApps.length > 0
+                  ? "All applications are archived."
+                  : "No applications match."
+                : "Nothing archived yet — applications marked Offer or Rejected appear here."}
             </p>
           )}
           {filtered.map((app) => {
