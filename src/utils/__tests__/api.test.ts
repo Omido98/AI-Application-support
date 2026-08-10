@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { sendMessage } from "@/utils/api";
+import { sendMessage, deslopText } from "@/utils/api";
 import type { ApiConfig } from "@/stores/chatStore";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -371,5 +371,42 @@ describe("sendMessage (Anthropic)", () => {
     for (const call of chatCalls) {
       expect(call[1]).not.toHaveProperty("payload.tools");
     }
+  });
+});
+
+describe("deslopText", () => {
+  it("sends the draft as the only user message with the de-slop prompt and no tools", async () => {
+    mockChatSequence([
+      { kind: "stream", data: openaiMessage({ content: "Clean draft." }) },
+    ]);
+    const result = await deslopText("A sloppy draft.", baseConfig);
+    expect(result).toEqual({ content: "Clean draft." });
+
+    const chatCalls = mockedInvoke.mock.calls.filter(
+      (c) => c[0] === "zen_chat_stream",
+    );
+    expect(chatCalls.length).toBeGreaterThan(0);
+    for (const call of chatCalls) {
+      const payload = (call[1] as {
+        payload: {
+          messages: Array<{ role: string; content?: string | null }>;
+          tools?: unknown;
+        };
+      }).payload;
+      expect(payload.tools).toBeUndefined();
+      expect(payload.messages[0].role).toBe("system");
+      expect(payload.messages[0].content).toContain("Anti-slop writing rules");
+      expect(payload.messages[0].content).toContain("No changes needed");
+      expect(payload.messages[1]).toEqual({
+        role: "user",
+        content: "A sloppy draft.",
+      });
+    }
+  });
+
+  it("returns an error when the API key is missing", async () => {
+    const result = await deslopText("Draft.", { ...baseConfig, apiKey: "" });
+    expect(result.content).toBe("");
+    expect(result.error).toMatch(/API key/i);
   });
 });

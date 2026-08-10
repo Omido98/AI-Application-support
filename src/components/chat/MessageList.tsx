@@ -3,9 +3,17 @@ import ReactMarkdown from "react-markdown";
 import { useChatStore } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
+import { deslopText } from "@/utils/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, BookmarkPlus, Sparkles, ArrowDown } from "lucide-react";
+import {
+  Copy,
+  Check,
+  BookmarkPlus,
+  Sparkles,
+  Loader2,
+  ArrowDown,
+} from "lucide-react";
 
 function LoadingDots() {
   return (
@@ -32,9 +40,13 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
   const applications = useApplicationStore((s) => s.applications);
   const selectedId = useApplicationStore((s) => s.selectedApplicationId);
   const addCoverLetter = useProfileStore((s) => s.addCoverLetter);
+  const config = useChatStore((s) => s.config);
+  const addMessage = useChatStore((s) => s.addMessage);
+  const setError = useChatStore((s) => s.setError);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [deslopPendingId, setDeslopPendingId] = useState<string | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const company =
@@ -108,6 +120,35 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
       addedAt: new Date().toISOString(),
     });
     flashFeedback(msgId, setSavedId);
+  };
+
+  const handleDeslop = async (msgId: string, content: string) => {
+    if (!content.trim() || deslopPendingId) return;
+    setDeslopPendingId(msgId);
+    setError(null);
+    const result = await deslopText(content, config);
+    setDeslopPendingId(null);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    if (result.stopped) {
+      if (result.content.trim()) {
+        addMessage({
+          role: "assistant",
+          content: result.content,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    if (result.content.trim()) {
+      addMessage({
+        role: "assistant",
+        content: result.content,
+        timestamp: new Date().toISOString(),
+      });
+    }
   };
 
   if (messages.length === 0 && !isSending) {
@@ -200,6 +241,24 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
                     <Check className="size-3.5 text-green-400" />
                   ) : (
                     <BookmarkPlus className="size-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeslop(key, msg.content)}
+                  disabled={deslopPendingId !== null}
+                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
+                  title={
+                    deslopPendingId === key
+                      ? "Removing AI slop…"
+                      : "Remove AI slop"
+                  }
+                  aria-label="Remove AI slop"
+                >
+                  {deslopPendingId === key ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3.5" />
                   )}
                 </button>
               </div>

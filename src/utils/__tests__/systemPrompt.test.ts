@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildSystemPrompt,
   buildBioPrompt,
+  buildDeslopPrompt,
   getStandardPrompt,
 } from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
@@ -54,6 +55,33 @@ describe("getStandardPrompt", () => {
   it("limits research to one search and up to 5 page fetches per turn", () => {
     const prompt = getStandardPrompt();
     expect(prompt).toContain("one search and up to 5 page fetches per turn");
+  });
+
+  it("includes the anti-slop writing rules", () => {
+    const prompt = getStandardPrompt();
+    expect(prompt).toContain("Anti-slop writing rules");
+    expect(prompt).toContain("Binary contrasts");
+    expect(prompt).toContain("Banned outright: delve, foster, leverage");
+    expect(prompt).toContain("Never use em dashes");
+    expect(prompt).toContain("re-read it for these patterns");
+  });
+});
+
+describe("buildDeslopPrompt", () => {
+  it("includes the editor persona and the anti-slop rules", () => {
+    const prompt = buildDeslopPrompt();
+    expect(prompt).toContain("sharp human editor");
+    expect(prompt).toContain("Anti-slop writing rules");
+    expect(prompt).toContain("Never use em dashes");
+    expect(prompt).toContain("re-read it for these patterns");
+    expect(prompt).toContain("No changes needed");
+    expect(prompt).toContain("Output only the edited draft");
+  });
+
+  it("does not include chat-only behavior rules", () => {
+    const prompt = buildDeslopPrompt();
+    expect(prompt).not.toContain("Your Behavior Rules");
+    expect(prompt).not.toContain("web_search");
   });
 });
 
@@ -244,6 +272,7 @@ describe("buildBioPrompt", () => {
     expect(prompt).toContain("first person");
     expect(prompt).toContain("Never invent facts");
     expect(prompt).toContain("Never use em dashes");
+    expect(prompt).toContain("Anti-slop writing rules");
     expect(prompt).toContain("Output only the bio text");
   });
 

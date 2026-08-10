@@ -2,6 +2,7 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import type { ApiConfig } from "@/stores/chatStore";
 import type { ChatMessage } from "@/stores/chatStore";
 import type { ProviderId } from "@/utils/providers";
+import { buildDeslopPrompt } from "@/utils/systemPrompt";
 
 export interface ApiResponse {
   content: string;
@@ -179,6 +180,29 @@ export async function sendMessage(
     return sendAnthropicMessage(messages, config, systemPrompt, options);
   }
   return sendOpenAICompatMessage(messages, config, systemPrompt, options);
+}
+
+/**
+ * Run the "Remove AI slop" pass on a single draft: sends the draft as the
+ * only user message with the de-slop editor prompt and no tools, and
+ * returns the cleaned draft (or "No changes needed.").
+ *
+ * @param draft - The assistant message text to clean up.
+ * @param config - API configuration (provider, baseUrl, apiKey, model, ...).
+ * @param options - Live-text callback and an optional AbortSignal.
+ * @returns The cleaned reply content, or an error message.
+ */
+export async function deslopText(
+  draft: string,
+  config: ApiConfig,
+  options: SendMessageOptions = {},
+): Promise<ApiResponse> {
+  return sendMessage(
+    [{ role: "user", content: draft, timestamp: new Date().toISOString() }],
+    { ...config, webSearchEnabled: false },
+    buildDeslopPrompt(),
+    options,
+  );
 }
 
 /**
