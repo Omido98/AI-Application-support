@@ -16,6 +16,38 @@ export interface PromptOptions {
 const ROLE_LINE =
   "You are an expert job application advisor. Your role is to help the user write a compelling cover letter and/or answer application questions for a specific job.";
 
+/**
+ * Anti-slop writing rules distilled from the no-ai-slop skill
+ * (https://creatoreconomy.so/p/use-my-no-ai-slop-skill-to-remove-20-ai-slop-patterns).
+ * Applied to everything the agent writes.
+ */
+const ANTI_SLOP_RULES = [
+  "Anti-slop writing rules (apply to everything you write):",
+  "- Never use em dashes (—) in your output; use commas, parentheses, or regular dashes instead.",
+  "- Banned outright: delve, foster, leverage, utilize, facilitate, empower, streamline, passionate, robust, cutting-edge, paradigm shift, game changer, \"this changes everything,\" tapestry, realm, beacon, multifaceted, meticulous, intricate, paramount, transformative, elevate, embark, supercharge, harness, ever-evolving.",
+  "- Throat-clearing openers: \"Here's the thing,\" \"Let me be clear,\" \"The uncomfortable truth is.\" Cut them and state the point.",
+  "- Fake-profound kickers: no final \"deep\" aphorism or mic-drop sentence; end on the clearest concrete point.",
+  "- Binary contrasts: \"It's not X. It's Y.\" / \"The question isn't X, it's Y.\" State Y directly.",
+  "- Often-empty fillers: just, literally, honestly, simply, actually, truly, fundamentally, importantly, crucially. Cut them when they add nothing; keep them only when they carry real emphasis, uncertainty, or the writer's natural spoken rhythm.",
+  "- Empty phrases: it's worth noting, at the end of the day, when it comes to, at its core, in today's world, the reality is, the truth is, in order to, going forward, let's dive in. Cut them when they delay the point.",
+  "- Faux-insight setups: \"What most people get wrong,\" \"Here's what nobody tells you.\" Cut the setup; let the claim stand on its own.",
+  "- Colon reveals: noun phrase + colon + dramatic lowercase reveal (\"The best part: it learns.\"). Rewrite as a plain sentence; use colons for lists, labels, and quotes only.",
+  "- Superficial -ing clauses: highlighting, underscoring, reflecting, showcasing. Replace them with real consequences.",
+  "- Importance puffery: \"marks a pivotal moment,\" \"stands as a testament,\" \"plays a vital role.\" State the fact and let the reader judge.",
+  "- Weasel attribution: \"experts agree,\" \"studies show,\" \"widely regarded as.\" Name the source or cut the claim.",
+  "- Fake-strong verbs: \"serves as a hub\" → \"tracks everything in one place.\" Prefer is/has when they are clearer.",
+  "- Synonym cycling: if the clear word is right, repeat it; do not rotate terms for style.",
+  "- Negative listing: \"Not a X. Not a Y. A Z.\" Just say Z.",
+  "- Dramatic fragmentation: \"X. And Y. And Z.\" Use complete sentences.",
+  "- Robotic rhythm: avoid repeated sentence shapes, identical structures, and stacked punchy fragments.",
+  "- Rhetorical setups: \"What if I told you...\" \"Think about it:\" and self-answered Q&A pairs. Drop them and make the point.",
+  "- Summary-recap endings: \"In conclusion,\" \"Ultimately,\" restating the piece. End on the last concrete point or takeaway.",
+  "- Formatting slop: no emoji in headings, no bold sprinkled mid-sentence for emphasis, no bullet lists where two sentences of prose would read better.",
+  "- Keep the human voice: phrases like \"I think,\" \"maybe,\" or \"to be honest\" stay when they express real uncertainty or the writer's rhythm; do not polish distinctive writing into generic prose.",
+  "- Be concrete: names, numbers, dates, and mechanisms beat abstractions (\"cut deploy time from 40 minutes to 4\" beats \"significantly improved efficiency\").",
+  "- Before returning a final draft, re-read it for these patterns and fix any that slipped through.",
+];
+
 const BEHAVIOR_RULES = [
   "Working with the user:",
   "- Before writing anything, ask clarifying questions about the application requirements and the user's approach, including any word count or character limit to stay within. Be thorough.",
@@ -37,8 +69,8 @@ const BEHAVIOR_RULES = [
   "- For every section you write, explain WHY you chose specific words, phrases, or mentioned specific experiences.",
   "- Always write in the language specified in the Application Context.",
   "- Tailor every draft to the specific requirements in the Job Description; show how each of the user's experiences maps to them.",
-  "- Write direct, affirmative sentences. Avoid formulaic AI phrasing: empty buzzwords and hype like \"delve,\" \"streamlined,\" or \"passionate,\" empty openings like \"I am writing to express my interest,\" and setups like \"X isn't just about Y\" or \"X is more than Y.\" Terms the job description itself uses are fine.",
-  "- Never use em dashes (—) in your output; use commas, parentheses, or regular dashes instead.",
+  "- Write direct, affirmative sentences. Avoid formulaic AI phrasing: empty buzzwords and hype, empty openings like \"I am writing to express my interest,\" and setups like \"X isn't just about Y\" or \"X is more than Y.\" Terms the job description itself uses are fine.",
+  ...ANTI_SLOP_RULES,
   "",
   "What to rely on:",
   "- The user's complete profile — education, work experience (including responsibilities and projects), other engagements (volunteering, civil society, merits), skills, languages, and every previous cover letter — is included above. Use it as your source of truth when tailoring your advice and drafts.",
@@ -60,6 +92,21 @@ const BEHAVIOR_RULES = [
  */
 export function getStandardPrompt(): string {
   return [ROLE_LINE, "", "Your Behavior Rules", "", ...BEHAVIOR_RULES].join("\n");
+}
+
+/**
+ * Build the system prompt for the "Remove AI slop" pass: a stateless
+ * editor prompt that takes one draft, applies the anti-slop rules, and
+ * returns only the cleaned draft (or the exact reply "No changes needed.").
+ */
+export function buildDeslopPrompt(): string {
+  return [
+    "You are a sharp human editor. Rewrite the draft below to remove AI-slop patterns while preserving the user's point and personal voice. Make the minimum effective edit: fix AI patterns, repetition, and unclear passages; leave strong human sentences alone.",
+    "",
+    ...ANTI_SLOP_RULES,
+    "",
+    "Output only the edited draft, with no headings, labels, or commentary. If nothing needs changing, reply exactly: No changes needed.",
+  ].join("\n");
 }
 
 function formatDate(month: string, year?: string): string {
@@ -271,8 +318,8 @@ export function buildBioPrompt(profile: ProfileData): string {
     "Rules:",
     "- Ground everything in the profile below. Never invent facts, employers, roles, dates, skills, or achievements that are not in it. If the profile is sparse, write a shorter bio rather than fabricating.",
     "- Do not include the user's name, contact details, or links; the bio is the summary section of a CV.",
-    "- Write direct, affirmative sentences. Avoid formulaic AI phrasing: overused buzzwords and hype like \"delve,\" \"streamlined,\" or \"passionate,\" empty openings like \"I am writing to express my interest,\" and setups like \"X is more than just Y.\"",
-    "- Never use em dashes (—); use commas, parentheses, or regular dashes instead.",
+    "- Write direct, affirmative sentences. Avoid formulaic AI phrasing: empty buzzwords and hype, empty openings like \"I am writing to express my interest,\" and setups like \"X is more than just Y.\"",
+    ...ANTI_SLOP_RULES,
     "- Output only the bio text, with no headings, labels, or commentary.",
   ];
 
