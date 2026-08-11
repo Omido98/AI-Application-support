@@ -98,6 +98,10 @@ export interface ProfileData {
   linkedinUrl: string;
   /** Short CV intro written by the user (or AI-generated). */
   bio: string;
+  /** AI-extracted highlights from the previous cover letters, deduplicated
+   * against the rest of the profile. The chat agent reads this instead of
+   * the full letters when it is non-empty. */
+  coverLetterSummary: string;
   interests: Interest[];
   education: Education[];
   coverLetters: CoverLetter[];

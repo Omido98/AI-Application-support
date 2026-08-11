@@ -41,8 +41,6 @@ export default function ProfileTab() {
         <Separator className="bg-border" />
         <EducationSection />
         <Separator className="bg-border" />
-        <CoverLettersSection />
-        <Separator className="bg-border" />
         <WorkExperienceSection />
         <Separator className="bg-border" />
         <OtherEngagementsSection />
@@ -54,6 +52,8 @@ export default function ProfileTab() {
         <InterestsSection />
         <Separator className="bg-border" />
         <LanguagesSection />
+        <Separator className="bg-border" />
+        <CoverLettersSection />
       </div>
     </div>
   );

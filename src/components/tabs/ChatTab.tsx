@@ -138,6 +138,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         country: freshProfile.country,
         linkedinUrl: freshProfile.linkedinUrl,
         bio: freshProfile.bio,
+        coverLetterSummary: freshProfile.coverLetterSummary,
         interests: freshProfile.interests,
         education: freshProfile.education,
         coverLetters: freshProfile.coverLetters,

@@ -73,8 +73,8 @@ const BEHAVIOR_RULES = [
   ...ANTI_SLOP_RULES,
   "",
   "What to rely on:",
-  "- The user's complete profile — education, work experience (including responsibilities and projects), other engagements (volunteering, civil society, merits), skills, languages, and every previous cover letter — is included above. Use it as your source of truth when tailoring your advice and drafts.",
-  "- Learn from the user's previous cover letters only for content inspiration: pay attention to specific interests or themes they expressed in them, and reflect those again when they are relevant to the new role. Never use an old letter as a template — do not copy its tone, structure, style, or wording. Always write new content from scratch with the tone and structure that best fit the new role.",
+  "- The user's complete profile — education, work experience (including responsibilities and projects), other engagements (volunteering, civil society, merits), skills, languages — is included above. Previous cover letters are included as a digest when a summary exists, or in full when it does not. Use all of it as your source of truth when tailoring your advice and drafts.",
+  "- Learn from the user's previous cover letters (or their summary) only for content inspiration: pay attention to specific interests or themes they expressed in them, and reflect those again when they are relevant to the new role. Never use an old letter as a template — do not copy its tone, structure, style, or wording. Always write new content from scratch with the tone and structure that best fit the new role.",
   "- If you see a clear way to improve on a previous letter, suggest it.",
   "- The user may provide a LinkedIn profile URL in their profile. Use it to learn more about them when relevant — you may fetch the page for additional context, but never invent details that are not visible there.",
   "",
@@ -178,128 +178,196 @@ export function buildSystemPrompt(
   );
 
   if (profile && profileHasContent) {
-    const details: string[] = [];
-    if (profile.fullName.trim()) details.push(`name: ${profile.fullName.trim()}`);
-    if (profile.email.trim()) details.push(`email: ${profile.email.trim()}`);
-    if (profile.city.trim() && profile.country.trim()) {
-      details.push(`location: ${profile.city.trim()}, ${profile.country.trim()}`);
-    } else if (profile.city.trim()) {
-      details.push(`city: ${profile.city.trim()}`);
-    } else if (profile.country.trim()) {
-      details.push(`country: ${profile.country.trim()}`);
-    }
-    if (profile.linkedinUrl.trim()) {
-      details.push(`LinkedIn: ${profile.linkedinUrl.trim()}`);
-    }
-    if (details.length > 0) {
-      sections.push("- Personal Details:", ...details.map((d) => `  * ${d}`));
-    }
-    if (profile.bio.trim()) {
-      sections.push(`- Bio: ${profile.bio.trim()}`);
-    }
-    if (profile.education.length > 0) {
-      sections.push("- Education:");
-      profile.education.forEach((e) => {
-        const eduEnd = e.endYear ? formatDate(e.endMonth, e.endYear) : "present";
-        const parts = [
-          `  * ${e.degree} in ${e.major} at ${e.school} (${formatDate(e.startMonth, e.startYear)} – ${eduEnd})`,
-        ];
-        if (e.programName) parts.push(`    Program: ${e.programName}`);
-        if (e.finalGrade) parts.push(`    Final grade: ${e.finalGrade}`);
-        if (e.thesisTitle) parts.push(`    Thesis: ${e.thesisTitle}`);
-        if (e.courses.length > 0) {
-          parts.push(`    Courses: ${e.courses.join(", ")}`);
-        }
-        sections.push(parts.join("\n"));
-      });
-    }
-    if (profile.workExperience.length > 0) {
-      sections.push("- Work Experience:");
-      profile.workExperience.forEach((w) => {
-        const end = w.isCurrent
-          ? "present"
-          : `${formatDate(w.endMonth ?? "", w.endYear)}`;
-        const parts = [
-          `  * ${w.role} at ${w.company} (${formatDate(w.startMonth, w.startYear)} – ${end})`,
-        ];
-        if (w.jobDescription) {
-          parts.push(`    Responsibilities: ${w.jobDescription}`);
-        }
-        const projects = w.projects.filter((p) => p.trim().length > 0);
-        if (projects.length > 0) {
-          parts.push(`    Projects/Initiatives: ${projects.join(" | ")}`);
-        }
-        sections.push(parts.join("\n"));
-      });
-    }
-    if (profile.otherEngagements.length > 0) {
-      sections.push("- Other Engagements:");
-      profile.otherEngagements.forEach((oe) => {
-        const end = oe.isCurrent
-          ? "present"
-          : `${formatDate(oe.endMonth ?? "", oe.endYear)}`;
-        const parts = [
-          `  * ${oe.role} at ${oe.organization} (${formatDate(oe.startMonth, oe.startYear)} – ${end})`,
-        ];
-        if (oe.description) {
-          parts.push(`    Description: ${oe.description}`);
-        }
-        const achievements = oe.achievements.filter((a) => a.trim().length > 0);
-        if (achievements.length > 0) {
-          parts.push(`    Achievements/Merits: ${achievements.join(" | ")}`);
-        }
-        sections.push(parts.join("\n"));
-      });
-    }
-    if (profile.certifications.length > 0) {
-      sections.push(
-        "- Certifications: " +
-          profile.certifications
-            .map(
-              (c) =>
-                `${c.name} (expires ${c.expiryMonth} ${c.expiryYear})`,
-            )
-            .join(" | "),
-      );
-    }
-    if (profile.skills.length > 0) {
-      sections.push(
-        "- Skills: " + profile.skills.map((s) => s.name).join(", "),
-      );
-    }
-    if (profile.languages.length > 0) {
-      sections.push(
-        "- Languages: " +
-          profile.languages.map((l) => `${l.name} (${l.fluency})`).join(", "),
-      );
-    }
-    const interests = profile.interests
-      .map((i) => i.name.trim())
-      .filter((n) => n.length > 0);
-    if (interests.length > 0) {
-      sections.push("- Interests: " + interests.join(", "));
-    }
-    if (profile.coverLetters.length > 0) {
-      sections.push("- Previous Cover Letters (full text):");
-      profile.coverLetters.forEach((cl, i) => {
-        const date = cl.addedAt
-          ? new Date(cl.addedAt).toLocaleDateString()
-          : "unknown date";
-        const target = cl.company ? `for ${cl.company}` : "(no company recorded)";
-        sections.push(`  [Cover Letter ${i + 1} — ${target}, added ${date}]`);
-        sections.push(cl.content.trim() || "(empty)");
-      });
-    }
+    sections.push(...renderProfileSections(profile));
   } else {
     sections.push(
       "The user has not filled in their profile yet.",
     );
   }
 
+  if (profile && profileHasContent) {
+    sections.push(...renderCoverLetterSections(profile, true));
+  }
+
   if (!useCustom) {
     sections.push("", "Your Behavior Rules", "", ...BEHAVIOR_RULES);
   }
 
+  return sections.join("\n");
+}
+
+/**
+ * Render every candidate-profile section except the previous cover letters
+ * (which are rendered by `renderCoverLetterSections`, so the chat prompt and
+ * the summarizer can use different representations). Returns ready-to-push
+ * lines for a system prompt.
+ */
+function renderProfileSections(profile: ProfileData): string[] {
+  const sections: string[] = [];
+  const details: string[] = [];
+  if (profile.fullName.trim()) details.push(`name: ${profile.fullName.trim()}`);
+  if (profile.email.trim()) details.push(`email: ${profile.email.trim()}`);
+  if (profile.city.trim() && profile.country.trim()) {
+    details.push(`location: ${profile.city.trim()}, ${profile.country.trim()}`);
+  } else if (profile.city.trim()) {
+    details.push(`city: ${profile.city.trim()}`);
+  } else if (profile.country.trim()) {
+    details.push(`country: ${profile.country.trim()}`);
+  }
+  if (profile.linkedinUrl.trim()) {
+    details.push(`LinkedIn: ${profile.linkedinUrl.trim()}`);
+  }
+  if (details.length > 0) {
+    sections.push("- Personal Details:", ...details.map((d) => `  * ${d}`));
+  }
+  if (profile.bio.trim()) {
+    sections.push(`- Bio: ${profile.bio.trim()}`);
+  }
+  if (profile.education.length > 0) {
+    sections.push("- Education:");
+    profile.education.forEach((e) => {
+      const eduEnd = e.endYear ? formatDate(e.endMonth, e.endYear) : "present";
+      const parts = [
+        `  * ${e.degree} in ${e.major} at ${e.school} (${formatDate(e.startMonth, e.startYear)} – ${eduEnd})`,
+      ];
+      if (e.programName) parts.push(`    Program: ${e.programName}`);
+      if (e.finalGrade) parts.push(`    Final grade: ${e.finalGrade}`);
+      if (e.thesisTitle) parts.push(`    Thesis: ${e.thesisTitle}`);
+      if (e.courses.length > 0) {
+        parts.push(`    Courses: ${e.courses.join(", ")}`);
+      }
+      sections.push(parts.join("\n"));
+    });
+  }
+  if (profile.workExperience.length > 0) {
+    sections.push("- Work Experience:");
+    profile.workExperience.forEach((w) => {
+      const end = w.isCurrent
+        ? "present"
+        : `${formatDate(w.endMonth ?? "", w.endYear)}`;
+      const parts = [
+        `  * ${w.role} at ${w.company} (${formatDate(w.startMonth, w.startYear)} – ${end})`,
+      ];
+      if (w.jobDescription) {
+        parts.push(`    Responsibilities: ${w.jobDescription}`);
+      }
+      const projects = w.projects.filter((p) => p.trim().length > 0);
+      if (projects.length > 0) {
+        parts.push(`    Projects/Initiatives: ${projects.join(" | ")}`);
+      }
+      sections.push(parts.join("\n"));
+    });
+  }
+  if (profile.otherEngagements.length > 0) {
+    sections.push("- Other Engagements:");
+    profile.otherEngagements.forEach((oe) => {
+      const end = oe.isCurrent
+        ? "present"
+        : `${formatDate(oe.endMonth ?? "", oe.endYear)}`;
+      const parts = [
+        `  * ${oe.role} at ${oe.organization} (${formatDate(oe.startMonth, oe.startYear)} – ${end})`,
+      ];
+      if (oe.description) {
+        parts.push(`    Description: ${oe.description}`);
+      }
+      const achievements = oe.achievements.filter((a) => a.trim().length > 0);
+      if (achievements.length > 0) {
+        parts.push(`    Achievements/Merits: ${achievements.join(" | ")}`);
+      }
+      sections.push(parts.join("\n"));
+    });
+  }
+  if (profile.certifications.length > 0) {
+    sections.push(
+      "- Certifications: " +
+        profile.certifications
+          .map(
+            (c) =>
+              `${c.name} (expires ${c.expiryMonth} ${c.expiryYear})`,
+          )
+          .join(" | "),
+    );
+  }
+  if (profile.skills.length > 0) {
+    sections.push(
+      "- Skills: " + profile.skills.map((s) => s.name).join(", "),
+    );
+  }
+  if (profile.languages.length > 0) {
+    sections.push(
+      "- Languages: " +
+        profile.languages.map((l) => `${l.name} (${l.fluency})`).join(", "),
+    );
+  }
+  const interests = profile.interests
+    .map((i) => i.name.trim())
+    .filter((n) => n.length > 0);
+  if (interests.length > 0) {
+    sections.push("- Interests: " + interests.join(", "));
+  }
+  return sections;
+}
+
+/**
+ * Render the previous-cover-letters block of the candidate profile.
+ * When `useSummary` is true and the profile carries a non-empty
+ * `coverLetterSummary`, only that summary is rendered — the chat agent reads
+ * the digested highlights instead of every letter. Otherwise the full text
+ * of all letters is rendered.
+ */
+function renderCoverLetterSections(
+  profile: ProfileData,
+  useSummary: boolean,
+): string[] {
+  const sections: string[] = [];
+  if (profile.coverLetters.length === 0) return sections;
+
+  if (useSummary) {
+    const summary = (profile.coverLetterSummary ?? "").trim();
+    if (summary) {
+      sections.push("- Previous Cover Letters (summary):");
+      sections.push(summary);
+      return sections;
+    }
+  }
+
+  sections.push("- Previous Cover Letters (full text):");
+  profile.coverLetters.forEach((cl, i) => {
+    const date = cl.addedAt
+      ? new Date(cl.addedAt).toLocaleDateString()
+      : "unknown date";
+    const target = cl.company ? `for ${cl.company}` : "(no company recorded)";
+    sections.push(`  [Cover Letter ${i + 1} — ${target}, added ${date}]`);
+    sections.push(cl.content.trim() || "(empty)");
+  });
+  return sections;
+}
+
+/**
+ * Build the system prompt for the cover letter summarizer: a stateless
+ * extraction pass over the previous cover letters that keeps every point
+ * not already covered by the rest of the profile, so the chat agent can
+ * retrieve everything from the summary alone.
+ */
+export function buildCoverLetterSummaryPrompt(profile: ProfileData): string {
+  const sections: string[] = [
+    "You are the user's personal profile summarizer. Read their previous cover letters and the rest of their profile, then extract a compact bullet-point summary of the cover letters that the chat assistant can rely on instead of reading the full letters.",
+    "",
+    "Rules:",
+    "- Cover everything that is retrievable from the letters: motivations for applying, career interests and goals, enthusiasm toward specific fields or companies, personal fun facts and stories, and details such as involvement in non-profits or volunteering.",
+    "- Omit points that already exist in the rest of the profile (personal details, education, work experience, other engagements, certifications, skills, languages, interests, bio). Those sections reach the chat assistant directly.",
+    "- When in doubt whether a point is fully covered by another profile section, keep it anyway — the summary is the only way the chat assistant sees the letters.",
+    "- Keep specific details intact: names of organizations, places, numbers, dates, and distinctive phrases from the letters.",
+    "- Never invent content that is not in the letters.",
+    "- Write each distinct point as its own short bullet. No headings, no preamble, no formatting beyond the bullets.",
+    "",
+    "Candidate Profile (context for deduplication)",
+  ];
+  sections.push(...renderProfileSections(profile));
+  sections.push(...renderCoverLetterSections(profile, false));
+  if (profile.coverLetters.length === 0) {
+    sections.push("The user has no previous cover letters yet.");
+  }
   return sections.join("\n");
 }
 
