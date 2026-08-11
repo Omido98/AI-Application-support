@@ -3,6 +3,7 @@ import {
   buildSystemPrompt,
   buildBioPrompt,
   buildDeslopPrompt,
+  buildCoverLetterSummaryPrompt,
   getStandardPrompt,
 } from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
@@ -32,6 +33,7 @@ function makeProfile(overrides: Partial<ProfileData> = {}): ProfileData {
     country: "",
     linkedinUrl: "",
     bio: "",
+    coverLetterSummary: "",
     interests: [],
     education: [],
     coverLetters: [],
@@ -227,6 +229,51 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("Dear hiring team, ...");
   });
 
+  it("uses the cover letter summary instead of the full letters when present", () => {
+    const profile = makeProfile({
+      coverLetterSummary:
+        "- Motivated by climate change work\n- Enjoy mentoring juniors",
+      coverLetters: [
+        {
+          id: "c1",
+          company: "Other Corp",
+          content: "Long letter body that should not leak into the chat.",
+          addedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).toContain("Previous Cover Letters (summary)");
+    expect(prompt).toContain("- Motivated by climate change work");
+    expect(prompt).not.toContain("Previous Cover Letters (full text)");
+    expect(prompt).not.toContain("Long letter body that should not leak");
+  });
+
+  it("falls back to the full letters when the summary is empty", () => {
+    const profile = makeProfile({
+      coverLetterSummary: "   ",
+      coverLetters: [
+        {
+          id: "c1",
+          company: "Other Corp",
+          content: "Dear hiring team, ...",
+          addedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).toContain("Previous Cover Letters (full text)");
+    expect(prompt).toContain("Dear hiring team, ...");
+    expect(prompt).not.toContain("Previous Cover Letters (summary)");
+  });
+
+  it("does not render a cover letter block when there are no letters", () => {
+    const profile = makeProfile({ coverLetterSummary: "Stale summary text" });
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).not.toContain("Previous Cover Letters (summary)");
+    expect(prompt).not.toContain("Stale summary text");
+  });
+
   it("uses the standard rules by default", () => {
     const prompt = buildSystemPrompt(baseApplication, null);
     expect(prompt).toContain("Your Behavior Rules");
@@ -307,5 +354,50 @@ describe("buildBioPrompt", () => {
   it("handles an empty profile gracefully", () => {
     const prompt = buildBioPrompt(makeProfile());
     expect(prompt).toContain("has not filled in their profile yet");
+  });
+});
+
+describe("buildCoverLetterSummaryPrompt", () => {
+  it("instructs to keep uncertain points and omit covered ones", () => {
+    const prompt = buildCoverLetterSummaryPrompt(makeProfile());
+    expect(prompt).toContain("When in doubt");
+    expect(prompt).toContain("already exist in the rest of the profile");
+    expect(prompt).toContain("compact bullet-point summary");
+    expect(prompt).toContain("Never invent content");
+  });
+
+  it("includes the full cover letters and the rest of the profile", () => {
+    const profile = makeProfile({
+      fullName: "Jane Doe",
+      workExperience: [
+        {
+          id: "w1",
+          company: "Startup A",
+          role: "Developer",
+          startMonth: "July",
+          startYear: "2022",
+          isCurrent: true,
+          jobDescription: "",
+          projects: [],
+        },
+      ],
+      coverLetters: [
+        {
+          id: "c1",
+          company: "Other Corp",
+          content: "I have always loved volunteer work.",
+          addedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const prompt = buildCoverLetterSummaryPrompt(profile);
+    expect(prompt).toContain("Developer at Startup A");
+    expect(prompt).toContain("Previous Cover Letters (full text)");
+    expect(prompt).toContain("I have always loved volunteer work.");
+  });
+
+  it("handles a profile with no cover letters", () => {
+    const prompt = buildCoverLetterSummaryPrompt(makeProfile());
+    expect(prompt).toContain("has no previous cover letters yet");
   });
 });

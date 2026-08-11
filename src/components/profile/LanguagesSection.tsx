@@ -1,9 +1,13 @@
+import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus } from "lucide-react";
 import type { Language, FluencyLevel } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import ConfirmDeleteDialog, {
+  type DeleteTarget,
+} from "@/components/profile/ConfirmDeleteDialog";
 
 const FLUENCY_OPTIONS: FluencyLevel[] = [
   "Beginner",
@@ -29,6 +33,20 @@ export default function LanguagesSection() {
   const addLanguage = useProfileStore((s) => s.addLanguage);
   const updateLanguage = useProfileStore((s) => s.updateLanguage);
   const removeLanguage = useProfileStore((s) => s.removeLanguage);
+
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+
+  /** A language with no name deletes without confirmation. */
+  const requestDelete = (lang: Language) => {
+    if (!lang.name.trim()) {
+      removeLanguage(lang.id);
+      return;
+    }
+    setDeleteTarget({
+      label: `the language "${lang.name.trim()}"`,
+      onConfirm: () => removeLanguage(lang.id),
+    });
+  };
 
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
@@ -78,7 +96,7 @@ export default function LanguagesSection() {
             </select>
             <button
               type="button"
-              onClick={() => removeLanguage(lang.id)}
+              onClick={() => requestDelete(lang)}
               className="text-destructive hover:text-red-400 transition-colors shrink-0"
               title="Remove language"
             >
@@ -87,6 +105,10 @@ export default function LanguagesSection() {
           </div>
         ))}
       </CardContent>
+      <ConfirmDeleteDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+      />
     </Card>
   );
 }

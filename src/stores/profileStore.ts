@@ -27,6 +27,7 @@ function writeSnapshot() {
     country: s.country,
     linkedinUrl: s.linkedinUrl,
     bio: s.bio,
+    coverLetterSummary: s.coverLetterSummary,
     interests: s.interests,
     education: s.education,
     coverLetters: s.coverLetters,
@@ -75,6 +76,9 @@ interface ProfileState extends ProfileData {
 
   /** Set the CV bio text */
   setBio: (value: string) => void;
+
+  /** Set the AI-extracted cover letter summary text */
+  setCoverLetterSummary: (value: string) => void;
 
   // Education actions
   setEducation: (items: Education[]) => void;
@@ -137,6 +141,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
   country: "",
   linkedinUrl: "",
   bio: "",
+  coverLetterSummary: "",
   interests: [],
   education: [],
   coverLetters: [],
@@ -158,6 +163,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
         country: data.country ?? "",
         linkedinUrl: data.linkedinUrl ?? "",
         bio: data.bio ?? "",
+        coverLetterSummary: data.coverLetterSummary ?? "",
         interests: data.interests ?? [],
         education: data.education ?? [],
         coverLetters: data.coverLetters ?? [],
@@ -182,6 +188,12 @@ export const useProfileStore = create<ProfileState>((set) => ({
   // ── Bio ──
   setBio: (value) => {
     set({ bio: value });
+    debouncedSave();
+  },
+
+  // ── Cover letter summary ──
+  setCoverLetterSummary: (value) => {
+    set({ coverLetterSummary: value });
     debouncedSave();
   },
 

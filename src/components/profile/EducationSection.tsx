@@ -6,6 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import ConfirmDeleteDialog, {
+  truncateLabel,
+  type DeleteTarget,
+} from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -36,6 +40,19 @@ const inputClass =
 const selectClass =
   "bg-field border border-border text-text-primary rounded-md px-3 py-1.5 text-sm appearance-none cursor-pointer transition-[border-color,box-shadow] hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary";
 
+/** An entry carrying no user content is deleted without confirmation. */
+function isEducationEmpty(e: Education): boolean {
+  return (
+    !e.school.trim() &&
+    !e.degree.trim() &&
+    !e.programName.trim() &&
+    !e.major.trim() &&
+    !e.finalGrade.trim() &&
+    !e.thesisTitle.trim() &&
+    e.courses.every((c) => !c.trim())
+  );
+}
+
 export default function EducationSection() {
   const education = useProfileStore((s) => s.education);
   const addEducation = useProfileStore((s) => s.addEducation);
@@ -43,6 +60,7 @@ export default function EducationSection() {
   const removeEducation = useProfileStore((s) => s.removeEducation);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -53,6 +71,34 @@ export default function EducationSection() {
     const edu = createEmptyEducation();
     addEducation(edu);
     setExpanded((prev) => ({ ...prev, [edu.id]: true }));
+  };
+
+  const requestDeleteEntry = (edu: Education) => {
+    if (isEducationEmpty(edu)) {
+      removeEducation(edu.id);
+      return;
+    }
+    const title = [edu.degree, edu.school].filter(Boolean).join(" — ");
+    setDeleteTarget({
+      label: title ? `the education entry "${title}"` : "this education entry",
+      onConfirm: () => removeEducation(edu.id),
+    });
+  };
+
+  const requestDeleteCourse = (edu: Education, courseIndex: number) => {
+    const course = edu.courses[courseIndex];
+    if (!course.trim()) {
+      const next = edu.courses.filter((_, i) => i !== courseIndex);
+      updateEducation(edu.id, { courses: next });
+      return;
+    }
+    setDeleteTarget({
+      label: `the course "${truncateLabel(course)}"`,
+      onConfirm: () => {
+        const next = edu.courses.filter((_, i) => i !== courseIndex);
+        updateEducation(edu.id, { courses: next });
+      },
+    });
   };
 
   return (
@@ -69,7 +115,7 @@ export default function EducationSection() {
           Add Education
         </Button>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-3">
         {education.length === 0 && (
           <p className="text-text-muted text-sm text-center py-4">
             No education entries yet. Click "Add Education" to get started.
@@ -86,37 +132,58 @@ export default function EducationSection() {
               key={edu.id}
               className="bg-field border-border relative overflow-visible transition-[border-color] hover:border-primary/20"
             >
-              {/* Trash button — top right */}
-              <button
-                type="button"
-                onClick={() => removeEducation(edu.id)}
-                className="absolute top-3 right-3 text-destructive hover:text-red-400 transition-colors z-10"
-                title="Remove entry"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {isExpanded && (
+                <button
+                  type="button"
+                  onClick={() => requestDeleteEntry(edu)}
+                  className="absolute top-3 right-3 text-destructive hover:text-red-400 transition-colors z-10"
+                  title="Remove entry"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
 
-              <CardContent className="pt-6 pb-4">
+              <CardContent className={isExpanded ? "pt-6 pb-4" : "pt-3 pb-2"}>
                 {!isExpanded ? (
-                  <div>
-                    {title ? (
-                      <p className="text-text-primary text-sm font-medium mb-1">
-                        {title}
-                      </p>
-                    ) : (
-                      <p className="text-text-muted italic text-sm mb-1">
-                        Untitled entry
-                      </p>
-                    )}
-                    <p className="text-text-secondary text-sm">{dateRange}</p>
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="text-primary px-0 h-auto mt-1"
-                      onClick={() => toggleExpand(edu.id)}
-                    >
-                      Expand <ChevronDown className="h-3.5 w-3.5 ml-1" />
-                    </Button>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleExpand(edu.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleExpand(edu.id);
+                      }
+                    }}
+                    className="flex w-full items-center justify-between gap-3 text-left cursor-pointer"
+                    title="Expand entry"
+                  >
+                    <span className="min-w-0">
+                      <span
+                        className={`block text-sm font-medium truncate ${
+                          title ? "text-text-primary" : "text-text-muted italic"
+                        }`}
+                      >
+                        {title || "Untitled entry"}
+                      </span>
+                      <span className="block text-xs text-text-secondary truncate">
+                        {dateRange}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <ChevronDown className="h-4 w-4 text-text-muted" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          requestDeleteEntry(edu);
+                        }}
+                        className="text-destructive hover:text-red-400 transition-colors"
+                        title="Remove entry"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </span>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -258,10 +325,7 @@ export default function EducationSection() {
                           />
                           <button
                             type="button"
-                            onClick={() => {
-                              const next = edu.courses.filter((_, i) => i !== ci);
-                              updateEducation(edu.id, { courses: next });
-                            }}
+                            onClick={() => requestDeleteCourse(edu, ci)}
                             className="text-destructive hover:text-red-400 transition-colors shrink-0"
                             title="Remove course"
                           >
@@ -297,6 +361,10 @@ export default function EducationSection() {
           );
         })}
       </CardContent>
+      <ConfirmDeleteDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+      />
     </Card>
   );
 }

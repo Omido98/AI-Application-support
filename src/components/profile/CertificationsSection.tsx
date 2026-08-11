@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus } from "lucide-react";
 import type { Certification } from "@/types";
@@ -5,6 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import ConfirmDeleteDialog, {
+  type DeleteTarget,
+} from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -30,6 +34,22 @@ export default function CertificationsSection() {
   const addCertification = useProfileStore((s) => s.addCertification);
   const updateCertification = useProfileStore((s) => s.updateCertification);
   const removeCertification = useProfileStore((s) => s.removeCertification);
+
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+
+  /** A certification with no name and no expiry year deletes without confirmation. */
+  const requestDelete = (cert: Certification) => {
+    if (!cert.name.trim() && !cert.expiryYear.trim()) {
+      removeCertification(cert.id);
+      return;
+    }
+    setDeleteTarget({
+      label: cert.name.trim()
+        ? `the certification "${cert.name.trim()}"`
+        : "this certification",
+      onConfirm: () => removeCertification(cert.id),
+    });
+  };
 
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
@@ -95,7 +115,7 @@ export default function CertificationsSection() {
             </div>
             <button
               type="button"
-              onClick={() => removeCertification(cert.id)}
+              onClick={() => requestDelete(cert)}
               className="text-destructive hover:text-red-400 transition-colors shrink-0 mt-5"
               title="Remove certification"
             >
@@ -104,6 +124,10 @@ export default function CertificationsSection() {
           </div>
         ))}
       </CardContent>
+      <ConfirmDeleteDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+      />
     </Card>
   );
 }

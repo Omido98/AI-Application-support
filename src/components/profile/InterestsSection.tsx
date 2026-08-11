@@ -1,9 +1,13 @@
+import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus } from "lucide-react";
 import type { Interest } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import ConfirmDeleteDialog, {
+  type DeleteTarget,
+} from "@/components/profile/ConfirmDeleteDialog";
 
 function createEmptyInterest(): Interest {
   return { id: crypto.randomUUID(), name: "" };
@@ -17,6 +21,20 @@ export default function InterestsSection() {
   const addInterest = useProfileStore((s) => s.addInterest);
   const updateInterest = useProfileStore((s) => s.updateInterest);
   const removeInterest = useProfileStore((s) => s.removeInterest);
+
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+
+  /** An empty interest deletes without confirmation. */
+  const requestDelete = (interest: Interest) => {
+    if (!interest.name.trim()) {
+      removeInterest(interest.id);
+      return;
+    }
+    setDeleteTarget({
+      label: `the interest "${interest.name.trim()}"`,
+      onConfirm: () => removeInterest(interest.id),
+    });
+  };
 
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
@@ -51,7 +69,7 @@ export default function InterestsSection() {
             />
             <button
               type="button"
-              onClick={() => removeInterest(interest.id)}
+              onClick={() => requestDelete(interest)}
               className="text-destructive hover:text-red-400 transition-colors shrink-0"
               title="Remove interest"
             >
@@ -60,6 +78,10 @@ export default function InterestsSection() {
           </div>
         ))}
       </CardContent>
+      <ConfirmDeleteDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+      />
     </Card>
   );
 }

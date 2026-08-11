@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import ConfirmDeleteDialog, {
+  truncateLabel,
+  type DeleteTarget,
+} from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -38,6 +42,16 @@ const selectClass =
 const textareaClass =
   "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 min-h-[100px] max-h-[200px] transition-[border-color,box-shadow] hover:border-primary/30";
 
+/** An entry carrying no user content is deleted without confirmation. */
+function isOtherEngagementEmpty(oe: OtherEngagement): boolean {
+  return (
+    !oe.organization.trim() &&
+    !oe.role.trim() &&
+    !oe.description.trim() &&
+    oe.achievements.every((a) => !a.trim())
+  );
+}
+
 export default function OtherEngagementsSection() {
   const otherEngagements = useProfileStore((s) => s.otherEngagements);
   const addOtherEngagement = useProfileStore((s) => s.addOtherEngagement);
@@ -45,6 +59,7 @@ export default function OtherEngagementsSection() {
   const removeOtherEngagement = useProfileStore((s) => s.removeOtherEngagement);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -55,6 +70,37 @@ export default function OtherEngagementsSection() {
     const oe = createEmptyOtherEngagement();
     addOtherEngagement(oe);
     setExpanded((prev) => ({ ...prev, [oe.id]: true }));
+  };
+
+  const requestDeleteEntry = (oe: OtherEngagement) => {
+    if (isOtherEngagementEmpty(oe)) {
+      removeOtherEngagement(oe.id);
+      return;
+    }
+    const title = [oe.role, oe.organization].filter(Boolean).join(" @ ");
+    setDeleteTarget({
+      label: title ? `the engagement entry "${title}"` : "this engagement entry",
+      onConfirm: () => removeOtherEngagement(oe.id),
+    });
+  };
+
+  const requestDeleteAchievement = (
+    oe: OtherEngagement,
+    achievementIndex: number,
+  ) => {
+    const achievement = oe.achievements[achievementIndex];
+    if (!achievement.trim()) {
+      const next = oe.achievements.filter((_, i) => i !== achievementIndex);
+      updateOtherEngagement(oe.id, { achievements: next });
+      return;
+    }
+    setDeleteTarget({
+      label: `the achievement "${truncateLabel(achievement)}"`,
+      onConfirm: () => {
+        const next = oe.achievements.filter((_, i) => i !== achievementIndex);
+        updateOtherEngagement(oe.id, { achievements: next });
+      },
+    });
   };
 
   return (
@@ -71,7 +117,7 @@ export default function OtherEngagementsSection() {
           Add Other Engagement
         </Button>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-3">
         {otherEngagements.length === 0 && (
           <p className="text-text-muted text-sm text-center py-4">
             No other engagements yet. Click "Add Other Engagement" to get started.
@@ -90,37 +136,58 @@ export default function OtherEngagementsSection() {
               key={oe.id}
               className="bg-field border-border relative overflow-visible transition-[border-color] hover:border-primary/20"
             >
-              {/* Trash button */}
-              <button
-                type="button"
-                onClick={() => removeOtherEngagement(oe.id)}
-                className="absolute top-3 right-3 text-destructive hover:text-red-400 transition-colors z-10"
-                title="Remove entry"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {isExpanded && (
+                <button
+                  type="button"
+                  onClick={() => requestDeleteEntry(oe)}
+                  className="absolute top-3 right-3 text-destructive hover:text-red-400 transition-colors z-10"
+                  title="Remove entry"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
 
-              <CardContent className="pt-6 pb-4">
+              <CardContent className={isExpanded ? "pt-6 pb-4" : "pt-3 pb-2"}>
                 {!isExpanded ? (
-                  <div>
-                    {title ? (
-                      <p className="text-text-primary text-sm font-medium mb-1">
-                        {title}
-                      </p>
-                    ) : (
-                      <p className="text-text-muted italic text-sm mb-1">
-                        Untitled entry
-                      </p>
-                    )}
-                    <p className="text-text-secondary text-sm">{dateRange}</p>
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="text-primary px-0 h-auto mt-1"
-                      onClick={() => toggleExpand(oe.id)}
-                    >
-                      Expand <ChevronDown className="h-3.5 w-3.5 ml-1" />
-                    </Button>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleExpand(oe.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleExpand(oe.id);
+                      }
+                    }}
+                    className="flex w-full items-center justify-between gap-3 text-left cursor-pointer"
+                    title="Expand entry"
+                  >
+                    <span className="min-w-0">
+                      <span
+                        className={`block text-sm font-medium truncate ${
+                          title ? "text-text-primary" : "text-text-muted italic"
+                        }`}
+                      >
+                        {title || "Untitled entry"}
+                      </span>
+                      <span className="block text-xs text-text-secondary truncate">
+                        {dateRange}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <ChevronDown className="h-4 w-4 text-text-muted" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          requestDeleteEntry(oe);
+                        }}
+                        className="text-destructive hover:text-red-400 transition-colors"
+                        title="Remove entry"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </span>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -280,10 +347,7 @@ export default function OtherEngagementsSection() {
                           />
                           <button
                             type="button"
-                            onClick={() => {
-                              const next = oe.achievements.filter((_, i) => i !== ai);
-                              updateOtherEngagement(oe.id, { achievements: next });
-                            }}
+                            onClick={() => requestDeleteAchievement(oe, ai)}
                             className="text-destructive hover:text-red-400 transition-colors shrink-0 mt-2"
                             title="Remove achievement"
                           >
@@ -308,6 +372,10 @@ export default function OtherEngagementsSection() {
           );
         })}
       </CardContent>
+      <ConfirmDeleteDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+      />
     </Card>
   );
 }

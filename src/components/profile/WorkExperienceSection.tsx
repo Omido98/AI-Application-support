@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import ConfirmDeleteDialog, {
+  truncateLabel,
+  type DeleteTarget,
+} from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -38,6 +42,16 @@ const selectClass =
 const textareaClass =
   "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 min-h-[100px] max-h-[200px] transition-[border-color,box-shadow] hover:border-primary/30";
 
+/** An entry carrying no user content is deleted without confirmation. */
+function isWorkExperienceEmpty(w: WorkExperience): boolean {
+  return (
+    !w.company.trim() &&
+    !w.role.trim() &&
+    !w.jobDescription.trim() &&
+    w.projects.every((p) => !p.trim())
+  );
+}
+
 export default function WorkExperienceSection() {
   const workExperience = useProfileStore((s) => s.workExperience);
   const addWorkExperience = useProfileStore((s) => s.addWorkExperience);
@@ -45,6 +59,7 @@ export default function WorkExperienceSection() {
   const removeWorkExperience = useProfileStore((s) => s.removeWorkExperience);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -55,6 +70,34 @@ export default function WorkExperienceSection() {
     const we = createEmptyWorkExperience();
     addWorkExperience(we);
     setExpanded((prev) => ({ ...prev, [we.id]: true }));
+  };
+
+  const requestDeleteEntry = (we: WorkExperience) => {
+    if (isWorkExperienceEmpty(we)) {
+      removeWorkExperience(we.id);
+      return;
+    }
+    const title = [we.role, we.company].filter(Boolean).join(" @ ");
+    setDeleteTarget({
+      label: title ? `the work experience entry "${title}"` : "this work experience entry",
+      onConfirm: () => removeWorkExperience(we.id),
+    });
+  };
+
+  const requestDeleteProject = (we: WorkExperience, projectIndex: number) => {
+    const project = we.projects[projectIndex];
+    if (!project.trim()) {
+      const next = we.projects.filter((_, i) => i !== projectIndex);
+      updateWorkExperience(we.id, { projects: next });
+      return;
+    }
+    setDeleteTarget({
+      label: `the project "${truncateLabel(project)}"`,
+      onConfirm: () => {
+        const next = we.projects.filter((_, i) => i !== projectIndex);
+        updateWorkExperience(we.id, { projects: next });
+      },
+    });
   };
 
   return (
@@ -71,7 +114,7 @@ export default function WorkExperienceSection() {
           Add Work Experience
         </Button>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-3">
         {workExperience.length === 0 && (
           <p className="text-text-muted text-sm text-center py-4">
             No work experience entries yet. Click "Add Work Experience" to get started.
@@ -90,37 +133,58 @@ export default function WorkExperienceSection() {
               key={we.id}
               className="bg-field border-border relative overflow-visible transition-[border-color] hover:border-primary/20"
             >
-              {/* Trash button */}
-              <button
-                type="button"
-                onClick={() => removeWorkExperience(we.id)}
-                className="absolute top-3 right-3 text-destructive hover:text-red-400 transition-colors z-10"
-                title="Remove entry"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {isExpanded && (
+                <button
+                  type="button"
+                  onClick={() => requestDeleteEntry(we)}
+                  className="absolute top-3 right-3 text-destructive hover:text-red-400 transition-colors z-10"
+                  title="Remove entry"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
 
-              <CardContent className="pt-6 pb-4">
+              <CardContent className={isExpanded ? "pt-6 pb-4" : "pt-3 pb-2"}>
                 {!isExpanded ? (
-                  <div>
-                    {title ? (
-                      <p className="text-text-primary text-sm font-medium mb-1">
-                        {title}
-                      </p>
-                    ) : (
-                      <p className="text-text-muted italic text-sm mb-1">
-                        Untitled entry
-                      </p>
-                    )}
-                    <p className="text-text-secondary text-sm">{dateRange}</p>
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="text-primary px-0 h-auto mt-1"
-                      onClick={() => toggleExpand(we.id)}
-                    >
-                      Expand <ChevronDown className="h-3.5 w-3.5 ml-1" />
-                    </Button>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleExpand(we.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleExpand(we.id);
+                      }
+                    }}
+                    className="flex w-full items-center justify-between gap-3 text-left cursor-pointer"
+                    title="Expand entry"
+                  >
+                    <span className="min-w-0">
+                      <span
+                        className={`block text-sm font-medium truncate ${
+                          title ? "text-text-primary" : "text-text-muted italic"
+                        }`}
+                      >
+                        {title || "Untitled entry"}
+                      </span>
+                      <span className="block text-xs text-text-secondary truncate">
+                        {dateRange}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <ChevronDown className="h-4 w-4 text-text-muted" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          requestDeleteEntry(we);
+                        }}
+                        className="text-destructive hover:text-red-400 transition-colors"
+                        title="Remove entry"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </span>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -280,10 +344,7 @@ export default function WorkExperienceSection() {
                           />
                           <button
                             type="button"
-                            onClick={() => {
-                              const next = we.projects.filter((_, i) => i !== pi);
-                              updateWorkExperience(we.id, { projects: next });
-                            }}
+                            onClick={() => requestDeleteProject(we, pi)}
                             className="text-destructive hover:text-red-400 transition-colors shrink-0 mt-2"
                             title="Remove project"
                           >
@@ -308,6 +369,10 @@ export default function WorkExperienceSection() {
           );
         })}
       </CardContent>
+      <ConfirmDeleteDialog
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+      />
     </Card>
   );
 }
