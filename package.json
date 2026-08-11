@@ -1,7 +1,7 @@
 {
   "name": "ai-application-support",
   "private": true,
-  "version": "1.1.8",
+  "version": "1.1.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -29,6 +29,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "shadcn": "^4.15.0",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
@@ -36,6 +37,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.20",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

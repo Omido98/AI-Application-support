@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -153,4 +154,33 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+
+/* ============================================================
+   Chat markdown — tables use the app's theme tokens so they
+   match the rest of the UI in light and dark mode.
+   ============================================================ */
+.chat-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow: hidden;
+}
+.chat-markdown th {
+  background: var(--field);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.chat-markdown td {
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+.chat-markdown tbody tr:nth-child(even) td {
+  background: var(--field);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { sendMessage, deslopText } from "@/utils/api";
+import { sendMessage, deslopText, reviewDraft } from "@/utils/api";
 import type { ApiConfig } from "@/stores/chatStore";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -406,6 +406,62 @@ describe("deslopText", () => {
 
   it("returns an error when the API key is missing", async () => {
     const result = await deslopText("Draft.", { ...baseConfig, apiKey: "" });
+    expect(result.content).toBe("");
+    expect(result.error).toMatch(/API key/i);
+  });
+});
+
+describe("reviewDraft", () => {
+  const appContext = {
+    company: "Acme Corp",
+    jobDescription: "Build the platform",
+    language: "English",
+    requirements: "Cover letter",
+    companyResearch: "",
+  };
+
+  it("sends the review prompt with tools enabled and the draft embedded", async () => {
+    mockChatSequence([
+      { kind: "stream", data: openaiMessage({ content: "Review feedback." }) },
+    ]);
+    const result = await reviewDraft(
+      "Dear Acme Corp, ...",
+      appContext,
+      null,
+      baseConfig,
+    );
+    expect(result).toEqual({ content: "Review feedback." });
+
+    const chatCalls = mockedInvoke.mock.calls.filter(
+      (c) => c[0] === "zen_chat_stream",
+    );
+    expect(chatCalls.length).toBeGreaterThan(0);
+    for (const call of chatCalls) {
+      const payload = (call[1] as {
+        payload: {
+          messages: Array<{ role: string; content?: string | null }>;
+          tools?: unknown;
+        };
+      }).payload;
+      expect(payload.tools).toBeDefined();
+      expect(payload.messages[0].role).toBe("system");
+      expect(payload.messages[0].content).toContain("hiring manager proxy");
+      expect(payload.messages[0].content).toContain("Dear Acme Corp, ...");
+      expect(payload.messages[0].content).toContain("- Company: Acme Corp");
+      expect(payload.messages[1]).toEqual({
+        role: "user",
+        content: "Review the draft above.",
+      });
+    }
+  });
+
+  it("returns an error when the API key is missing", async () => {
+    const result = await reviewDraft(
+      "Draft.",
+      appContext,
+      null,
+      { ...baseConfig, apiKey: "" },
+    );
     expect(result.content).toBe("");
     expect(result.error).toMatch(/API key/i);
   });
