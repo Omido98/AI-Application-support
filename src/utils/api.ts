@@ -2,7 +2,9 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import type { ApiConfig } from "@/stores/chatStore";
 import type { ChatMessage } from "@/stores/chatStore";
 import type { ProviderId } from "@/utils/providers";
-import { buildDeslopPrompt } from "@/utils/systemPrompt";
+import { buildDeslopPrompt, buildDraftReviewPrompt } from "@/utils/systemPrompt";
+import type { ApplicationContext } from "@/utils/systemPrompt";
+import type { ProfileData } from "@/types";
 
 export interface ApiResponse {
   content: string;
@@ -201,6 +203,35 @@ export async function deslopText(
     [{ role: "user", content: draft, timestamp: new Date().toISOString() }],
     { ...config, webSearchEnabled: false },
     buildDeslopPrompt(),
+    options,
+  );
+}
+
+/**
+ * Run the "Review draft" pass on a draft: sends the draft, the Application
+ * Context, and the Candidate Profile as a stateless hiring-manager-proxy
+ * review that researches the company, audits the draft's factual grounding,
+ * and returns structured feedback. Unlike the de-slop pass, web tools stay
+ * enabled so the reviewer can research the company.
+ *
+ * @param draft - The assistant message text to review.
+ * @param application - The Application Context of the thread.
+ * @param profile - The candidate's profile, used for the grounding audit.
+ * @param config - API configuration (provider, baseUrl, apiKey, model, ...).
+ * @param options - Live-text callback and an optional AbortSignal.
+ * @returns The review feedback, or an error message.
+ */
+export async function reviewDraft(
+  draft: string,
+  application: ApplicationContext,
+  profile: ProfileData | null,
+  config: ApiConfig,
+  options: SendMessageOptions = {},
+): Promise<ApiResponse> {
+  return sendMessage(
+    [{ role: "user", content: "Review the draft above.", timestamp: new Date().toISOString() }],
+    config,
+    buildDraftReviewPrompt(draft, application, profile),
     options,
   );
 }

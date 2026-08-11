@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useChatStore } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
-import { deslopText } from "@/utils/api";
+import { deslopText, reviewDraft } from "@/utils/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +14,9 @@ import {
   Sparkles,
   Loader2,
   ArrowDown,
+  ShieldCheck,
 } from "lucide-react";
+import type { ProfileData } from "@/types";
 
 function LoadingDots() {
   return (
@@ -47,10 +50,13 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [deslopPendingId, setDeslopPendingId] = useState<string | null>(null);
+  const [reviewPendingId, setReviewPendingId] = useState<string | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const company =
-    applications.find((a) => a.id === selectedId)?.companyName ?? "";
+  const application =
+    applications.find((a) => a.id === selectedId) ?? null;
+
+  const company = application?.companyName ?? "";
 
   const messageKey = (msg: { timestamp: string; content: string }) =>
     msg.timestamp + msg.content.slice(0, 40);
@@ -151,6 +157,57 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
     }
   };
 
+  const handleReview = async (msgId: string, content: string) => {
+    if (!content.trim() || reviewPendingId || !application) return;
+    setReviewPendingId(msgId);
+    setError(null);
+
+    const appCtx = {
+      company: application.companyName,
+      jobDescription: application.jobDescription,
+      language: application.applicationLanguage,
+      requirements: application.requirements,
+      companyResearch: application.companyResearch,
+    };
+
+    const profileState = useProfileStore.getState();
+    if (!profileState.isLoaded) {
+      await profileState.loadProfile();
+    }
+    const freshProfile = useProfileStore.getState();
+    const profileData: ProfileData = {
+      fullName: freshProfile.fullName,
+      email: freshProfile.email,
+      city: freshProfile.city,
+      country: freshProfile.country,
+      linkedinUrl: freshProfile.linkedinUrl,
+      bio: freshProfile.bio,
+      coverLetterSummary: freshProfile.coverLetterSummary,
+      interests: freshProfile.interests,
+      education: freshProfile.education,
+      coverLetters: freshProfile.coverLetters,
+      workExperience: freshProfile.workExperience,
+      otherEngagements: freshProfile.otherEngagements,
+      certifications: freshProfile.certifications,
+      skills: freshProfile.skills,
+      languages: freshProfile.languages,
+    };
+
+    const result = await reviewDraft(content, appCtx, profileData, config);
+    setReviewPendingId(null);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    if (result.content.trim()) {
+      addMessage({
+        role: "assistant",
+        content: result.content,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  };
+
   if (messages.length === 0 && !isSending) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -205,8 +262,10 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
               {isUser ? (
                 <p>{msg.content}</p>
               ) : (
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {msg.content}
+                  </ReactMarkdown>
                 </div>
               )}
             </div>
@@ -261,6 +320,24 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
                     <Sparkles className="size-3.5" />
                   )}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => handleReview(key, msg.content)}
+                  disabled={reviewPendingId !== null}
+                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
+                  title={
+                    reviewPendingId === key
+                      ? "Reviewing draft…"
+                      : "Review draft"
+                  }
+                  aria-label="Review draft"
+                >
+                  {reviewPendingId === key ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="size-3.5" />
+                  )}
+                </button>
               </div>
             )}
           </div>
@@ -270,8 +347,10 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
       {isSending && streamingText ? (
         <div className="flex justify-start">
           <div className="max-w-[80%] rounded-xl px-4 py-2.5 text-sm leading-relaxed break-words bg-surface text-text-primary border border-border">
-            <div className="prose prose-sm max-w-none dark:prose-invert">
-              <ReactMarkdown>{streamingText}</ReactMarkdown>
+            <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {streamingText}
+              </ReactMarkdown>
             </div>
             <span
               className="inline-block w-2 h-4 align-middle bg-primary/70 animate-pulse ml-0.5"
