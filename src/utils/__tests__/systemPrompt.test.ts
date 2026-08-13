@@ -4,6 +4,8 @@ import {
   buildBioPrompt,
   buildDeslopPrompt,
   buildDraftReviewPrompt,
+  buildDraftRevisionPrompt,
+  buildDraftVerifyPrompt,
   buildCoverLetterSummaryPrompt,
   getStandardPrompt,
 } from "@/utils/systemPrompt";
@@ -55,9 +57,9 @@ describe("getStandardPrompt", () => {
     expect(prompt).toContain("web_search");
   });
 
-  it("limits research to one search and up to 5 page fetches per turn", () => {
+  it("limits the reviewer to one search and up to 5 page fetches", () => {
     const prompt = getStandardPrompt();
-    expect(prompt).toContain("one search and up to 5 page fetches per turn");
+    expect(prompt).toContain("one search and up to 5 page fetches");
   });
 
   it("includes the anti-slop writing rules", () => {
@@ -69,11 +71,23 @@ describe("getStandardPrompt", () => {
     expect(prompt).toContain("re-read it for these patterns");
   });
 
-  it("includes the structured fit table in the initial evaluation", () => {
+  it("omits the fit-evaluation block by default", () => {
     const prompt = getStandardPrompt();
+    expect(prompt).not.toContain("Initial fit evaluation");
+    expect(prompt).not.toContain("structured fit table");
+    expect(prompt).not.toContain("Technical Skills 30%");
+  });
+
+  it("includes the fit-evaluation block only when requested", () => {
+    const prompt = getStandardPrompt(true);
+    expect(prompt).toContain("Initial fit evaluation (first message of a conversation only):");
+    expect(prompt).toContain("Help me answer my application");
+    expect(prompt).toContain("neutral third-party evaluator");
+    expect(prompt).toContain("likely not worth applying");
     expect(prompt).toContain("structured fit table");
     expect(prompt).toContain("Technical Skills 30%");
-    expect(prompt).toContain("strong fit 75+");
+    expect(prompt).toContain("Key Strengths");
+    expect(prompt).toContain("provisional or inconclusive");
   });
 
   it("includes the cover letter writing rules", () => {
@@ -184,6 +198,100 @@ describe("buildDraftReviewPrompt", () => {
   it("handles a null profile gracefully", () => {
     const prompt = buildDraftReviewPrompt("Draft text.", baseApplication, null);
     expect(prompt).toContain("Candidate Profile (not filled in)");
+  });
+
+  it("requires a final VERDICT line so the improve pipeline can stop early", () => {
+    const prompt = buildDraftReviewPrompt("Draft text.", baseApplication, null);
+    expect(prompt).toContain("VERDICT: PASS");
+    expect(prompt).toContain("VERDICT: REVISE");
+    expect(prompt).toContain("very last line");
+  });
+
+  it("uses the compact one-line-per-finding feedback format", () => {
+    const prompt = buildDraftReviewPrompt("Draft text.", baseApplication, null);
+    expect(prompt).toContain("compact checklist, one line per finding");
+    expect(prompt).toContain('exact draft passage in double quotes, an arrow, then the fix');
+    expect(prompt).toContain("- None.");
+    expect(prompt).toContain("every finding must be directly actionable");
+  });
+
+  it("caps the report at 12 findings so downstream passes stay small", () => {
+    const prompt = buildDraftReviewPrompt("Draft text.", baseApplication, null);
+    expect(prompt).toContain("At most 12 findings in total");
+    expect(prompt).toContain("12 most impactful");
+  });
+
+  it("requires a self-contained report because the posting is not passed to the reviser", () => {
+    const prompt = buildDraftReviewPrompt("Draft text.", baseApplication, null);
+    expect(prompt).toContain("only context the reviser will receive");
+    expect(prompt).toContain("job posting text is not passed to the reviser");
+  });
+});
+
+describe("buildDraftRevisionPrompt", () => {
+  it("includes the writer persona, the review feedback, the draft, and no posting context", () => {
+    const prompt = buildDraftRevisionPrompt(
+      "Dear Acme Corp, ...",
+      "Feedback report...",
+      null,
+    );
+    expect(prompt).toContain("senior application writer");
+    expect(prompt).toContain("Feedback report...");
+    expect(prompt).toContain("Current draft:");
+    expect(prompt).toContain("Dear Acme Corp, ...");
+    expect(prompt).not.toContain("Application Context");
+    expect(prompt).not.toContain("- Company:");
+    expect(prompt).not.toContain("Job Description");
+  });
+
+  it("applies anti-slop rules, forbids fabrication, and outputs only the draft", () => {
+    const prompt = buildDraftRevisionPrompt("Draft.", "Revise.", null);
+    expect(prompt).toContain("Anti-slop writing rules");
+    expect(prompt).toContain("Never fabricate");
+    expect(prompt).toContain("Output only the revised draft");
+  });
+
+  it("keeps the forward-looking, non-CV-repetition rule", () => {
+    const prompt = buildDraftRevisionPrompt("Draft.", "Revise.", null);
+    expect(prompt).toContain("not a CV repetition");
+    expect(prompt).toContain("tasks you will solve");
+  });
+
+  it("includes the candidate profile as the grounding source", () => {
+    const profile = makeProfile({
+      skills: [{ id: "s1", name: "TypeScript" }],
+    });
+    const prompt = buildDraftRevisionPrompt("Draft.", "Revise.", profile);
+    expect(prompt).toContain("- Skills: TypeScript");
+  });
+
+  it("handles a null profile gracefully", () => {
+    const prompt = buildDraftRevisionPrompt("Draft.", "Revise.", null);
+    expect(prompt).toContain("Candidate Profile (not filled in)");
+  });
+});
+
+describe("buildDraftVerifyPrompt", () => {
+  it("uses the check-reading persona with a single verdict line", () => {
+    const prompt = buildDraftVerifyPrompt("Revised draft.", "Feedback report.");
+    expect(prompt).toContain("check-reading a revised draft");
+    expect(prompt).toContain("VERDICT: PASS");
+    expect(prompt).toContain("VERDICT: REVISE");
+    expect(prompt).toContain("at most one short line of reasoning");
+  });
+
+  it("embeds the draft and the review feedback", () => {
+    const prompt = buildDraftVerifyPrompt("Revised draft.", "Feedback report.");
+    expect(prompt).toContain("Revised draft.");
+    expect(prompt).toContain("Reviewer's feedback:");
+    expect(prompt).toContain("Feedback report.");
+  });
+
+  it("does not include chat-only behavior rules or profile data", () => {
+    const prompt = buildDraftVerifyPrompt("Draft.", "Review.");
+    expect(prompt).not.toContain("Your Behavior Rules");
+    expect(prompt).not.toContain("web_search");
+    expect(prompt).not.toContain("Candidate Profile");
   });
 });
 
@@ -409,6 +517,33 @@ describe("buildSystemPrompt", () => {
       customPrompt: "   ",
     });
     expect(prompt).toContain("Your Behavior Rules");
+  });
+
+  it("omits the fit-evaluation block unless explicitly requested", () => {
+    const prompt = buildSystemPrompt(baseApplication, null, {
+      mode: "standard",
+      customPrompt: "",
+    });
+    expect(prompt).not.toContain("Initial fit evaluation");
+  });
+
+  it("includes the fit-evaluation block when requested", () => {
+    const prompt = buildSystemPrompt(baseApplication, null, {
+      mode: "standard",
+      customPrompt: "",
+      fitEvaluation: true,
+    });
+    expect(prompt).toContain("Initial fit evaluation");
+    expect(prompt).toContain("structured fit table");
+  });
+
+  it("never includes the fit-evaluation block in custom mode", () => {
+    const prompt = buildSystemPrompt(baseApplication, null, {
+      mode: "custom",
+      customPrompt: "Custom instructions.",
+      fitEvaluation: true,
+    });
+    expect(prompt).not.toContain("Initial fit evaluation");
   });
 });
 

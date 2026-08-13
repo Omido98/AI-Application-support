@@ -44,6 +44,116 @@ fn anthropic_endpoint(base: &str, path: &str) -> String {
     format!("{base}/v1{path}")
 }
 
+/// Hard cap on automatic retries for HTTP 429 (rate limit) responses, and
+/// the longest delay we are willing to wait based on a `Retry-After` header.
+const MAX_RATE_LIMIT_RETRIES: u32 = 3;
+const MAX_RETRY_AFTER_SECS: u64 = 30;
+
+/// Whether a 429 response signals an exhausted quota (not retryable) rather
+/// than a transient rate limit. Retrying quota errors would only waste calls.
+fn is_quota_error(status: reqwest::StatusCode, body: &str) -> bool {
+    if status != reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return false;
+    }
+    let lower = body.to_lowercase();
+    lower.contains("free usage") || lower.contains("freeusagelimit") || lower.contains("quota")
+}
+
+/// Seconds to wait before retrying, from the `Retry-After` header (capped),
+/// or `None` when the header is missing or unparsable.
+fn retry_after_secs(response: &reqwest::Response) -> Option<u64> {
+    response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|secs| secs.min(MAX_RETRY_AFTER_SECS))
+}
+
+/// Exponential backoff for retry attempt `attempt` (0-indexed): 1s, 2s, 4s.
+fn backoff_secs(attempt: u32) -> u64 {
+    [1, 2, 4]
+        .get(attempt as usize)
+        .copied()
+        .unwrap_or(MAX_RETRY_AFTER_SECS)
+}
+
+fn friendly_rate_limit_message(status: reqwest::StatusCode, retry_after: Option<u64>) -> String {
+    match retry_after {
+        Some(secs) => format!(
+            "Rate limit reached ({status}). Please try again in about {secs} seconds."
+        ),
+        None => format!("Rate limit reached ({status}). Please wait a moment and try again."),
+    }
+}
+
+fn friendly_quota_message(status: reqwest::StatusCode) -> String {
+    format!(
+        "Free usage limit reached ({status}). The free allowance resets daily, so please try again later."
+    )
+}
+
+/// Send a POST request to a provider endpoint, retrying HTTP 429 responses
+/// up to `MAX_RATE_LIMIT_RETRIES` times with `Retry-After` or exponential
+/// backoff. Quota-type 429s fail immediately with a friendly message; any
+/// other non-2xx status fails with the usual API error text. Returns the
+/// response only for a successful status. When a cancellation token is
+/// supplied and it fires during a backoff wait, the request is aborted.
+async fn send_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    provider: &str,
+    payload: &serde_json::Value,
+    token: Option<&CancellationToken>,
+) -> Result<reqwest::Response, String> {
+    for attempt in 0..=MAX_RATE_LIMIT_RETRIES {
+        let mut request = client.post(url).json(payload);
+        if provider == "anthropic" {
+            request = request
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01");
+        } else {
+            request = request.bearer_auth(api_key);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| format!("Network error: {e}"))?;
+
+        let status = response.status();
+        if status.is_success() {
+            return Ok(response);
+        }
+
+        let retry_after = retry_after_secs(&response);
+        let body = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response: {e}"))?;
+
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            if is_quota_error(status, &body) {
+                return Err(friendly_quota_message(status));
+            }
+            if attempt < MAX_RATE_LIMIT_RETRIES {
+                if token.is_some_and(|t| t.is_cancelled()) {
+                    return Err("Request cancelled.".to_string());
+                }
+                let wait = retry_after.unwrap_or_else(|| backoff_secs(attempt));
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                continue;
+            }
+            return Err(friendly_rate_limit_message(status, retry_after));
+        }
+
+        let snippet: String = body.chars().take(500).collect();
+        return Err(format!("API error ({status}): {snippet}"));
+    }
+    Err("Rate limit retries exhausted.".to_string())
+}
+
 /// List available models from a `/models` endpoint (OpenAI-compatible shape:
 /// `{ "data": [{ "id": "..." }] }`, which Anthropic also uses).
 /// Used to populate the model dropdown.
@@ -116,30 +226,12 @@ async fn zen_chat(
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    let mut request = client.post(&url).json(&payload);
-    if provider == "anthropic" {
-        request = request
-            .header("x-api-key", &api_key)
-            .header("anthropic-version", "2023-06-01");
-    } else {
-        request = request.bearer_auth(api_key);
-    }
+    let response = send_with_retry(&client, &url, &api_key, &provider, &payload, None).await?;
 
-    let response = request
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {e}"))?;
-
-    let status = response.status();
     let text = response
         .text()
         .await
         .map_err(|e| format!("Failed to read response: {e}"))?;
-
-    if !status.is_success() {
-        let snippet: String = text.chars().take(500).collect();
-        return Err(format!("API error ({status}): {snippet}"));
-    }
 
     serde_json::from_str(&text).map_err(|e| format!("Invalid response from API: {e}"))
 }
@@ -541,29 +633,10 @@ async fn run_stream(
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    let mut request = client.post(&url).json(payload);
-    if provider == "anthropic" {
-        request = request
-            .header("x-api-key", api_key)
-            .header("anthropic-version", "2023-06-01");
-    } else {
-        request = request.bearer_auth(api_key);
-    }
-
-    let response = request
-        .send()
-        .await
-        .map_err(|e| format!("Network error: {e}"))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let text = response
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read response: {e}"))?;
-        let snippet: String = text.chars().take(500).collect();
-        return Err(format!("API error ({status}): {snippet}"));
-    }
+    // Retried on HTTP 429 with backoff. Retries happen while the initial
+    // request is rejected, before any SSE data has been emitted, so a retried
+    // stream is indistinguishable from a slow first response.
+    let response = send_with_retry(&client, &url, api_key, provider, payload, Some(token)).await?;
 
     // Providers that ignore `stream: true` answer with a plain JSON body;
     // treat anything that is not text/event-stream as such.

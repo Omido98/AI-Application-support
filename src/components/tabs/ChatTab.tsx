@@ -100,8 +100,10 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   }, [clearMessages, setError, setDraft]);
 
   // ── Send a given text as a user message ──
+  // `triggerFitEvaluation` is set by the starter button only, so the agent
+  // runs the fit evaluation exactly when the user asks for it via the button.
   const sendText = useCallback(
-    async (text: string) => {
+    async (text: string, triggerFitEvaluation = false) => {
       const trimmed = text.trim();
       if (!trimmed || isSending || !application) return;
 
@@ -116,7 +118,14 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       };
       addMessage(userMsg);
 
-      // Build system prompt
+      // Send to API
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      setStreamingText("");
+      setIsSending(true);
+      setError(null);
+
+      // Application context of the current thread
       const appCtx = {
         company: application.companyName,
         jobDescription: application.jobDescription,
@@ -148,17 +157,12 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         skills: freshProfile.skills,
         languages: freshProfile.languages,
       };
+
       const systemPrompt = buildSystemPrompt(appCtx, profileData, {
         mode: config.systemPromptMode ?? "standard",
         customPrompt: config.customSystemPrompt ?? "",
+        fitEvaluation: triggerFitEvaluation,
       });
-
-      // Send to API
-      const controller = new AbortController();
-      controllerRef.current = controller;
-      setStreamingText("");
-      setIsSending(true);
-      setError(null);
 
       const threadAtSend = useChatStore.getState().activeThreadId;
       const { messages } = useChatStore.getState();
@@ -228,7 +232,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
   // ── Starter button on empty chat ──
   const handleStart = useCallback(() => {
-    void sendText("Help me answer my application");
+    void sendText("Help me answer my application", true);
   }, [sendText]);
 
   // ── Show loading state while restoring config ──

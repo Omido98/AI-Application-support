@@ -2,7 +2,12 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import type { ApiConfig } from "@/stores/chatStore";
 import type { ChatMessage } from "@/stores/chatStore";
 import type { ProviderId } from "@/utils/providers";
-import { buildDeslopPrompt, buildDraftReviewPrompt } from "@/utils/systemPrompt";
+import {
+  buildDeslopPrompt,
+  buildDraftReviewPrompt,
+  buildDraftRevisionPrompt,
+  buildDraftVerifyPrompt,
+} from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
 import type { ProfileData } from "@/types";
 
@@ -13,12 +18,60 @@ export interface ApiResponse {
   stopped?: boolean;
 }
 
+/** The reviewer's verdict on a draft, parsed from its feedback report. */
+export type ReviewVerdict = "pass" | "revise" | "unknown";
+
+/** A step of the improve-draft pipeline, reported via `onStep`. */
+export type ImproveStep = "review" | "revise" | "verify" | "deslop";
+
+/** How deep the improve pipeline should iterate. */
+export type ImproveDraftDepth = "quick" | "deep";
+
 /** Options for sendMessage: live text rendering and stop support. */
 export interface SendMessageOptions {
   /** Called with each chunk of text as it streams in (live rendering). */
   onDelta?: (text: string) => void;
   /** Aborting the signal stops generation; whatever was streamed is returned. */
   signal?: AbortSignal;
+}
+
+/** Options for improveDraft: pipeline step reporting plus the usual ones. */
+export interface ImproveDraftOptions extends SendMessageOptions {
+  /** Called when the pipeline enters a new step (review / revise / verify / deslop). */
+  onStep?: (step: ImproveStep) => void;
+}
+
+/** Result of the improve-draft pipeline. */
+export interface ImproveDraftResponse extends ApiResponse {
+  /** How many revise passes were applied (0 = review already passed). */
+  rounds: number;
+  /** The final reviewer verdict that ended the pipeline. */
+  verdict: ReviewVerdict;
+}
+
+/** Hard cap on review → revise iterations inside improveDraft. */
+export const MAX_REVISION_LOOPS = 3;
+
+/**
+ * Delay (ms) inserted between improve-pipeline passes so requests spread out
+ * instead of firing in a burst, reducing the chance of provider rate limits.
+ * Tests set this to 0 to keep them fast.
+ */
+export let PACE_DELAY_MS = 700;
+
+/** Override the pipeline pacing delay (used by tests to disable it). */
+export function setPaceDelayMs(ms: number): void {
+  PACE_DELAY_MS = ms;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pace(): Promise<void> {
+  if (PACE_DELAY_MS > 0) {
+    await sleep(PACE_DELAY_MS);
+  }
 }
 
 /** An event emitted by the Rust `zen_chat_stream` command. */
@@ -234,6 +287,246 @@ export async function reviewDraft(
     buildDraftReviewPrompt(draft, application, profile),
     options,
   );
+}
+
+/**
+ * Parse the reviewer's verdict out of a review report. The review prompt
+ * requires the report to end with a `VERDICT: PASS` or `VERDICT: REVISE`
+ * line; this scans the last matching line and returns "unknown" when the
+ * model failed to emit one.
+ */
+export function parseReviewVerdict(text: string): ReviewVerdict {
+  const lines = text.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const match = /^VERDICT:\s*(PASS|REVISE)\b/i.exec(lines[i].trim());
+    if (match) return match[1].toLowerCase() === "pass" ? "pass" : "revise";
+  }
+  return "unknown";
+}
+
+/**
+ * Run the "Verify draft" pass: a stateless check-reading gate used inside
+ * the deep improve loop. It receives the revised draft plus the original
+ * review feedback and answers only whether the draft now addresses it, with
+ * a single verdict line and no tools, so re-iterations stay cheap and fast.
+ *
+ * @param draft - The revised draft text to check.
+ * @param feedback - The reviewer's feedback the draft was revised against.
+ * @param config - API configuration (provider, baseUrl, apiKey, model, ...).
+ * @param options - Live-text callback and an optional AbortSignal.
+ * @returns The verifier's verdict line, or an error message.
+ */
+export async function verifyDraft(
+  draft: string,
+  feedback: string,
+  config: ApiConfig,
+  options: SendMessageOptions = {},
+): Promise<ApiResponse> {
+  return sendMessage(
+    [{ role: "user", content: "Verify whether the revised draft above addresses the feedback below.", timestamp: new Date().toISOString() }],
+    { ...config, webSearchEnabled: false },
+    buildDraftVerifyPrompt(draft, feedback),
+    options,
+  );
+}
+
+/**
+ * Run the "Revise draft" pass on a draft: sends the draft, the reviewer's
+ * feedback report, and the Candidate Profile as a stateless senior-writer
+ * pass that rewrites the draft to address every actionable point of the
+ * review. The raw job posting is not included: the review report is
+ * self-contained, and the profile is the grounding source for factual fixes.
+ * Web tools stay disabled: revision is grounded in the profile and the
+ * review, not fresh research.
+ *
+ * @param draft - The current draft text to revise.
+ * @param review - The reviewer's feedback report to apply.
+ * @param profile - The candidate's profile, used as the grounding source.
+ * @param config - API configuration (provider, baseUrl, apiKey, model, ...).
+ * @param options - Live-text callback and an optional AbortSignal.
+ * @returns The revised draft, or an error message.
+ */
+export async function reviseDraft(
+  draft: string,
+  review: string,
+  profile: ProfileData | null,
+  config: ApiConfig,
+  options: SendMessageOptions = {},
+): Promise<ApiResponse> {
+  return sendMessage(
+    [{ role: "user", content: "Revise the draft above.", timestamp: new Date().toISOString() }],
+    { ...config, webSearchEnabled: false },
+    buildDraftRevisionPrompt(draft, review, profile),
+    options,
+  );
+}
+
+/**
+ * Run the "Improve draft" pipeline in quick mode: one review → revise
+ * sequence, stopping early when the initial review already passes the draft
+ * (in that case only the de-slop polish runs). Every pass is stateless with
+ * a focused prompt, so the pipeline never re-reads the chat history. The
+ * revise pass applies the anti-slop rules itself, so no separate polish
+ * pass follows it.
+ *
+ * Revision passes stream live via `options.onDelta` (the text they produce
+ * is a preview: a later round may replace it). Intermediate steps are
+ * reported through `options.onStep`.
+ *
+ * @param draft - The assistant message text to improve.
+ * @param application - The Application Context of the thread.
+ * @param profile - The candidate's profile, used for the review's grounding audit.
+ * @param config - API configuration (provider, baseUrl, apiKey, model, ...).
+ * @param options - Pipeline step callback, live-text callback, and AbortSignal.
+ * @returns The final improved draft plus the number of revise rounds.
+ */
+export async function improveDraft(
+  draft: string,
+  application: ApplicationContext,
+  profile: ProfileData | null,
+  config: ApiConfig,
+  options: ImproveDraftOptions = {},
+): Promise<ImproveDraftResponse> {
+  return runImprovePipeline("quick", draft, application, profile, config, options);
+}
+
+/**
+ * Run the "Improve draft" pipeline in deep mode: the same review → revise
+ * sequence as quick mode, but each round is re-checked by a cheap stateless
+ * verifier and the loop iterates until it passes, capped at
+ * `MAX_REVISION_LOOPS`.
+ *
+ * @param draft - The assistant message text to improve.
+ * @param application - The Application Context of the thread.
+ * @param profile - The candidate's profile, used for the review's grounding audit.
+ * @param config - API configuration (provider, baseUrl, apiKey, model, ...).
+ * @param options - Pipeline step callback, live-text callback, and AbortSignal.
+ * @returns The final improved draft plus the number of revise rounds.
+ */
+export async function deepImproveDraft(
+  draft: string,
+  application: ApplicationContext,
+  profile: ProfileData | null,
+  config: ApiConfig,
+  options: ImproveDraftOptions = {},
+): Promise<ImproveDraftResponse> {
+  return runImprovePipeline("deep", draft, application, profile, config, options);
+}
+
+async function runImprovePipeline(
+  depth: ImproveDraftDepth,
+  draft: string,
+  application: ApplicationContext,
+  profile: ProfileData | null,
+  config: ApiConfig,
+  options: ImproveDraftOptions = {},
+): Promise<ImproveDraftResponse> {
+  const notStopped = () => !options.signal?.aborted;
+
+  // The reviewer's feedback every revision round must apply. Rounds always
+  // revise against the original review report; the verifier only checks it.
+  let reviewFeedback = "";
+
+  await pace();
+  options.onStep?.("review");
+  const firstReview = await reviewDraft(draft, application, profile, config, {
+    signal: options.signal,
+  });
+  if (firstReview.error) {
+    return { content: "", error: firstReview.error, rounds: 0, verdict: "unknown" };
+  }
+  if (firstReview.stopped) {
+    return { content: firstReview.content ?? "", stopped: true, rounds: 0, verdict: "unknown" };
+  }
+  reviewFeedback = firstReview.content;
+
+  let current = draft;
+  let verdict = parseReviewVerdict(reviewFeedback);
+  let rounds = 0;
+
+  // The draft already passes review: only run the de-slop polish.
+  if (verdict === "pass" && notStopped()) {
+    return finishWithDeslop(current, config, options, verdict);
+  }
+
+  while (rounds < MAX_REVISION_LOOPS) {
+    if (!notStopped()) {
+      return { content: current, stopped: true, rounds, verdict: "unknown" };
+    }
+
+    await pace();
+    options.onStep?.("revise");
+    const revised = await reviseDraft(current, reviewFeedback, profile, config, {
+      signal: options.signal,
+      onDelta: options.onDelta,
+    });
+    if (revised.error) {
+      return { content: "", error: revised.error, rounds, verdict: "unknown" };
+    }
+    if (revised.stopped) {
+      return { content: revised.content ?? "", stopped: true, rounds, verdict: "unknown" };
+    }
+    current = revised.content;
+    rounds++;
+
+    // Quick mode ends after a single pass; deep mode re-checks the result
+    // with a cheap stateless verifier and iterates until it passes.
+    if (depth === "quick") {
+      break;
+    }
+
+    await pace();
+    options.onStep?.("verify");
+    const check = await verifyDraft(current, reviewFeedback, config, {
+      signal: options.signal,
+    });
+    if (check.error) {
+      return { content: "", error: check.error, rounds, verdict: "unknown" };
+    }
+    if (check.stopped) {
+      return { content: current, stopped: true, rounds, verdict: "unknown" };
+    }
+    verdict = parseReviewVerdict(check.content ?? "");
+
+    if (verdict === "pass") {
+      break;
+    }
+  }
+
+  return { content: current, rounds, verdict };
+}
+
+function finishWithDeslop(
+  current: string,
+  config: ApiConfig,
+  options: ImproveDraftOptions,
+  verdict: ReviewVerdict,
+): Promise<ImproveDraftResponse> {
+  return (async () => {
+    await pace();
+    options.onStep?.("deslop");
+    const cleaned = await deslopText(current, config, { signal: options.signal });
+    if (cleaned.error) {
+      return { content: "", error: cleaned.error, rounds: 0, verdict };
+    }
+    if (cleaned.stopped) {
+      return { content: cleaned.content ?? "", stopped: true, rounds: 0, verdict };
+    }
+    return { content: applyDeslop(current, cleaned.content), rounds: 0, verdict };
+  })();
+}
+
+/**
+ * Fold the de-slop pass output into the draft. The editor replies with the
+ * exact text "No changes needed." when the draft is already clean — in that
+ * case the draft is kept unchanged.
+ */
+function applyDeslop(current: string, cleaned: string): string {
+  const trimmed = cleaned.trim();
+  if (!trimmed || trimmed.toLowerCase() === "no changes needed.") {
+    return current;
+  }
+  return cleaned;
 }
 
 /**
