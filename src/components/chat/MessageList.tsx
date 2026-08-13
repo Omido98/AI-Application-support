@@ -4,7 +4,8 @@ import remarkGfm from "remark-gfm";
 import { useChatStore } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
-import { deslopText, reviewDraft } from "@/utils/api";
+import { deepImproveDraft, deslopText, improveDraft, reviewDraft } from "@/utils/api";
+import type { ImproveStep } from "@/utils/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,8 @@ import {
   Loader2,
   ArrowDown,
   ShieldCheck,
+  Wand2,
+  Zap,
 } from "lucide-react";
 import type { ProfileData } from "@/types";
 
@@ -51,7 +54,22 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [deslopPendingId, setDeslopPendingId] = useState<string | null>(null);
   const [reviewPendingId, setReviewPendingId] = useState<string | null>(null);
+  const [improvePendingId, setImprovePendingId] = useState<string | null>(null);
+  const [deepImprovePendingId, setDeepImprovePendingId] = useState<string | null>(null);
+  const [improveStep, setImproveStep] = useState<ImproveStep | null>(null);
+  const [improvePreview, setImprovePreview] = useState("");
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const anyActionPending = !!(
+    deslopPendingId || reviewPendingId || improvePendingId || deepImprovePendingId
+  );
+
+  const STEP_LABELS: Record<ImproveStep, string> = {
+    review: "Reviewing draft…",
+    revise: "Revising draft…",
+    deslop: "Polishing…",
+    verify: "Verifying…",
+  };
 
   const application =
     applications.find((a) => a.id === selectedId) ?? null;
@@ -138,16 +156,6 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
       setError(result.error);
       return;
     }
-    if (result.stopped) {
-      if (result.content.trim()) {
-        addMessage({
-          role: "assistant",
-          content: result.content,
-          timestamp: new Date().toISOString(),
-        });
-      }
-      return;
-    }
     if (result.content.trim()) {
       addMessage({
         role: "assistant",
@@ -170,31 +178,95 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
       companyResearch: application.companyResearch,
     };
 
+    const profileData = await loadProfileData();
+
+    const result = await reviewDraft(content, appCtx, profileData, config);
+    setReviewPendingId(null);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    if (result.content.trim()) {
+      addMessage({
+        role: "assistant",
+        content: result.content,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  };
+
+  /** Ensure the profile is loaded from disk and return it as plain data. */
+  const loadProfileData = async (): Promise<ProfileData> => {
     const profileState = useProfileStore.getState();
     if (!profileState.isLoaded) {
       await profileState.loadProfile();
     }
-    const freshProfile = useProfileStore.getState();
-    const profileData: ProfileData = {
-      fullName: freshProfile.fullName,
-      email: freshProfile.email,
-      city: freshProfile.city,
-      country: freshProfile.country,
-      linkedinUrl: freshProfile.linkedinUrl,
-      bio: freshProfile.bio,
-      coverLetterSummary: freshProfile.coverLetterSummary,
-      interests: freshProfile.interests,
-      education: freshProfile.education,
-      coverLetters: freshProfile.coverLetters,
-      workExperience: freshProfile.workExperience,
-      otherEngagements: freshProfile.otherEngagements,
-      certifications: freshProfile.certifications,
-      skills: freshProfile.skills,
-      languages: freshProfile.languages,
+    const p = useProfileStore.getState();
+    return {
+      fullName: p.fullName,
+      email: p.email,
+      city: p.city,
+      country: p.country,
+      linkedinUrl: p.linkedinUrl,
+      bio: p.bio,
+      coverLetterSummary: p.coverLetterSummary,
+      interests: p.interests,
+      education: p.education,
+      coverLetters: p.coverLetters,
+      workExperience: p.workExperience,
+      otherEngagements: p.otherEngagements,
+      certifications: p.certifications,
+      skills: p.skills,
+      languages: p.languages,
+    };
+  };
+
+  /**
+   * Run the improve pipeline on an assistant message. Quick mode does a
+   * single review → revise → polish pass; deep mode re-checks each round
+   * with a cheap verifier and iterates until the draft passes.
+   */
+  const runImprove = async (
+    msgId: string,
+    content: string,
+    depth: "quick" | "deep",
+  ) => {
+    const pending = depth === "deep" ? deepImprovePendingId : improvePendingId;
+    if (!content.trim() || pending || !application) return;
+    if (depth === "deep") setDeepImprovePendingId(msgId);
+    else setImprovePendingId(msgId);
+    setImproveStep("review");
+    setImprovePreview("");
+    setError(null);
+
+    const appCtx = {
+      company: application.companyName,
+      jobDescription: application.jobDescription,
+      language: application.applicationLanguage,
+      requirements: application.requirements,
+      companyResearch: application.companyResearch,
     };
 
-    const result = await reviewDraft(content, appCtx, profileData, config);
-    setReviewPendingId(null);
+    const profileData = await loadProfileData();
+
+    const options = {
+      onStep: (step: ImproveStep) => {
+        setImproveStep(step);
+        // The revise pass streams live; the other steps replace the preview.
+        if (step !== "revise") setImprovePreview("");
+      },
+      onDelta: (text: string) => setImprovePreview((prev) => prev + text),
+    };
+
+    const result =
+      depth === "deep"
+        ? await deepImproveDraft(content, appCtx, profileData, config, options)
+        : await improveDraft(content, appCtx, profileData, config, options);
+
+    setImprovePendingId(null);
+    setDeepImprovePendingId(null);
+    setImproveStep(null);
+    setImprovePreview("");
     if (result.error) {
       setError(result.error);
       return;
@@ -305,7 +377,7 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
                 <button
                   type="button"
                   onClick={() => handleDeslop(key, msg.content)}
-                  disabled={deslopPendingId !== null}
+                  disabled={anyActionPending}
                   className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
                   title={
                     deslopPendingId === key
@@ -323,7 +395,7 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
                 <button
                   type="button"
                   onClick={() => handleReview(key, msg.content)}
-                  disabled={reviewPendingId !== null}
+                  disabled={anyActionPending}
                   className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
                   title={
                     reviewPendingId === key
@@ -336,6 +408,42 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
                     <Loader2 className="size-3.5 animate-spin" />
                   ) : (
                     <ShieldCheck className="size-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => runImprove(key, msg.content, "quick")}
+                  disabled={anyActionPending}
+                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
+                  title={
+                    improvePendingId === key
+                      ? (improveStep ? STEP_LABELS[improveStep] : "Improving draft…")
+                      : "Improve draft"
+                  }
+                  aria-label="Improve draft"
+                >
+                  {improvePendingId === key ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Wand2 className="size-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => runImprove(key, msg.content, "deep")}
+                  disabled={anyActionPending}
+                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
+                  title={
+                    deepImprovePendingId === key
+                      ? (improveStep ? STEP_LABELS[improveStep] : "Deep improving draft…")
+                      : "Deep improve draft"
+                  }
+                  aria-label="Deep improve draft"
+                >
+                  {deepImprovePendingId === key ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5" />
                   )}
                 </button>
               </div>
@@ -362,6 +470,33 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
         <div className="flex justify-start">
           <div className="max-w-[80%] rounded-xl bg-surface text-text-primary border border-border">
             <LoadingDots />
+          </div>
+        </div>
+      ) : null}
+
+      {(improvePendingId || deepImprovePendingId) && improveStep ? (
+        <div className="flex justify-start">
+          <div className="max-w-[80%] rounded-xl bg-surface text-text-primary border border-border">
+            {improvePreview ? (
+              <div className="px-4 py-2.5 text-sm leading-relaxed break-words">
+                <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {improvePreview}
+                  </ReactMarkdown>
+                </div>
+                <span
+                  className="inline-block w-2 h-4 align-middle bg-primary/70 animate-pulse ml-0.5"
+                  aria-hidden="true"
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-4 py-3">
+                <Loader2 className="size-4 animate-spin text-text-muted" />
+                <span className="text-sm text-text-muted">
+                  {STEP_LABELS[improveStep]}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       ) : null}
