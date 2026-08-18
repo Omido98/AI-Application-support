@@ -167,7 +167,53 @@ describe("sendMessage (OpenAI-compatible)", () => {
     }
   });
 
-  it("returns drafted text when the model repeats the same tool call", async () => {
+  it("allows a repeated call and finishes normally", async () => {
+    const sameCall = openaiToolCall("web_search", "Acme Corp");
+    mockChatSequence([
+      {
+        kind: "stream",
+        data: openaiMessage({ content: null, tool_calls: [sameCall] }),
+      },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: null, tool_calls: [sameCall] }),
+      },
+      { kind: "stream", data: openaiMessage({ content: "Acme is a company." }) },
+    ]);
+    const result = await sendMessage([], baseConfig, "system");
+    expect(result).toEqual({ content: "Acme is a company." });
+  });
+
+  it("does not treat an interleaved repeat (A, B, A) as a loop", async () => {
+    mockChatSequence([
+      {
+        kind: "stream",
+        data: openaiMessage({
+          content: null,
+          tool_calls: [openaiToolCall("web_search", "Acme Corp")],
+        }),
+      },
+      {
+        kind: "stream",
+        data: openaiMessage({
+          content: null,
+          tool_calls: [openaiToolCall("fetch_page", "https://acme.example")],
+        }),
+      },
+      {
+        kind: "stream",
+        data: openaiMessage({
+          content: null,
+          tool_calls: [openaiToolCall("web_search", "Acme Corp")],
+        }),
+      },
+      { kind: "stream", data: openaiMessage({ content: "Acme is a company." }) },
+    ]);
+    const result = await sendMessage([], baseConfig, "system");
+    expect(result).toEqual({ content: "Acme is a company." });
+  });
+
+  it("finishes with a tools-free answer when the model repeats the same call three times", async () => {
     const sameCall = openaiToolCall("web_search", "Acme Corp");
     mockChatSequence([
       {
@@ -178,28 +224,37 @@ describe("sendMessage (OpenAI-compatible)", () => {
         kind: "stream",
         data: openaiMessage({ content: null, tool_calls: [sameCall] }),
       },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: null, tool_calls: [sameCall] }),
+      },
+      { kind: "plain", data: openaiMessage({ content: "Final answer." }) },
     ]);
     const result = await sendMessage([], baseConfig, "system");
     expect(result.error).toBeUndefined();
-    expect(result.content).toContain("Let me research that.");
+    expect(result.content).toContain("[Web research stopped");
+    expect(result.content).toContain("Final answer.");
   });
 
-  it("fails cleanly when a loop repeats a call without drafting anything", async () => {
+  it("fails cleanly when three repeats and the tools-free round draft nothing", async () => {
     const sameCall = openaiToolCall("web_search", "Acme Corp");
     mockChatSequence([
       { kind: "stream", data: openaiMessage({ content: null, tool_calls: [sameCall] }) },
       { kind: "stream", data: openaiMessage({ content: null, tool_calls: [sameCall] }) },
+      { kind: "stream", data: openaiMessage({ content: null, tool_calls: [sameCall] }) },
+      { kind: "plain", data: openaiMessage({ content: null }) },
     ]);
     const result = await sendMessage([], baseConfig, "system");
     expect(result.error).toMatch(/stuck repeating/);
   });
 
-  it("returns the draft when the round cap is reached with unique calls", async () => {
+  it("finishes with a tools-free answer when the round cap is reached with unique calls", async () => {
     let round = 0;
     mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
       if (cmd === "zen_web_search") return searchResult;
       if (cmd === "zen_fetch_page") return "Page text.";
       if (cmd === "zen_chat_stream_cancel") return null;
+      if (cmd === "zen_chat") return openaiMessage({ content: "Final answer." });
       if (cmd === "zen_chat_stream") {
         round += 1;
         const query = `query-${round}`;
@@ -219,7 +274,8 @@ describe("sendMessage (OpenAI-compatible)", () => {
     const result = await sendMessage([], baseConfig, "system");
     expect(round).toBe(15);
     expect(result.error).toBeUndefined();
-    expect(result.content).toContain("Draft 1.");
+    expect(result.content).toContain("[Web research stopped");
+    expect(result.content).toContain("Final answer.");
   });
 
   it("errors after the round cap when the model never writes anything", async () => {
@@ -329,25 +385,22 @@ describe("sendMessage (Anthropic)", () => {
     expect(result).toEqual({ content: "Acme is a company." });
   });
 
-  it("returns drafted text when a tool_use repeats", async () => {
+  it("finishes with a tools-free answer when a tool_use repeats three times", async () => {
     let round = 0;
     mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
       if (cmd === "zen_web_search") return searchResult;
       if (cmd === "zen_chat_stream_cancel") return null;
+      if (cmd === "zen_chat") {
+        return { content: [anthropicText("Final answer.")] };
+      }
       if (cmd === "zen_chat_stream") {
         round += 1;
         setTimeout(() => {
           streamOnEvent(args)?.onmessage({
             type: "done",
-            data:
-              round === 1
-                ? {
-                    content: [
-                      anthropicText("Researching now."),
-                      anthropicToolUse("t1", "Acme Corp"),
-                    ],
-                  }
-                : { content: [anthropicToolUse("t2", "Acme Corp")] },
+            data: {
+              content: [anthropicToolUse(`t${round}`, "Acme Corp")],
+            },
           });
         });
         return `req-${round}`;
@@ -356,7 +409,8 @@ describe("sendMessage (Anthropic)", () => {
     });
     const result = await sendMessage([], anthropicConfig, "system");
     expect(result.error).toBeUndefined();
-    expect(result.content).toContain("Researching now.");
+    expect(result.content).toContain("[Web research stopped");
+    expect(result.content).toContain("Final answer.");
   });
 
   it("advertises no tools when web search is disabled", async () => {

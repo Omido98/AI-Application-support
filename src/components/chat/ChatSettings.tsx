@@ -27,7 +27,7 @@ export default function ChatSettings({
   const setConfig = useChatStore((s) => s.setConfig);
 
   const [webSearchEnabled, setWebSearchEnabled] = useState(
-    config.webSearchEnabled ?? true,
+    config.webSearchEnabled ?? false,
   );
   const [promptMode, setPromptMode] = useState(
     config.systemPromptMode ?? "standard",
@@ -39,7 +39,7 @@ export default function ChatSettings({
   const standardPrompt = useMemo(() => getStandardPrompt(), []);
 
   useEffect(() => {
-    setWebSearchEnabled(config.webSearchEnabled ?? true);
+    setWebSearchEnabled(config.webSearchEnabled ?? false);
     setPromptMode(config.systemPromptMode ?? "standard");
     setCustomPrompt(config.customSystemPrompt ?? "");
   }, [config.webSearchEnabled, config.systemPromptMode, config.customSystemPrompt]);
@@ -84,12 +84,14 @@ export default function ChatSettings({
               htmlFor="web-search-enabled"
               className="text-text-secondary text-xs cursor-pointer"
             >
-              Web search
+              Web search (after the first message)
             </Label>
             <p className="text-xs text-text-muted">
-              Let the chat agent search the web and fetch pages to research the
-              company (up to 5 pages per turn). Turn it off if your model keeps
-              requesting web tools without answering.
+              The first message of a chat always researches the company for
+              the fit evaluation. Turn this on to let the agent search the
+              web and fetch pages on later messages too (up to 5 pages per
+              turn). Turn it off if your model keeps requesting web tools
+              without answering.
             </p>
           </div>
         </div>

@@ -420,7 +420,7 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("- Interests: Trail running");
   });
 
-  it("includes previous cover letters when present", () => {
+  it("omits the full cover letters entirely when no summary exists", () => {
     const profile = makeProfile({
       coverLetters: [
         {
@@ -432,9 +432,9 @@ describe("buildSystemPrompt", () => {
       ],
     });
     const prompt = buildSystemPrompt(baseApplication, profile);
-    expect(prompt).toContain("Previous Cover Letters (full text)");
-    expect(prompt).toContain("for Other Corp");
-    expect(prompt).toContain("Dear hiring team, ...");
+    expect(prompt).not.toContain("Previous Cover Letters");
+    expect(prompt).not.toContain("for Other Corp");
+    expect(prompt).not.toContain("Dear hiring team, ...");
   });
 
   it("uses the cover letter summary instead of the full letters when present", () => {
@@ -457,7 +457,7 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("Long letter body that should not leak");
   });
 
-  it("falls back to the full letters when the summary is empty", () => {
+  it("omits the cover letters when the summary is empty", () => {
     const profile = makeProfile({
       coverLetterSummary: "   ",
       coverLetters: [
@@ -470,8 +470,8 @@ describe("buildSystemPrompt", () => {
       ],
     });
     const prompt = buildSystemPrompt(baseApplication, profile);
-    expect(prompt).toContain("Previous Cover Letters (full text)");
-    expect(prompt).toContain("Dear hiring team, ...");
+    expect(prompt).not.toContain("Previous Cover Letters (full text)");
+    expect(prompt).not.toContain("Dear hiring team, ...");
     expect(prompt).not.toContain("Previous Cover Letters (summary)");
   });
 

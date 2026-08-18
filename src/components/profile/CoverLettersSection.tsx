@@ -137,9 +137,10 @@ export default function CoverLettersSection() {
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-text-muted max-w-md">
-              The chat agent reads this digest instead of every letter, so it
-              remembers the highlights without the repetition. Re-run it
-              whenever you add or change letters.
+              The chat assistant only ever reads the summary in the text box
+              below, never the full letters. After adding or editing a cover
+              letter, press "Summarize cover letters" again to keep the
+              summary current.
             </p>
             <Button
               variant="outline"

@@ -19,6 +19,16 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  /** True when the send failed (no reply landed); shows a re-send action. */
+  failed?: boolean;
+}
+
+/**
+ * Stable identity key for a message, used by action buttons and re-sends.
+ * Matches the key the UI computes for each rendered message.
+ */
+export function messageKey(msg: { timestamp: string; content: string }): string {
+  return msg.timestamp + msg.content.slice(0, 40);
 }
 
 // ──────────────────────────────────────────────
@@ -48,7 +58,7 @@ const defaultApiConfig: ApiConfig = {
   apiKey: "",
   model: "deepseek-v4-flash-free",
   reasoningEffort: null,
-  webSearchEnabled: true,
+  webSearchEnabled: false,
   systemPromptMode: "standard",
   customSystemPrompt: "",
 };
@@ -123,6 +133,11 @@ interface ChatState {
 
   // Message actions
   addMessage: (msg: ChatMessage) => void;
+  /** Replace a message by key (e.g. clear a failed flag, swap a regenerated reply). */
+  updateMessage: (
+    key: string,
+    updater: (msg: ChatMessage) => ChatMessage,
+  ) => void;
   clearMessages: () => Promise<void>;
   /** Load (or reset) the chat thread for an application */
   switchThread: (applicationId: string | null) => Promise<void>;
@@ -166,6 +181,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   addMessage: (msg) => {
     set((s) => ({ messages: [...s.messages, msg] }));
+    scheduleThreadSave();
+  },
+
+  updateMessage: (key, updater) => {
+    set((s) => ({
+      messages: s.messages.map((m) => (messageKey(m) === key ? updater(m) : m)),
+    }));
     scheduleThreadSave();
   },
 
@@ -247,7 +269,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...data,
           apiKey: keychainKey ?? data.apiKey ?? "",
           reasoningEffort: data.reasoningEffort ?? null,
-          webSearchEnabled: data.webSearchEnabled ?? true,
+          webSearchEnabled: data.webSearchEnabled ?? false,
           systemPromptMode: data.systemPromptMode ?? "standard",
           customSystemPrompt: data.customSystemPrompt ?? "",
         },

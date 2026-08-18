@@ -652,8 +652,11 @@ async function sendOpenAICompatMessage(
   // Text streamed so far; returned as the partial answer when the user stops.
   let streamedContent = "";
 
-  // Signatures of every tool call made so far, to detect looping models.
-  const seenCalls = new Set<string>();
+  // Counts of every tool call signature made so far, to detect looping
+  // models. A call only counts as stuck once the same signature appears a
+  // third time: models legitimately re-search a topic or re-fetch a page
+  // that failed or came back truncated.
+  const callCounts = new Map<string, number>();
 
   const buildPayload = (withTools: boolean, stream: boolean): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
@@ -703,6 +706,38 @@ async function sendOpenAICompatMessage(
         typeof err === "string" ? err : "An unknown error occurred.";
       return { error: message };
     }
+  };
+
+  /**
+   * The model repeated a tool call or exhausted its rounds without writing a
+   * final answer. Rather than failing the request, strip the tools and run
+   * one final round so it writes its answer with what it already has. Errors
+   * only if even that round writes nothing.
+   */
+  const finishWithoutTools = async (fallbackError: string): Promise<ApiResponse> => {
+    useTools = false;
+    // Drop tool artifacts from the history so the tools-free request parses.
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].role === "tool") {
+        history.splice(i, 1);
+      } else {
+        delete history[i].tool_calls;
+      }
+    }
+
+    const retry = await runNonStreamingRound(false);
+    if (retry.error) {
+      return { content: "", error: retry.error };
+    }
+    const content = retry.data?.choices?.[0]?.message?.content;
+    if (content == null) {
+      return partialContent
+        ? { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` }
+        : { content: "", error: fallbackError };
+    }
+    return {
+      content: `[Web research stopped — answering without it]\n\n${content}`,
+    };
   };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -773,21 +808,27 @@ async function sendOpenAICompatMessage(
         partialContent = drafted;
       }
 
-      // If the model requests an identical tool call again, it is stuck in a
-      // loop — stop and hand back whatever it drafted.
+      // If the model requests the same tool call a third time, it is stuck in
+      // a loop — stop researching and force a tools-free final round. One
+      // repeat is not a loop: models legitimately re-search a topic or
+      // re-fetch a page that failed or came back truncated.
       const keys = toolCalls.map(
         (call) => `${call.function.name}(${call.function.arguments})`,
       );
-      if (keys.some((key) => seenCalls.has(key))) {
-        return partialContent
-          ? { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` }
-          : {
-              content: "",
-              error:
-                "The model got stuck repeating the same web request. Please try again.",
-            };
+      let stuck = false;
+      for (const key of keys) {
+        const count = (callCounts.get(key) ?? 0) + 1;
+        callCounts.set(key, count);
+        if (count >= 3) {
+          stuck = true;
+          break;
+        }
       }
-      for (const key of keys) seenCalls.add(key);
+      if (stuck) {
+        return finishWithoutTools(
+          "The model got stuck repeating the same web request. Please try again.",
+        );
+      }
 
       // Record the assistant's tool-call message, then feed back the results.
       history.push({
@@ -816,15 +857,11 @@ async function sendOpenAICompatMessage(
     return { content: drafted };
   }
 
-  // Ran out of tool rounds: return the draft if there is one, otherwise fail.
-  if (partialContent) {
-    return { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` };
-  }
-  return {
-    content: "",
-    error:
-      "The model kept requesting web tools without producing a final answer. Please try again.",
-  };
+  // Ran out of tool rounds: force a tools-free final answer instead of
+  // failing, so the model writes with what it already researched.
+  return finishWithoutTools(
+    "The model kept requesting web tools without producing a final answer. Please try again.",
+  );
 }
 
 // ──────────────────────────────────────────────
@@ -921,8 +958,11 @@ async function sendAnthropicMessage(
   // Text streamed so far; returned as the partial answer when the user stops.
   let streamedContent = "";
 
-  // Signatures of every tool call made so far, to detect looping models.
-  const seenCalls = new Set<string>();
+  // Counts of every tool call signature made so far, to detect looping
+  // models. A call only counts as stuck once the same signature appears a
+  // third time: models legitimately re-search a topic or re-fetch a page
+  // that failed or came back truncated.
+  const callCounts = new Map<string, number>();
 
   const buildPayload = (withTools: boolean, stream: boolean): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
@@ -958,6 +998,31 @@ async function sendAnthropicMessage(
         typeof err === "string" ? err : "An unknown error occurred.";
       return { error: message };
     }
+  };
+
+  /**
+   * The model repeated a tool call or exhausted its rounds without writing a
+   * final answer. Rather than failing the request, strip the tools and run
+   * one final round so it writes its answer with what it already has. Errors
+   * only if even that round writes nothing.
+   */
+  const finishWithoutTools = async (fallbackError: string): Promise<ApiResponse> => {
+    useTools = false;
+    toolContext = [];
+
+    const retry = await runNonStreamingRound(false);
+    if (retry.error) {
+      return { content: "", error: retry.error };
+    }
+    const text = textFromAnthropicBlocks(retry.data?.content);
+    if (text == null) {
+      return partialContent
+        ? { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` }
+        : { content: "", error: fallbackError };
+    }
+    return {
+      content: `[Web research stopped — answering without it]\n\n${text}`,
+    };
   };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -1021,21 +1086,27 @@ async function sendAnthropicMessage(
         partialContent = drafted;
       }
 
-      // If the model requests an identical tool call again, it is stuck in a
-      // loop — stop and hand back whatever it drafted.
+      // If the model requests the same tool call a third time, it is stuck in
+      // a loop — stop researching and force a tools-free final round. One
+      // repeat is not a loop: models legitimately re-search a topic or
+      // re-fetch a page that failed or came back truncated.
       const keys = toolUses.map(
         (call) => `${call.name}(${JSON.stringify(call.input ?? {})})`,
       );
-      if (keys.some((key) => seenCalls.has(key))) {
-        return partialContent
-          ? { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` }
-          : {
-              content: "",
-              error:
-                "The model got stuck repeating the same web request. Please try again.",
-            };
+      let stuck = false;
+      for (const key of keys) {
+        const count = (callCounts.get(key) ?? 0) + 1;
+        callCounts.set(key, count);
+        if (count >= 3) {
+          stuck = true;
+          break;
+        }
       }
-      for (const key of keys) seenCalls.add(key);
+      if (stuck) {
+        return finishWithoutTools(
+          "The model got stuck repeating the same web request. Please try again.",
+        );
+      }
 
       // Echo the assistant's full content blocks, then feed back the results.
       toolContext.push({ role: "assistant", content: blocks });
@@ -1062,15 +1133,11 @@ async function sendAnthropicMessage(
     return { content: text };
   }
 
-  // Ran out of tool rounds: return the draft if there is one, otherwise fail.
-  if (partialContent) {
-    return { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` };
-  }
-  return {
-    content: "",
-    error:
-      "The model kept requesting web tools without producing a final answer. Please try again.",
-  };
+  // Ran out of tool rounds: force a tools-free final answer instead of
+  // failing, so the model writes with what it already researched.
+  return finishWithoutTools(
+    "The model kept requesting web tools without producing a final answer. Please try again.",
+  );
 }
 
 /** Join all text blocks of an Anthropic response; null if there is no text. */
