@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useChatStore } from "@/stores/chatStore";
+import { useChatStore, messageKey } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { deepImproveDraft, deslopText, improveDraft, reviewDraft } from "@/utils/api";
@@ -18,6 +18,8 @@ import {
   ShieldCheck,
   Wand2,
   Zap,
+  RotateCcw,
+  RefreshCw,
 } from "lucide-react";
 import type { ProfileData } from "@/types";
 
@@ -31,7 +33,17 @@ function LoadingDots() {
   );
 }
 
-export default function MessageList({ onStart }: { onStart?: () => void }) {
+export default function MessageList({
+  onStart,
+  onResend,
+  onRegenerate,
+}: {
+  onStart?: () => void;
+  /** Re-send a failed user message in place (no duplicate is created). */
+  onResend?: (key: string) => void;
+  /** Regenerate the latest assistant message, replacing it in place. */
+  onRegenerate?: (key: string) => void;
+}) {
   const messages = useChatStore((s) => s.messages);
   const isSending = useChatStore((s) => s.isSending);
   const streamingText = useChatStore((s) => s.streamingText);
@@ -75,9 +87,6 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
     applications.find((a) => a.id === selectedId) ?? null;
 
   const company = application?.companyName ?? "";
-
-  const messageKey = (msg: { timestamp: string; content: string }) =>
-    msg.timestamp + msg.content.slice(0, 40);
 
   // Auto-scroll to the bottom only while the user is already near the bottom,
   // so scrolling up to read is never hijacked — even during live streaming.
@@ -323,6 +332,21 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
               isUser ? "justify-end" : "justify-start",
             )}
           >
+            {isUser && msg.failed && (
+              <div className="flex flex-col gap-1 pr-2 justify-start">
+                <button
+                  type="button"
+                  onClick={() => onResend?.(key)}
+                  disabled={isSending || anyActionPending}
+                  className="text-destructive hover:text-destructive/80 transition-colors disabled:opacity-50"
+                  title="Re-send message"
+                  aria-label="Re-send message"
+                >
+                  <RotateCcw className="size-3.5" />
+                </button>
+              </div>
+            )}
+
             <div
               className={cn(
                 "max-w-[80%] rounded-xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
@@ -344,6 +368,18 @@ export default function MessageList({ onStart }: { onStart?: () => void }) {
 
             {!isUser && (
               <div className="flex flex-col gap-1 pl-2 justify-start">
+                {messages[messages.length - 1] === msg && (
+                  <button
+                    type="button"
+                    onClick={() => onRegenerate?.(key)}
+                    disabled={isSending || anyActionPending}
+                    className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
+                    title="Regenerate answer"
+                    aria-label="Regenerate answer"
+                  >
+                    <RefreshCw className="size-3.5" />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleCopy(key, msg.content)}

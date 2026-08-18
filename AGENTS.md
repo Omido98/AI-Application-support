@@ -38,6 +38,8 @@ code on main is never touched until the user explicitly merges.
 9. After the user merges, the branch can be deleted.
 
 Safety notes:
+- Release tasks are delegated to the `release-manager` subagent, which
+  follows the `release-process` skill.
 - Pushing to a branch or tag never modifies main. Git keeps every version.
 - Old releases can be deleted by the user at any time (the repo is a
   single-commit clean slate starting at v1.0.0).
@@ -55,16 +57,8 @@ Safety notes:
 - "run the app (locally)" / "open the app" = `npm run tauri dev`
   — dev build of current source with hot reload, not installed.
 - "install the app locally" = `npm run build:arm64` (native ARM64, this
-  laptop; `npm run build:x64` for a Windows x64 build). Then MOVE the fresh
-  installer out of `src-tauri\target\aarch64-pc-windows-msvc\release\bundle\`
-  into the user's Downloads folder (GitHub-style filename,
-  `AI.Application.Support_<version>_arm64-setup.exe`), so the installer
-  exists ONLY in Downloads. The next build regenerates a fresh one in the
-  bundle folder, which is moved the same way again. If a `.msi` is produced
-  alongside the `.exe`, move it too.
-- Nothing is ever cleaned up automatically: the user deletes old installers
-  from Downloads when done, and `src-tauri\target\` is a git-ignored build
-  cache (~15 GB) that can be deleted freely anytime — it is rebuilt on the
-  next run/build.
+  laptop; `npm run build:x64` for a Windows x64 build).
+- Installer handling (moving the fresh installer into Downloads, cache
+  cleanup) follows the machine conventions in the global AGENTS.md.
 - Prefer these over pushing release tags until the user wants a bulk
   release to users.

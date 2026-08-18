@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useChatStore } from "@/stores/chatStore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useChatStore, messageKey, type ChatMessage } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useAppStore } from "@/stores/useAppStore";
 import { sendMessage } from "@/utils/api";
 import { buildSystemPrompt } from "@/utils/systemPrompt";
+import { estimateTokens } from "@/utils/tokens";
 import ChatSettings from "@/components/chat/ChatSettings";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
@@ -30,12 +31,14 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const configLoaded = useChatStore((s) => s.configLoaded);
   const config = useChatStore((s) => s.config);
   const loadConfig = useChatStore((s) => s.loadConfig);
+  const setConfig = useChatStore((s) => s.setConfig);
 
   const activeThreadId = useChatStore((s) => s.activeThreadId);
   const threadLoaded = useChatStore((s) => s.threadLoaded);
   const switchThread = useChatStore((s) => s.switchThread);
   const addMessage = useChatStore((s) => s.addMessage);
   const clearMessages = useChatStore((s) => s.clearMessages);
+  const updateMessage = useChatStore((s) => s.updateMessage);
   const isSending = useChatStore((s) => s.isSending);
   const setIsSending = useChatStore((s) => s.setIsSending);
   const setError = useChatStore((s) => s.setError);
@@ -44,6 +47,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     (s) => s.drafts[s.activeThreadId ?? ""] ?? "",
   );
   const setDraft = useChatStore((s) => s.setDraft);
+  const messages = useChatStore((s) => s.messages);
 
   const applications = useApplicationStore((s) => s.applications);
   const applicationsLoaded = useApplicationStore((s) => s.isLoaded);
@@ -54,6 +58,32 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const profile = useProfileStore();
   const loadProfile = useProfileStore((s) => s.loadProfile);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
+
+  // Live estimate of the input tokens the next send would consume
+  // (system prompt + conversation history + typed draft).
+  const tokenEstimate = useMemo(() => {
+    if (!application) return 0;
+    const appCtx = {
+      company: application.companyName,
+      jobDescription: application.jobDescription,
+      language: application.applicationLanguage,
+      requirements: application.requirements,
+      companyResearch: application.companyResearch,
+    };
+    const prompt = buildSystemPrompt(appCtx, profile, {
+      mode: config.systemPromptMode ?? "standard",
+      customPrompt: config.customSystemPrompt ?? "",
+    });
+    const historyText = messages.map((m) => m.content).join("\n");
+    return estimateTokens(`${prompt}\n${historyText}\n${inputValue}`);
+  }, [
+    application,
+    profile,
+    messages,
+    inputValue,
+    config.systemPromptMode,
+    config.customSystemPrompt,
+  ]);
 
   // ── Input state ──
   const [showConfig, setShowConfig] = useState(false);
@@ -96,27 +126,79 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     clearMessages();
     setError(null);
     setDraft("");
+    // A fresh thread means web search should behave like a first message
+    // again: enabled for the next message, off afterwards by default.
+    void setConfig({ webSearchEnabled: false });
     setConfirmReset(false);
-  }, [clearMessages, setError, setDraft]);
+  }, [clearMessages, setError, setDraft, setConfig]);
 
-  // ── Send a given text as a user message ──
+  // ── Send a message to the chat ──
+  // Three modes:
+  // - default: `text` is added as a new user message and sent.
+  // - `resendKey`: an existing failed user message is sent again in place
+  //   (no duplicate is created; the failed marker is cleared on the way out).
+  // - `regenerateKey`: the given assistant message is dropped from the
+  //   request history and generated anew; on success it is replaced in
+  //   place, and on failure the old reply is kept.
   // `triggerFitEvaluation` is set by the starter button only, so the agent
   // runs the fit evaluation exactly when the user asks for it via the button.
   const sendText = useCallback(
-    async (text: string, triggerFitEvaluation = false) => {
-      const trimmed = text.trim();
-      if (!trimmed || isSending || !application) return;
+    async (
+      opts: {
+        text?: string;
+        triggerFitEvaluation?: boolean;
+        resendKey?: string;
+        regenerateKey?: string;
+      } = {},
+    ) => {
+      const isResend = !!opts.resendKey;
+      const isRegenerate = !!opts.regenerateKey;
 
-      // Clear input immediately
-      setDraft("");
+      if (isSending || !application) return;
 
-      // Add user message
-      const userMsg = {
-        role: "user" as const,
-        content: trimmed,
-        timestamp: new Date().toISOString(),
-      };
-      addMessage(userMsg);
+      let trimmed = "";
+      if (isResend || isRegenerate) {
+        const store = useChatStore.getState();
+        const target = store.messages.find(
+          (m) => messageKey(m) === (opts.resendKey ?? opts.regenerateKey),
+        );
+        if (!target || !target.content.trim()) return;
+        trimmed = target.content.trim();
+      } else {
+        trimmed = (opts.text ?? "").trim();
+      }
+      if (!trimmed) return;
+
+      // Clear the input only for a freshly typed send; re-sends and
+      // regenerations reuse a message that is already in the thread.
+      if (!isResend && !isRegenerate) {
+        setDraft("");
+      }
+
+      // Web search runs only on the first message of a thread (company
+      // research for the fit evaluation); later messages only search when
+      // the user enabled it in the chat settings.
+      const threadIsEmpty = useChatStore.getState().messages.length === 0;
+      const webSearchEnabled = threadIsEmpty || config.webSearchEnabled;
+
+      // A re-send clears the failed marker immediately so the button
+      // disappears while the request is in flight.
+      if (isResend) {
+        updateMessage(opts.resendKey!, (m) => ({ ...m, failed: false }));
+      }
+
+      // Add the user message only for a fresh send; re-sends reuse the
+      // message already in the thread, regenerations keep the old reply
+      // until the new one is ready.
+      let userMsg: ChatMessage | null = null;
+      if (!isResend && !isRegenerate) {
+        userMsg = {
+          role: "user",
+          content: trimmed,
+          timestamp: new Date().toISOString(),
+        };
+        addMessage(userMsg);
+      }
 
       // Send to API
       const controller = new AbortController();
@@ -161,13 +243,22 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       const systemPrompt = buildSystemPrompt(appCtx, profileData, {
         mode: config.systemPromptMode ?? "standard",
         customPrompt: config.customSystemPrompt ?? "",
-        fitEvaluation: triggerFitEvaluation,
+        fitEvaluation: opts.triggerFitEvaluation ?? false,
       });
 
       const threadAtSend = useChatStore.getState().activeThreadId;
       const { messages } = useChatStore.getState();
-      const result = await sendMessage(messages, config, systemPrompt, {
-        signal: controller.signal,
+      // A regeneration drops the old reply from the history so the model
+      // answers afresh; the stored message itself stays until replaced.
+      const history = isRegenerate
+        ? messages.filter((m) => messageKey(m) !== opts.regenerateKey)
+        : messages;
+      const result = await sendMessage(
+        history,
+        { ...config, webSearchEnabled },
+        systemPrompt,
+        {
+          signal: controller.signal,
         onDelta: (chunk) => {
           // Only render text while still in the thread it was sent from.
           if (useChatStore.getState().activeThreadId === threadAtSend) {
@@ -185,6 +276,14 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       }
 
       if (result.error) {
+        // The user's message did not land: flag it so it can be re-sent in
+        // place. A regeneration keeps the old reply untouched.
+        if (!isRegenerate) {
+          const failedKey = opts.resendKey ?? (userMsg ? messageKey(userMsg) : null);
+          if (failedKey) {
+            updateMessage(failedKey, (m) => ({ ...m, failed: true }));
+          }
+        }
         setError(result.error);
         setIsSending(false);
         setStreamingText("");
@@ -192,20 +291,28 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         // User stopped mid-answer: keep whatever was generated so far.
         const partial = useChatStore.getState().streamingText;
         if (partial.trim()) {
-          addMessage({
-            role: "assistant",
-            content: partial,
-            timestamp: new Date().toISOString(),
-          });
+          if (isRegenerate) {
+            updateMessage(opts.regenerateKey!, (m) => ({ ...m, content: partial }));
+          } else {
+            addMessage({
+              role: "assistant",
+              content: partial,
+              timestamp: new Date().toISOString(),
+            });
+          }
         }
         setStreamingText("");
         setIsSending(false);
       } else {
-        addMessage({
-          role: "assistant",
-          content: result.content,
-          timestamp: new Date().toISOString(),
-        });
+        if (isRegenerate) {
+          updateMessage(opts.regenerateKey!, (m) => ({ ...m, content: result.content }));
+        } else {
+          addMessage({
+            role: "assistant",
+            content: result.content,
+            timestamp: new Date().toISOString(),
+          });
+        }
         setStreamingText("");
         setIsSending(false);
       }
@@ -214,6 +321,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     [
       isSending,
       addMessage,
+      updateMessage,
       application,
       profile,
       loadProfile,
@@ -227,12 +335,12 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
   // ── Handle send ──
   const handleSend = useCallback(() => {
-    void sendText(inputValue);
+    void sendText({ text: inputValue });
   }, [inputValue, sendText]);
 
   // ── Starter button on empty chat ──
   const handleStart = useCallback(() => {
-    void sendText("Help me answer my application", true);
+    void sendText({ text: "Help me answer my application", triggerFitEvaluation: true });
   }, [sendText]);
 
   // ── Show loading state while restoring config ──
@@ -401,7 +509,11 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       </div>
 
       {/* Messages */}
-      <MessageList onStart={handleStart} />
+      <MessageList
+        onStart={handleStart}
+        onResend={(key) => void sendText({ resendKey: key })}
+        onRegenerate={(key) => void sendText({ regenerateKey: key })}
+      />
 
       {/* Input */}
       <MessageInput
@@ -410,6 +522,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         onSend={handleSend}
         onStop={handleStop}
         disabled={isSending}
+        tokenEstimate={tokenEstimate}
       />
     </div>
   );
