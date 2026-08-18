@@ -150,11 +150,11 @@ function App() {
               aria-controls="tabpanel-main"
               onClick={() => setActiveTab(tab.id)}
               className={`
-                px-6 py-2 rounded-full text-sm font-medium transition-all duration-200 select-none
+                px-6 py-2 rounded-full text-sm font-medium transition-colors duration-200 select-none
                 ${
                   activeTab === tab.id
-                    ? "bg-primary text-primary-foreground shadow-lg shadow-primary/30"
-                    : "bg-surface text-text-secondary hover:bg-border hover:text-text-primary hover:brightness-110"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-surface text-text-secondary hover:bg-border hover:text-text-primary"
                 }
               `}
             >

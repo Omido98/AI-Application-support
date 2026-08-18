@@ -67,8 +67,8 @@ describe("STATUS_BADGE_CLASSES", () => {
 
   it("uses theme-aware text colours for the status tint", () => {
     const applied = STATUS_BADGE_CLASSES.applied;
-    expect(applied).toContain("dark:text-blue-400");
-    expect(applied).toContain("text-blue-600");
+    expect(applied).toContain("dark:text-blue-300");
+    expect(applied).toContain("text-blue-700");
   });
 });
 
