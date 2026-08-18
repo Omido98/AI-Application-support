@@ -29,17 +29,17 @@ import {
 } from "@/components/ui/dialog";
 
 const PRESET_ACCENTS = [
-  { name: "Purple", value: "#7c3aed" },
-  { name: "Violet", value: "#9333ea" },
-  { name: "Blue", value: "#2563eb" },
-  { name: "Cyan", value: "#0891b2" },
-  { name: "Teal", value: "#0d9488" },
-  { name: "Green", value: "#059669" },
-  { name: "Amber", value: "#d97706" },
-  { name: "Orange", value: "#ea580c" },
-  { name: "Red", value: "#dc2626" },
-  { name: "Pink", value: "#db2777" },
-  { name: "Slate", value: "#475569" },
+  { name: "Mint", value: "#34d399" },
+  { name: "Emerald", value: "#4ade80" },
+  { name: "Sky", value: "#93c5fd" },
+  { name: "Blue", value: "#60a5fa" },
+  { name: "Amber", value: "#fbbf24" },
+  { name: "Orange", value: "#fb923c" },
+  { name: "Rose", value: "#f87171" },
+  { name: "Pink", value: "#f472b6" },
+  { name: "Violet", value: "#a78bfa" },
+  { name: "Stone", value: "#a8a094" },
+  { name: "Deep Teal", value: "#0f6e5c" },
 ];
 
 type UpdateStatus =

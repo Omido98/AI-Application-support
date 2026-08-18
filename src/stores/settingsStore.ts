@@ -10,7 +10,7 @@ export interface Settings {
   accent: string;
 }
 
-export const DEFAULT_ACCENT = "#7c3aed";
+export const DEFAULT_ACCENT = "#34d399";
 export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   accent: DEFAULT_ACCENT,
@@ -32,7 +32,7 @@ export function getAccentLuminance(hex: string): number {
 
 /** Text colour (hex) that stays readable on top of the given accent. */
 export function getAccentForeground(hex: string): string {
-  return getAccentLuminance(hex) > 0.55 ? "#1e1b4b" : "#ffffff";
+  return getAccentLuminance(hex) > 0.45 ? "#0d2b22" : "#ffffff";
 }
 
 // ──────────────────────────────────────────────

@@ -86,7 +86,7 @@ export default function MessageInput({
         {tokenEstimate > 0 && (
           <span
             className={cn(
-              "text-[10px] leading-none select-none",
+              "text-[10px] leading-none select-none font-mono",
               tokenEstimate > TOKEN_WARN_THRESHOLD
                 ? "text-amber-500"
                 : "text-text-muted",

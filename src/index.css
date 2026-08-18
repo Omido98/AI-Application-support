@@ -10,6 +10,9 @@
    used by Tailwind classes like bg-background, text-foreground, etc.
    The values resolve to runtime CSS custom properties so both
    light/dark themes and the user-chosen accent colour work.
+
+   Design contract: DESIGN.md (Inkwell — warm charcoal paper,
+   ink-teal accent, serif documents, mono instrument readouts).
    ============================================================ */
 @theme {
   --color-background: var(--background);
@@ -36,93 +39,96 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --font-sans: "Geist Variable", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  --font-doc: "Source Serif 4 Variable", Georgia, "Times New Roman", serif;
   --radius: 0.5rem;
 }
 
 /* ============================================================
-   CSS Custom Properties — LIGHT THEME (default)
+   CSS Custom Properties — LIGHT THEME (paper variant)
    ============================================================ */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #f7f4ef;
+  --foreground: #1f1b15;
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: #1f1b15;
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
-  --primary: #7c3aed;
+  --popover-foreground: #1f1b15;
+  --primary: #0f6e5c;
   --primary-foreground: #ffffff;
-  --secondary: #0891b2;
+  --secondary: #6b6357;
   --secondary-foreground: #ffffff;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #7c3aed;
+  --muted: #f1ede6;
+  --muted-foreground: #948c7e;
+  --accent: #0f6e5c;
   --accent-foreground: #ffffff;
-  --destructive: #dc2626;
+  --destructive: #b91c1c;
   --destructive-foreground: #ffffff;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #7c3aed;
+  --border: #e3ddd2;
+  --input: #e3ddd2;
+  --ring: #0f6e5c;
   --surface: #ffffff;
-  --field: #f8fafc;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --chart-1: #7c3aed;
-  --chart-2: #0891b2;
-  --chart-3: #059669;
-  --chart-4: #d97706;
-  --chart-5: #64748b;
+  --field: #f1ede6;
+  --text-primary: #1f1b15;
+  --text-secondary: #6b6357;
+  --text-muted: #948c7e;
+  --chart-1: #0f6e5c;
+  --chart-2: #2563eb;
+  --chart-3: #d97706;
+  --chart-4: #16a34a;
+  --chart-5: #6b6357;
   --sidebar: #ffffff;
-  --sidebar-foreground: #0f172a;
-  --sidebar-primary: #7c3aed;
+  --sidebar-foreground: #1f1b15;
+  --sidebar-primary: #0f6e5c;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f1f5f9;
-  --sidebar-accent-foreground: #0f172a;
-  --sidebar-border: #e2e8f0;
-  --sidebar-ring: #7c3aed;
+  --sidebar-accent: #f1ede6;
+  --sidebar-accent-foreground: #1f1b15;
+  --sidebar-border: #e3ddd2;
+  --sidebar-ring: #0f6e5c;
 }
 
 /* ============================================================
-   DARK THEME
+   DARK THEME (normative — default)
    ============================================================ */
 .dark {
-  --background: #0a0a0f;
-  --foreground: #f1f5f9;
-  --card: #1a1a2e;
-  --card-foreground: #f1f5f9;
-  --popover: #1a1a2e;
-  --popover-foreground: #f1f5f9;
-  --primary: #7c3aed;
-  --primary-foreground: #ffffff;
-  --secondary: #06b6d4;
-  --secondary-foreground: #ffffff;
-  --muted: #1a1a2e;
-  --muted-foreground: #64748b;
-  --accent: #7c3aed;
-  --accent-foreground: #ffffff;
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
-  --border: #2a2a3e;
-  --input: #2a2a3e;
-  --ring: #7c3aed;
-  --surface: #1a1a2e;
-  --field: #14141f;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --chart-1: #7c3aed;
-  --chart-2: #06b6d4;
-  --chart-3: #1a1a2e;
-  --chart-4: #f1f5f9;
-  --chart-5: #94a3b8;
-  --sidebar: #1a1a2e;
-  --sidebar-foreground: #f1f5f9;
-  --sidebar-primary: #7c3aed;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #2a2a3e;
-  --sidebar-accent-foreground: #f1f5f9;
-  --sidebar-border: #2a2a3e;
-  --sidebar-ring: #7c3aed;
+  --background: #14120f;
+  --foreground: #f2ede4;
+  --card: #1e1b17;
+  --card-foreground: #f2ede4;
+  --popover: #262219;
+  --popover-foreground: #f2ede4;
+  --primary: #34d399;
+  --primary-foreground: #0d2b22;
+  --secondary: #a8a094;
+  --secondary-foreground: #14120f;
+  --muted: #262219;
+  --muted-foreground: #8a8376;
+  --accent: #34d399;
+  --accent-foreground: #0d2b22;
+  --destructive: #f87171;
+  --destructive-foreground: #330b0b;
+  --border: #3a352c;
+  --input: #3a352c;
+  --ring: #34d399;
+  --surface: #1e1b17;
+  --field: #262219;
+  --text-primary: #f2ede4;
+  --text-secondary: #a8a094;
+  --text-muted: #8a8376;
+  --chart-1: #34d399;
+  --chart-2: #93c5fd;
+  --chart-3: #fbbf24;
+  --chart-4: #f87171;
+  --chart-5: #a8a094;
+  --sidebar: #1e1b17;
+  --sidebar-foreground: #f2ede4;
+  --sidebar-primary: #34d399;
+  --sidebar-primary-foreground: #0d2b22;
+  --sidebar-accent: #262219;
+  --sidebar-accent-foreground: #f2ede4;
+  --sidebar-border: #3a352c;
+  --sidebar-ring: #34d399;
 }
 
 /* Base styles */
@@ -132,7 +138,7 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
     margin: 0;
     padding: 0;
   }
@@ -157,9 +163,19 @@
 }
 
 /* ============================================================
-   Chat markdown — tables use the app's theme tokens so they
-   match the rest of the UI in light and dark mode.
+   Chat documents — assistant output is a letter, not a bubble.
+   Serif type at 17px/1.75 (DESIGN.md: typography.doc-lg).
+   Tables use the app's theme tokens so they match the UI.
    ============================================================ */
+.chat-markdown {
+  font-family: var(--font-doc);
+  color: var(--text-primary);
+}
+.chat-markdown p,
+.chat-markdown li {
+  font-size: 1.0625rem;
+  line-height: 1.75;
+}
 .chat-markdown table {
   width: 100%;
   border-collapse: collapse;
