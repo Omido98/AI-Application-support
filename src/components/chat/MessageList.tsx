@@ -351,8 +351,8 @@ export default function MessageList({
               className={cn(
                 "whitespace-pre-wrap break-words",
                 isUser
-                  ? "max-w-[80%] rounded-xl px-4 py-2.5 text-sm leading-relaxed bg-primary text-primary-foreground"
-                  : "max-w-[75ch] px-1 py-1 text-text-primary",
+                  ? "max-w-[80%] rounded-lg px-4 py-3 text-sm leading-relaxed bg-primary text-primary-foreground"
+                  : "max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3",
               )}
             >
               {isUser ? (
@@ -490,7 +490,7 @@ export default function MessageList({
 
       {isSending && streamingText ? (
         <div className="flex justify-start">
-          <div className="max-w-[75ch] px-1 py-1 text-text-primary break-words">
+          <div className="max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3 break-words">
             <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {streamingText}
@@ -504,7 +504,7 @@ export default function MessageList({
         </div>
       ) : isSending ? (
         <div className="flex justify-start">
-          <div className="max-w-[80%] rounded-xl bg-surface text-text-primary border border-border">
+          <div className="max-w-[80%] rounded-lg bg-surface text-text-primary border border-border">
             <LoadingDots />
           </div>
         </div>
@@ -513,7 +513,7 @@ export default function MessageList({
       {(improvePendingId || deepImprovePendingId) && improveStep ? (
         <div className="flex justify-start">
           {improvePreview ? (
-            <div className="max-w-[75ch] px-1 py-1 text-text-primary break-words">
+            <div className="max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3 break-words">
               <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {improvePreview}
@@ -525,7 +525,7 @@ export default function MessageList({
               />
             </div>
           ) : (
-            <div className="max-w-[80%] rounded-xl bg-surface text-text-primary border border-border">
+            <div className="max-w-[80%] rounded-lg bg-surface text-text-primary border border-border">
               <div className="flex items-center gap-2 px-4 py-3">
                 <Loader2 className="size-4 animate-spin text-text-muted" />
                 <span className="text-sm text-text-muted">
