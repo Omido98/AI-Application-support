@@ -163,9 +163,9 @@
 }
 
 /* ============================================================
-   Chat documents — assistant output is a letter, not a bubble.
-   Serif type at 17px/1.75 (DESIGN.md: typography.doc-lg).
-   Tables use the app's theme tokens so they match the UI.
+   Chat documents — assistant output renders as a serif bubble.
+   Serif type at 15px/1.6 (one step below DESIGN.md doc-lg so
+   bubbles stay compact). Tables use the app's theme tokens.
    ============================================================ */
 .chat-markdown {
   font-family: var(--font-doc);
@@ -173,8 +173,8 @@
 }
 .chat-markdown p,
 .chat-markdown li {
-  font-size: 1.0625rem;
-  line-height: 1.75;
+  font-size: 0.9375rem;
+  line-height: 1.6;
 }
 .chat-markdown table {
   width: 100%;

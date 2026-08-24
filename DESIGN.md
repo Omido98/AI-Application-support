@@ -90,6 +90,11 @@ typography:
     fontSize: 17px
     fontWeight: 400
     lineHeight: 1.75
+  doc-sm:
+    fontFamily: Source Serif 4 Variable
+    fontSize: 15px
+    fontWeight: 400
+    lineHeight: 1.6
 rounded:
   sm: 6px
   md: 8px
@@ -168,8 +173,13 @@ components:
     rounded: "{rounded.md}"
     padding: 12px 16px
   chat-document:
+    backgroundColor: "{colors.surface}"
+    borderColor: "{colors.border}"
+    borderWidth: 1px
     textColor: "{colors.foreground}"
-    typography: "{typography.doc-lg}"
+    typography: "{typography.doc-sm}"
+    rounded: "{rounded.md}"
+    padding: 12px 16px
   divider:
     backgroundColor: "{colors.border}"
     height: 1px
@@ -224,9 +234,10 @@ emotional register is focused, trustworthy, and editorial — quiet confidence
 that reduces anxiety instead of adding urgency.
 
 The AI assistant is not a chat toy: it is a writing collaborator. Its output
-renders as a **document** — serif type in a readable column — never as generic
-chat bubbles. Machine-readouts (token estimates, timestamps) are set in
-monospace, like instrument dials on the desk.
+renders as a serif **document bubble** — a surface well with a hairline border,
+serif type in a readable column — so every reply is clearly containerized.
+Machine-readouts (token estimates, timestamps) are set in monospace, like
+instrument dials on the desk.
 
 ## Colors
 
@@ -282,9 +293,10 @@ Three voices, one purpose: UI chrome must stay quiet so the documents can speak.
   timestamps, counts, anything that reports machine state. It signals "this is
   data, not prose".
 - **Source Serif 4** (variable) is the document voice — every AI-written
-  letter, draft, and review. The assistant's output is set at 17px with a 1.75
-  line height in a ~75ch column, so it reads like a letter on the desk, not a
-  chat bubble.
+  letter, draft, and review. In chat the assistant's output is set at 15px with
+  a 1.6 line height inside a surface bubble (1px hairline border, 8px radius)
+  capped at ~75ch, so replies read like compact, clearly separated letters on
+  the desk.
 
 Hierarchy: `headline-lg` for the company/tab titles, `headline-md` for section
 titles, `headline-sm` for card titles, `body-lg`/`body-md` for running UI text,
@@ -350,11 +362,14 @@ logical unit of data; related units sit 16px apart. Card titles use
 
 ### Chat
 User messages are compact primary bubbles (8px radius). Assistant messages are
-**documents**: no background, no border, serif type at 17px/1.75, capped at
-75ch. The action rail (regenerate, copy, save, de-slop, review, improve) sits
-beside each assistant message as quiet icon buttons that surface on hover. A
-blinking cursor marks live streaming; pipeline steps ("Reviewing draft…") are
-shown as muted inline progress, never as a spinner-only void.
+**document bubbles**: surface background, 1px hairline border, serif type at
+15px/1.6, capped at 75ch — one reply per bubble, so where a message starts and
+ends is always clear. The action rail (regenerate, copy, save, de-slop,
+review, improve) sits beside each assistant message as quiet icon buttons that
+surface on hover. A blinking cursor marks live streaming; pipeline steps
+("Reviewing draft…") are shown as muted inline progress, never as a
+spinner-only void. Streaming and improve-preview replies use the same bubble
+treatment.
 
 ### Inputs
 36px fields on `surface-alt` with 1px borders; textareas share the treatment.
@@ -373,7 +388,7 @@ navigation moves between tabs.
 ## Do's and Don'ts
 
 - Do use the primary accent for exactly one primary action per screen
-- Do render AI output as serif documents — never as generic chat bubbles
+- Do render AI output as serif document bubbles — surface well, hairline border, one reply per bubble
 - Do keep machine readouts (tokens, timestamps) in Geist Mono
 - Do use status colours exclusively for application status
 - Don't use cool grays or pure white/black — the palette is warm by contract
