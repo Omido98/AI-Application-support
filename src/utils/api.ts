@@ -90,6 +90,8 @@ interface WebResult {
 /** A single Zen pricing entry scraped from the Zen docs page. */
 export interface ZenPricingEntry {
   id: string;
+  /** Human-readable display name ("Model" column), when known. */
+  name?: string | null;
   input: number | null;
   output: number | null;
   is_free: boolean;

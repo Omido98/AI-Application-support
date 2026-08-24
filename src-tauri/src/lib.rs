@@ -906,6 +906,11 @@ async fn zen_fetch_page(url: String) -> Result<String, String> {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ZenPricingEntry {
     id: String,
+    /// Human-readable display name from the docs endpoints table ("Model"
+    /// column), e.g. "claude-sonnet-4-5" -> "Claude Sonnet 4.5". Absent in
+    /// older caches and when the endpoints table could not be parsed.
+    #[serde(default)]
+    name: Option<String>,
     input: Option<f64>,
     output: Option<f64>,
     is_free: bool,
@@ -990,6 +995,15 @@ async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
         }
     }
 
+    // Reverse lookup: official model ID -> display name (first one wins).
+    let mut id_to_name: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for (name, id) in &name_to_id {
+        id_to_name
+            .entry(id.clone())
+            .or_insert_with(|| name.clone());
+    }
+
     let table = find_table(&["input", "output"])
         .ok_or_else(|| "Could not find the pricing table on the Zen docs page.".to_string())?;
 
@@ -1012,8 +1026,10 @@ async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
         let (input, input_free) = parse_zen_price(&cells[1]);
         let (output, output_free) = parse_zen_price(&cells[2]);
         seen.insert(id.clone());
+        let model_name = id_to_name.get(&id).cloned();
         entries.push(ZenPricingEntry {
             id,
+            name: model_name,
             input,
             output,
             is_free: input_free || output_free,

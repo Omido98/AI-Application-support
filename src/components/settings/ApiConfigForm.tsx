@@ -24,6 +24,7 @@ import {
 import {
   formatModelPrice,
   isFreeModel,
+  ZEN_MODEL_NAMES,
   type ModelPrice,
 } from "@/utils/zenPricing";
 import { saveJson, loadJson } from "@/utils/storage";
@@ -124,6 +125,18 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
     () => new Set(pricing.filter((p) => p.is_free).map((p) => p.id)),
     [pricing],
   );
+
+  // Model ID -> display name: static docs snapshot as base, live-scraped
+  // names win when present. Unknown IDs fall back to the raw ID.
+  const modelNames = useMemo(() => {
+    const map: Record<string, string> = { ...ZEN_MODEL_NAMES };
+    for (const entry of pricing) {
+      if (entry.name) map[entry.id] = entry.name;
+    }
+    return map;
+  }, [pricing]);
+
+  const displayName = (id: string): string => modelNames[id] ?? id;
 
   // Load the model list (and Zen prices when applicable) for a provider
   const loadModels = useCallback(
@@ -436,7 +449,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
           >
             <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
               <SelectValue>
-                {(v) => v ?? "Select a model…"}
+                {(v) => (v ? displayName(v) : "Select a model…")}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -452,7 +465,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
                 return (
                   <SelectItem key={id} value={id}>
                     <span className="flex items-center justify-between gap-3 flex-1">
-                      <span className="truncate">{id}</span>
+                      <span className="truncate">{displayName(id)}</span>
                       {price && (
                         <span className="flex items-center gap-1.5 shrink-0">
                           <span
@@ -597,7 +610,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
               {pendingSelection && (
                 <>
                   <span className="text-text-primary font-medium">
-                    {pendingSelection}
+                    {displayName(pendingSelection)}
                   </span>{" "}
                   is not a free model
                   {provider === "zen" && (
