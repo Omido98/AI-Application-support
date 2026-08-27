@@ -1,10 +1,10 @@
-﻿use ego_tree::NodeRef;
+use ego_tree::NodeRef;
 use futures_util::StreamExt;
 use keyring::Entry;
 use scraper::{ElementRef, Node, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use tauri::ipc::Channel;
 use tauri::State;
@@ -16,6 +16,76 @@ const KEYCHAIN_SERVICE: &str = "com.ai-application-support.app";
 /// Browser-like user agent so DuckDuckGo and typical websites serve normal
 /// HTML instead of bot-blocking pages.
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+/// Shared HTTP clients, built once and reused so connection pools, DNS
+/// lookups and TLS sessions persist between calls ("reqwest::Client" is an
+/// internally reference-counted handle and cheap to clone).
+#[derive(Clone)]
+struct HttpClients {
+    /// Client for chat/model endpoints. Deliberately has NO overall request
+    /// timeout: streamed responses may legitimately run for many minutes and
+    /// already end via "[DONE]"/"message_stop" or user cancellation, so only
+    /// the connect phase is bounded.
+    chat: reqwest::Client,
+    /// Client for HTML scraping with a browser user agent and bounded
+    /// redirects. Call sites apply their own per-request timeouts.
+    scrape: reqwest::Client,
+}
+
+impl HttpClients {
+    fn new() -> Result<Self, String> {
+        let chat = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+        let scrape = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .user_agent(BROWSER_USER_AGENT)
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+        Ok(Self { chat, scrape })
+    }
+}
+
+/// Upper bound on tool calls tracked for a single streamed response, so a
+/// malformed stream advertising huge index values cannot balloon memory.
+const MAX_STREAM_TOOL_CALLS: usize = 128;
+
+/// Hard cap on page bytes handed to the HTML parser in "zen_fetch_page";
+/// readable article content sits far below this and larger downloads would
+/// only spend parse time on text that gets truncated away anyway.
+const MAX_PAGE_BYTES: usize = 1024 * 1024;
+
+/// Text-collection budget for "zen_fetch_page", slightly above the
+/// 8000-character output cap so whitespace normalisation cannot undershoot.
+const FETCH_TEXT_BUDGET_CHARS: usize = 9000;
+
+// ──────────────────────────────────────────────
+// Pre-parsed CSS selectors (compiled once, reused by every scrape call)
+// ──────────────────────────────────────────────
+
+static DDG_RESULT_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.result").expect("valid static selector"));
+static DDG_TITLE_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("a.result__a").expect("valid static selector"));
+static DDG_SNIPPET_SELECTOR: LazyLock<Selector> = LazyLock::new(|| {
+    Selector::parse("a.result__snippet, div.result__snippet").expect("valid static selector")
+});
+static FETCH_SKIP_SELECTOR: LazyLock<Selector> = LazyLock::new(|| {
+    Selector::parse(
+        "script, style, noscript, template, svg, nav, header, footer, aside, iframe, form",
+    )
+    .expect("valid static selector")
+});
+static FETCH_BODY_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("body").expect("valid static selector"));
+static ZEN_TABLE_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("table").expect("valid static selector"));
+static ZEN_ROW_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("tr").expect("valid static selector"));
+static ZEN_CELL_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("th, td").expect("valid static selector"));
 
 /// A single web search result.
 #[derive(Serialize, Deserialize, Clone)]
@@ -142,7 +212,23 @@ async fn send_with_retry(
                     return Err("Request cancelled.".to_string());
                 }
                 let wait = retry_after.unwrap_or_else(|| backoff_secs(attempt));
-                tokio::time::sleep(Duration::from_secs(wait)).await;
+                // Abort promptly when cancellation fires during the wait,
+                // instead of finishing the sleep and firing another API call.
+                let cancelled = match token {
+                    Some(t) => {
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_secs(wait)) => false,
+                            _ = t.cancelled() => true,
+                        }
+                    }
+                    None => {
+                        tokio::time::sleep(Duration::from_secs(wait)).await;
+                        false
+                    }
+                };
+                if cancelled {
+                    return Err("Request cancelled.".to_string());
+                }
                 continue;
             }
             return Err(friendly_rate_limit_message(status, retry_after));
@@ -159,6 +245,7 @@ async fn send_with_retry(
 /// Used to populate the model dropdown.
 #[tauri::command]
 async fn zen_list_models(
+    clients: State<'_, HttpClients>,
     base_url: String,
     api_key: String,
     provider: String,
@@ -170,12 +257,7 @@ async fn zen_list_models(
         format!("{base}/models")
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
-
-    let mut request = client.get(&url);
+    let mut request = clients.chat.get(&url);
     if !api_key.is_empty() {
         request = if provider == "anthropic" {
             request
@@ -187,6 +269,7 @@ async fn zen_list_models(
     }
 
     let response = request
+        .timeout(Duration::from_secs(20))
         .send()
         .await
         .map_err(|e| format!("Network error: {e}"))?;
@@ -200,7 +283,12 @@ async fn zen_list_models(
         .await
         .map_err(|e| format!("Invalid response from models endpoint: {e}"))?;
 
-    Ok(parsed.data.into_iter().map(|m| m.id).collect())
+    // Deduplicate and sort so the dropdown is stable for providers that
+    // return repeated or unordered model ids.
+    let mut models: Vec<String> = parsed.data.into_iter().map(|m| m.id).collect();
+    models.sort();
+    models.dedup();
+    Ok(models)
 }
 
 /// Forward a chat request to the configured provider's endpoint.
@@ -209,6 +297,7 @@ async fn zen_list_models(
 /// Runs on the Rust side so the Tauri webview never hits CORS restrictions.
 #[tauri::command]
 async fn zen_chat(
+    clients: State<'_, HttpClients>,
     base_url: String,
     api_key: String,
     provider: String,
@@ -221,12 +310,14 @@ async fn zen_chat(
         format!("{base}/chat/completions")
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(180))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
-
-    let response = send_with_retry(&client, &url, &api_key, &provider, &payload, None).await?;
+    // Overall cap for the one-shot (non-streaming) request, which has no
+    // cancellation token; streaming runs without such a cap because its
+    // progress and cancellation are observable.
+    const NON_STREAM_TIMEOUT: Duration = Duration::from_secs(300);
+    let send = send_with_retry(&clients.chat, &url, &api_key, &provider, &payload, None);
+    let response = tokio::time::timeout(NON_STREAM_TIMEOUT, send)
+        .await
+        .map_err(|_| "Chat request timed out after 300 seconds.".to_string())??;
 
     let text = response
         .text()
@@ -244,6 +335,18 @@ async fn zen_chat(
 /// frontend can cancel a stream mid-generation (see zen_chat_stream_cancel).
 #[derive(Clone, Default)]
 struct StreamState(Arc<Mutex<HashMap<String, CancellationToken>>>);
+
+impl StreamState {
+    /// Lock the registry, recovering from poisoning: registry operations
+    /// never leave the map in an invalid state, so a panic while a guard
+    /// is held must not wedge cancellation and cleanup for every later
+    /// request.
+    fn lock(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<String, CancellationToken>> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
 
 /// Events emitted to the frontend while a chat response streams in.
 #[derive(Clone, Serialize)]
@@ -309,32 +412,25 @@ impl StreamAccumulator {
         }
     }
 
-    /// Process one SSE `data:` payload.
-    fn feed(
-        &mut self,
-        data: &str,
-        on_event: &Channel<ChatStreamEvent>,
-    ) -> Result<(), String> {
+    /// Process one SSE `data:` payload. Returns the answer-text delta to
+    /// forward to the frontend, if this payload carried one.
+    fn feed(&mut self, data: &str) -> Result<Option<String>, String> {
         if data == "[DONE]" {
             self.openai_finished = true;
-            return Ok(());
+            return Ok(None);
         }
         let parsed: serde_json::Value = serde_json::from_str(data)
             .map_err(|e| format!("Failed to parse streamed event: {e}"))?;
         if self.provider == "anthropic" {
-            self.feed_anthropic(&parsed, on_event)
+            self.feed_anthropic(&parsed)
         } else {
-            self.feed_openai(&parsed, on_event)
+            self.feed_openai(&parsed)
         }
     }
 
-    fn feed_openai(
-        &mut self,
-        parsed: &serde_json::Value,
-        on_event: &Channel<ChatStreamEvent>,
-    ) -> Result<(), String> {
+    fn feed_openai(&mut self, parsed: &serde_json::Value) -> Result<Option<String>, String> {
         let Some(choice) = parsed.pointer("/choices/0") else {
-            return Ok(());
+            return Ok(None);
         };
         if let Some(reason) = choice.get("finish_reason") {
             if !reason.is_null() {
@@ -342,17 +438,14 @@ impl StreamAccumulator {
             }
         }
         let Some(delta) = choice.get("delta") else {
-            return Ok(());
+            return Ok(None);
         };
 
+        let mut text_delta: Option<String> = None;
         if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
             if !content.is_empty() {
                 self.openai_content.push_str(content);
-                on_event
-                    .send(ChatStreamEvent::Delta {
-                        text: content.to_string(),
-                    })
-                    .map_err(|e| format!("Failed to send stream event: {e}"))?;
+                text_delta = Some(content.to_string());
             }
         }
 
@@ -362,6 +455,10 @@ impl StreamAccumulator {
                     .get("index")
                     .and_then(|i| i.as_u64())
                     .unwrap_or(0) as usize;
+                // Guard against malformed streams advertising huge indices.
+                if index >= MAX_STREAM_TOOL_CALLS {
+                    continue;
+                }
                 while self.openai_tool_calls.len() <= index {
                     self.openai_tool_calls
                         .push(OpenAIToolCallAcc::default());
@@ -384,14 +481,10 @@ impl StreamAccumulator {
                 }
             }
         }
-        Ok(())
+        Ok(text_delta)
     }
 
-    fn feed_anthropic(
-        &mut self,
-        parsed: &serde_json::Value,
-        on_event: &Channel<ChatStreamEvent>,
-    ) -> Result<(), String> {
+    fn feed_anthropic(&mut self, parsed: &serde_json::Value) -> Result<Option<String>, String> {
         let event_type = parsed
             .get("type")
             .and_then(|t| t.as_str())
@@ -447,13 +540,7 @@ impl StreamAccumulator {
                                     input_json: String::new(),
                                 });
                             }
-                            on_event
-                                .send(ChatStreamEvent::Delta {
-                                    text: text.to_string(),
-                                })
-                                .map_err(|e| {
-                                    format!("Failed to send stream event: {e}")
-                                })?;
+                            return Ok(Some(text.to_string()));
                         }
                     }
                     "input_json_delta" => {
@@ -481,7 +568,7 @@ impl StreamAccumulator {
             }
             _ => {}
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Assemble the final response JSON in the same shape the non-streaming
@@ -574,7 +661,11 @@ async fn stream_sse(
                 let line = line.trim_end_matches(['\r', '\n']);
                 if line.is_empty() {
                     if !event_data.is_empty() {
-                        acc.feed(&event_data, on_event)?;
+                        if let Some(delta) = acc.feed(&event_data)? {
+                            on_event
+                                .send(ChatStreamEvent::Delta { text: delta })
+                                .map_err(|e| format!("Failed to send stream event: {e}"))?;
+                        }
                         event_data.clear();
                         if acc.is_finished() {
                             return Ok::<(), String>(());
@@ -591,7 +682,11 @@ async fn stream_sse(
         }
         // A trailing event that was not terminated by a blank line.
         if !event_data.is_empty() {
-            acc.feed(&event_data, on_event)?;
+            if let Some(delta) = acc.feed(&event_data)? {
+                on_event
+                    .send(ChatStreamEvent::Delta { text: delta })
+                    .map_err(|e| format!("Failed to send stream event: {e}"))?;
+            }
         }
         Ok::<(), String>(())
     };
@@ -614,6 +709,7 @@ async fn stream_sse(
 /// same shape zen_chat returns (works for providers that ignore streaming
 /// and reply with a plain JSON body).
 async fn run_stream(
+    client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
     provider: &str,
@@ -628,15 +724,10 @@ async fn run_stream(
         format!("{base}/chat/completions")
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(180))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
-
     // Retried on HTTP 429 with backoff. Retries happen while the initial
     // request is rejected, before any SSE data has been emitted, so a retried
     // stream is indistinguishable from a slow first response.
-    let response = send_with_retry(&client, &url, api_key, provider, payload, Some(token)).await?;
+    let response = send_with_retry(client, &url, api_key, provider, payload, Some(token)).await?;
 
     // Providers that ignore `stream: true` answer with a plain JSON body;
     // treat anything that is not text/event-stream as such.
@@ -681,6 +772,7 @@ fn stream_request_id() -> String {
 /// chunks arrive as events on `on_event` (`delta` / `done` / `error`).
 #[tauri::command]
 fn zen_chat_stream(
+    clients: State<'_, HttpClients>,
     base_url: String,
     api_key: String,
     provider: String,
@@ -690,23 +782,26 @@ fn zen_chat_stream(
 ) -> Result<String, String> {
     let id = stream_request_id();
     let token = CancellationToken::new();
-    state
-        .0
-        .lock()
-        .map_err(|e| format!("Stream registry lock poisoned: {e}"))?
-        .insert(id.clone(), token.clone());
+    state.lock().insert(id.clone(), token.clone());
 
+    let chat_client = clients.inner().clone();
     let registry = state.inner().clone();
     let task_id = id.clone();
     tauri::async_runtime::spawn(async move {
-        let result =
-            run_stream(&base_url, &api_key, &provider, &payload, &on_event, &token).await;
+        let result = run_stream(
+            &chat_client.chat,
+            &base_url,
+            &api_key,
+            &provider,
+            &payload,
+            &on_event,
+            &token,
+        )
+        .await;
         if let Err(message) = result {
             let _ = on_event.send(ChatStreamEvent::Error { message });
         }
-        if let Ok(mut map) = registry.0.lock() {
-            map.remove(&task_id);
-        }
+        registry.lock().remove(&task_id);
     });
 
     Ok(id)
@@ -720,12 +815,7 @@ fn zen_chat_stream_cancel(
     id: String,
     state: State<'_, StreamState>,
 ) -> Result<(), String> {
-    if let Some(token) = state
-        .0
-        .lock()
-        .map_err(|e| format!("Stream registry lock poisoned: {e}"))?
-        .remove(&id)
-    {
+    if let Some(token) = state.lock().remove(&id) {
         token.cancel();
     }
     Ok(())
@@ -734,21 +824,20 @@ fn zen_chat_stream_cancel(
 /// Search the web via DuckDuckGo's HTML endpoint and return the top ~5 results,
 /// so the chat agent can research companies with current information.
 #[tauri::command]
-async fn zen_web_search(query: String) -> Result<Vec<WebResult>, String> {
+async fn zen_web_search(
+    clients: State<'_, HttpClients>,
+    query: String,
+) -> Result<Vec<WebResult>, String> {
     let url = reqwest::Url::parse_with_params(
         "https://html.duckduckgo.com/html/",
         &[("q", query.as_str())],
     )
     .map_err(|e| format!("Failed to build search URL: {e}"))?;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .user_agent(BROWSER_USER_AGENT)
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
-
-    let response = client
+    let response = clients
+        .scrape
         .get(url)
+        .timeout(Duration::from_secs(20))
         .send()
         .await
         .map_err(|e| format!("Network error: {e}"))?;
@@ -764,18 +853,11 @@ async fn zen_web_search(query: String) -> Result<Vec<WebResult>, String> {
 
     let document = scraper::Html::parse_document(&html);
 
-    let result_selector =
-        Selector::parse("div.result").map_err(|e| format!("Bad selector: {e}"))?;
-    let title_selector =
-        Selector::parse("a.result__a").map_err(|e| format!("Bad selector: {e}"))?;
-    let snippet_selector = Selector::parse("a.result__snippet, div.result__snippet")
-        .map_err(|e| format!("Bad selector: {e}"))?;
-
     let mut results = Vec::new();
-    for result in document.select(&result_selector).take(5) {
+    for result in document.select(&DDG_RESULT_SELECTOR).take(5) {
         let mut title = String::new();
         let mut url = String::new();
-        if let Some(a) = result.select(&title_selector).next() {
+        if let Some(a) = result.select(&DDG_TITLE_SELECTOR).next() {
             title = a.text().collect::<String>().trim().to_string();
             if let Some(href) = a.value().attr("href") {
                 url = decode_duckduckgo_href(href);
@@ -785,7 +867,7 @@ async fn zen_web_search(query: String) -> Result<Vec<WebResult>, String> {
             continue;
         }
         let snippet = result
-            .select(&snippet_selector)
+            .select(&DDG_SNIPPET_SELECTOR)
             .next()
             .map(|s| s.text().collect::<String>().trim().to_string())
             .unwrap_or_default();
@@ -823,32 +905,51 @@ fn decode_duckduckgo_href(href: &str) -> String {
     }
 }
 
-/// Recursively collect visible text from a node tree,
-/// skipping elements that match `skip` (script, style, nav, etc.).
-fn collect_text(node: NodeRef<'_, Node>, skip: &Selector, out: &mut Vec<String>) {
+/// Recursively collect visible text from a node tree, skipping elements that
+/// match `skip` (script, style, nav, etc.). Stops early — returning true —
+/// once `budget` characters have been gathered: page content worth reading
+/// sits at the top of the document, so walking the rest of a huge DOM only
+/// wastes time on text that would be truncated anyway.
+fn collect_text(
+    node: NodeRef<'_, Node>,
+    skip: &Selector,
+    out: &mut Vec<String>,
+    collected: &mut usize,
+    budget: usize,
+) -> bool {
+    if *collected >= budget {
+        return true;
+    }
     if node.value().is_element() {
         if let Some(el) = ElementRef::wrap(node) {
             if skip.matches(&el) {
-                return;
+                return false;
             }
             for child in el.children() {
-                collect_text(child, skip, out);
+                if collect_text(child, skip, out, collected, budget) {
+                    return true;
+                }
             }
         }
-        return;
+        return false;
     }
     if let Node::Text(text) = node.value() {
         let t = text.text.trim();
         if !t.is_empty() {
+            *collected += t.chars().count();
             out.push(t.to_string());
+            if *collected >= budget {
+                return true;
+            }
         }
     }
+    false
 }
 
 /// Fetch a web page and return its plain text (tags stripped, ~8000 chars max),
 /// so the chat agent can read an actual company page.
 #[tauri::command]
-async fn zen_fetch_page(url: String) -> Result<String, String> {
+async fn zen_fetch_page(clients: State<'_, HttpClients>, url: String) -> Result<String, String> {
     let parsed =
         reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
     let scheme = parsed.scheme();
@@ -856,15 +957,10 @@ async fn zen_fetch_page(url: String) -> Result<String, String> {
         return Err(format!("Unsupported URL scheme: {scheme}"));
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent(BROWSER_USER_AGENT)
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
-
-    let response = client
+    let mut response = clients
+        .scrape
         .get(parsed)
+        .timeout(Duration::from_secs(30))
         .send()
         .await
         .map_err(|e| format!("Network error: {e}"))?;
@@ -873,23 +969,40 @@ async fn zen_fetch_page(url: String) -> Result<String, String> {
         return Err(format!("Page returned HTTP {}", response.status()));
     }
 
-    let html = response
-        .text()
+    // Read at most MAX_PAGE_BYTES before parsing. Huge pages would spend
+    // seconds inside the HTML parser only for their text to be truncated away.
+    let mut html_bytes: Vec<u8> = Vec::with_capacity(64 * 1024);
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| format!("Failed to read page: {e}"))?;
+        .map_err(|e| format!("Failed to read page: {e}"))?
+    {
+        if html_bytes.len() + chunk.len() >= MAX_PAGE_BYTES {
+            let remaining = MAX_PAGE_BYTES - html_bytes.len();
+            html_bytes.extend_from_slice(&chunk[..remaining]);
+            break;
+        }
+        html_bytes.extend_from_slice(&chunk);
+    }
+    let html = String::from_utf8_lossy(&html_bytes);
 
     let document = scraper::Html::parse_document(&html);
-    let skip = Selector::parse(
-        "script, style, noscript, template, svg, nav, header, footer, aside, iframe, form",
-    )
-    .map_err(|e| format!("Bad selector: {e}"))?;
-    let body_selector =
-        Selector::parse("body").map_err(|e| format!("Bad selector: {e}"))?;
 
+    // Stop collecting as soon as we hold more text than the output cap:
+    // everything past that point would be truncated away regardless.
     let mut parts: Vec<String> = Vec::new();
-    if let Some(body) = document.select(&body_selector).next() {
+    let mut collected = 0usize;
+    if let Some(body) = document.select(&FETCH_BODY_SELECTOR).next() {
         for child in body.children() {
-            collect_text(child, &skip, &mut parts);
+            if collect_text(
+                child,
+                &FETCH_SKIP_SELECTOR,
+                &mut parts,
+                &mut collected,
+                FETCH_TEXT_BUDGET_CHARS,
+            ) {
+                break;
+            }
         }
     }
     let text = parts
@@ -906,6 +1019,11 @@ async fn zen_fetch_page(url: String) -> Result<String, String> {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ZenPricingEntry {
     id: String,
+    /// Human-readable display name from the docs endpoints table ("Model"
+    /// column), e.g. "claude-sonnet-4-5" -> "Claude Sonnet 4.5". Absent in
+    /// older caches and when the endpoints table could not be parsed.
+    #[serde(default)]
+    name: Option<String>,
     input: Option<f64>,
     output: Option<f64>,
     is_free: bool,
@@ -929,15 +1047,11 @@ fn parse_zen_price(text: &str) -> (Option<f64>, bool) {
 /// (lowercase, spaces to dashes); parenthetical price bands such as
 /// "(≤ 200K tokens)" are dropped, keeping the first (base) row per model.
 #[tauri::command]
-async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .user_agent(BROWSER_USER_AGENT)
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
-
-    let response = client
+async fn zen_fetch_zen_pricing(clients: State<'_, HttpClients>) -> Result<Vec<ZenPricingEntry>, String> {
+    let response = clients
+        .scrape
         .get("https://opencode.ai/docs/zen")
+        .timeout(Duration::from_secs(20))
         .send()
         .await
         .map_err(|e| format!("Network error: {e}"))?;
@@ -952,11 +1066,6 @@ async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
         .map_err(|e| format!("Failed to read pricing page: {e}"))?;
 
     let document = scraper::Html::parse_document(&html);
-    let table_selector =
-        Selector::parse("table").map_err(|e| format!("Bad selector: {e}"))?;
-    let row_selector = Selector::parse("tr").map_err(|e| format!("Bad selector: {e}"))?;
-    let cell_selector =
-        Selector::parse("th, td").map_err(|e| format!("Bad selector: {e}"))?;
 
     let cell_text = |el: ElementRef| -> String {
         el.text().collect::<String>().trim().to_string()
@@ -965,9 +1074,9 @@ async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
     // Table helper: returns the table whose first-row cells contain all the
     // given keywords (case-insensitive).
     let find_table = |keywords: &[&str]| -> Option<ElementRef> {
-        document.select(&table_selector).find(|table| {
+        document.select(&ZEN_TABLE_SELECTOR).find(|table| {
             let header: String = table
-                .select(&cell_selector)
+                .select(&ZEN_CELL_SELECTOR)
                 .take(6)
                 .map(cell_text)
                 .collect::<Vec<_>>()
@@ -978,13 +1087,21 @@ async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
     };
 
     // The endpoints table maps display names to official model IDs
-    // (e.g. "Claude Sonnet 4.5" -> "claude-sonnet-4-5").
+    // (e.g. "Claude Sonnet 4.5" -> "claude-sonnet-4-5"). Both directions are
+    // built in this single ordered pass so that the first display name seen
+    // for an id always wins, independent of HashMap iteration order.
     let mut name_to_id: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+    let mut id_to_name: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     if let Some(endpoints) = find_table(&["model", "id"]) {
-        for row in endpoints.select(&row_selector) {
-            let cells: Vec<String> = row.select(&cell_selector).map(cell_text).collect();
+        for row in endpoints.select(&ZEN_ROW_SELECTOR) {
+            let cells: Vec<String> =
+                row.select(&ZEN_CELL_SELECTOR).map(cell_text).collect();
             if cells.len() >= 2 && !cells[0].is_empty() && !cells[1].is_empty() {
+                id_to_name
+                    .entry(cells[1].clone())
+                    .or_insert_with(|| cells[0].clone());
                 name_to_id.insert(cells[0].clone(), cells[1].clone());
             }
         }
@@ -995,8 +1112,9 @@ async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
 
     let mut entries: Vec<ZenPricingEntry> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for row in table.select(&row_selector) {
-        let cells: Vec<String> = row.select(&cell_selector).map(cell_text).collect();
+    for row in table.select(&ZEN_ROW_SELECTOR) {
+        let cells: Vec<String> =
+            row.select(&ZEN_CELL_SELECTOR).map(cell_text).collect();
         if cells.len() < 3 {
             continue;
         }
@@ -1012,8 +1130,10 @@ async fn zen_fetch_zen_pricing() -> Result<Vec<ZenPricingEntry>, String> {
         let (input, input_free) = parse_zen_price(&cells[1]);
         let (output, output_free) = parse_zen_price(&cells[2]);
         seen.insert(id.clone());
+        let model_name = id_to_name.get(&id).cloned();
         entries.push(ZenPricingEntry {
             id,
+            name: model_name,
             input,
             output,
             is_free: input_free || output_free,
@@ -1063,7 +1183,10 @@ fn keyring_delete(key: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Shared across every command for connection/TLS/DNS reuse.
+    let http_clients = HttpClients::new().expect("failed to initialise HTTP clients");
     tauri::Builder::default()
+        .manage(http_clients)
         .manage(StreamState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
@@ -1084,4 +1207,178 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anthropic_endpoint_normalises_base_urls() {
+        assert_eq!(
+            anthropic_endpoint("https://api.anthropic.com", "/models"),
+            "https://api.anthropic.com/v1/models"
+        );
+        assert_eq!(
+            anthropic_endpoint("https://api.anthropic.com/", "/messages"),
+            "https://api.anthropic.com/v1/messages"
+        );
+        // A base that already ends in /v1 must not get a double prefix.
+        assert_eq!(
+            anthropic_endpoint("https://proxy.example.com/v1/", "/models"),
+            "https://proxy.example.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn decode_duckduckgo_href_extracts_real_target() {
+        assert_eq!(
+            decode_duckduckgo_href("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fjobs"),
+            "https://example.com/jobs"
+        );
+        assert_eq!(
+            decode_duckduckgo_href("/l/?uddg=https%3A%2F%2Fexample.org"),
+            "https://example.org"
+        );
+        // Non-redirect links pass through untouched; reqwest::Url
+        // normalises special-scheme URLs to gain a trailing slash.
+        assert_eq!(decode_duckduckgo_href("https://example.com"), "https://example.com/");
+        assert_eq!(decode_duckduckgo_href("not a url"), "not a url");
+    }
+
+    #[test]
+    fn parse_zen_price_handles_common_cells() {
+        assert_eq!(parse_zen_price("Free"), (None, true));
+        assert_eq!(parse_zen_price("$0.30"), (Some(0.30), false));
+        assert_eq!(parse_zen_price("$1,234.50"), (Some(1234.50), false));
+        assert_eq!(parse_zen_price("-"), (None, false));
+        assert_eq!(parse_zen_price(""), (None, false));
+    }
+
+    #[test]
+    fn quota_detection_matches_known_bodies() {
+        let limit = reqwest::StatusCode::TOO_MANY_REQUESTS;
+        let other = reqwest::StatusCode::BAD_REQUEST;
+        assert!(is_quota_error(limit, "You have exceeded your free usage limit"));
+        assert!(is_quota_error(limit, "QUOTA_EXHAUSTED"));
+        assert!(!is_quota_error(limit, "Slow down and retry shortly"));
+        assert!(!is_quota_error(other, "free usage limit exceeded"));
+    }
+
+    #[test]
+    fn backoff_schedule_is_exponential_then_capped() {
+        assert_eq!(backoff_secs(0), 1);
+        assert_eq!(backoff_secs(1), 2);
+        assert_eq!(backoff_secs(2), 4);
+        assert_eq!(backoff_secs(3), MAX_RETRY_AFTER_SECS);
+        assert_eq!(backoff_secs(99), MAX_RETRY_AFTER_SECS);
+    }
+
+    #[test]
+    fn openai_stream_assembles_content_and_tool_calls() {
+        let mut acc = StreamAccumulator::new("openai");
+
+        let delta = acc
+            .feed(r#"{"choices":[{"delta":{"role":"assistant","content":"Hel"}}]}"#)
+            .unwrap();
+        assert_eq!(delta.as_deref(), Some("Hel"));
+
+        assert_eq!(
+            acc.feed(r#"{"choices":[{"delta":{"content":"lo"}}]}"#).unwrap(),
+            Some("lo".to_string())
+        );
+
+        acc.feed(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"zen_web_search","arguments":"{\"q\":"}}]}}]}"#,
+        )
+        .unwrap();
+        acc.feed(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"rust\"}"}}]}}]}"#,
+        )
+        .unwrap();
+
+        // finish_reason marks completion but carries no text.
+        assert_eq!(
+            acc.feed(r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#)
+                .unwrap(),
+            None
+        );
+        assert!(acc.is_finished());
+
+        acc.feed("[DONE]").unwrap();
+
+        let data = acc.finish();
+        assert_eq!(data["choices"][0]["message"]["content"], "Hello");
+        let calls = data["choices"][0]["message"]["tool_calls"].as_array().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["id"], "call_1");
+        assert_eq!(calls[0]["type"], "function");
+        assert_eq!(calls[0]["function"]["name"], "zen_web_search");
+        assert_eq!(calls[0]["function"]["arguments"], r#"{"q":"rust"}"#);
+    }
+
+    #[test]
+    fn openai_stream_ignores_absurd_tool_indices() {
+        let mut acc = StreamAccumulator::new("openai");
+        acc.feed(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":1000000,"id":"x","function":{"name":"n","arguments":""}}]}}]}"#,
+        )
+        .unwrap();
+        assert!(acc.openai_tool_calls.is_empty());
+    }
+
+    #[test]
+    fn openai_stream_without_tools_has_null_tool_calls() {
+        let mut acc = StreamAccumulator::new("openai");
+        acc.feed(r#"{"choices":[{"delta":{"content":"hi"}}]}"#).unwrap();
+        acc.feed(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#).unwrap();
+        let data = acc.finish();
+        assert!(data["choices"][0]["message"]["tool_calls"].is_null());
+    }
+
+    #[test]
+    fn anthropic_stream_assembles_blocks_and_tool_input() {
+        let mut acc = StreamAccumulator::new("anthropic");
+
+        acc.feed(r#"{"type":"content_block_start","index":0,"content_block":{"type":"text"}}"#)
+            .unwrap();
+        let delta = acc
+            .feed(r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}"#)
+            .unwrap();
+        assert_eq!(delta.as_deref(), Some("Hi"));
+
+        acc.feed(
+            r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"zen_fetch_page","input":{}}}"#,
+        )
+        .unwrap();
+        // input_json_delta belongs to the tool block and emits no text delta.
+        assert_eq!(
+            acc.feed(
+                r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"url\":\"https://x.dev\"}"}}"#,
+            )
+            .unwrap(),
+            None
+        );
+
+        acc.feed(r#"{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null}}"#)
+            .unwrap();
+        acc.feed(r#"{"type":"message_stop"}"#).unwrap();
+        assert!(acc.is_finished());
+
+        let data = acc.finish();
+        assert_eq!(data["stop_reason"], "tool_use");
+        let blocks = data["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0], serde_json::json!({"type": "text", "text": "Hi"}));
+        assert_eq!(blocks[1]["type"], "tool_use");
+        assert_eq!(blocks[1]["id"], "toolu_1");
+        assert_eq!(blocks[1]["name"], "zen_fetch_page");
+        assert_eq!(blocks[1]["input"]["url"], "https://x.dev");
+    }
+
+    #[test]
+    fn malformed_sse_payload_is_an_error_not_a_panic() {
+        let mut acc = StreamAccumulator::new("openai");
+        assert!(acc.feed("this is not json").is_err());
+    }
 }
