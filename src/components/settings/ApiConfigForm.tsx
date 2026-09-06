@@ -22,6 +22,7 @@ import {
   type ZenPricingEntry,
 } from "@/utils/api";
 import {
+  computeRemovedModelIds,
   formatModelPrice,
   isFreeModel,
   ZEN_MODEL_NAMES,
@@ -138,6 +139,16 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
 
   const displayName = (id: string): string => modelNames[id] ?? id;
 
+  // Models the Zen /models endpoint still returns but the Zen docs no longer
+  // list (endpoints + pricing tables): removed or deprecated upstream, likely
+  // no longer usable. Empty when pricing is unavailable (scrape failed and
+  // no cache) so nothing is flagged without evidence.
+  const removedIds = useMemo(
+    () =>
+      provider === "zen" ? computeRemovedModelIds(models ?? [], pricing) : new Set<string>(),
+    [models, pricing, provider],
+  );
+
   // Load the model list (and Zen prices when applicable) for a provider
   const loadModels = useCallback(
     async (
@@ -206,17 +217,18 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
     ) {
       list.unshift(model);
     }
-    // Put free models first (Zen only — pricing is unknown elsewhere).
-    // Array.sort is stable, so relative order is preserved within groups.
+    // Zen only: usable models first (free models first within that group),
+    // removed models sink to the bottom. Array.sort is stable, so relative
+    // order is preserved within groups.
     if (provider === "zen") {
-      list.sort((a, b) => {
-        const freeA = isFreeModel(a) || fetchedFree.has(a);
-        const freeB = isFreeModel(b) || fetchedFree.has(b);
-        return Number(freeB) - Number(freeA);
-      });
+      const rank = (id: string) => {
+        if (removedIds.has(id)) return 2;
+        return isFreeModel(id) || fetchedFree.has(id) ? 0 : 1;
+      };
+      list.sort((a, b) => rank(a) - rank(b));
     }
     return list;
-  }, [models, model, selection, provider, config.provider, fetchedFree]);
+  }, [models, model, selection, provider, config.provider, fetchedFree, removedIds]);
 
   const resolvedModel =
     selection === CUSTOM_MODEL ? customModel.trim() : selection;
@@ -454,35 +466,51 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
             </SelectTrigger>
             <SelectContent>
               {options.map((id) => {
+                const removed = provider === "zen" && removedIds.has(id);
                 const free =
+                  !removed &&
                   provider === "zen" &&
                   (isFreeModel(id) || fetchedFree.has(id));
                 const price = free
                   ? "Free"
-                  : provider === "zen"
+                  : !removed && provider === "zen"
                     ? formatModelPrice(id, fetchedPrices)
                     : null;
                 return (
                   <SelectItem key={id} value={id}>
                     <span className="flex items-center justify-between gap-3 flex-1">
-                      <span className="truncate">{displayName(id)}</span>
-                      {price && (
-                        <span className="flex items-center gap-1.5 shrink-0">
-                          <span
-                            className={
-                              free
-                                ? "text-xs text-green-400 font-medium"
-                                : "text-xs text-text-muted"
-                            }
-                          >
-                            {price}
-                          </span>
-                          {free && (
-                            <span className="text-[10px] font-semibold text-green-400 bg-green-400/10 border border-green-400/30 rounded px-1 py-px uppercase tracking-wide">
-                              Free
-                            </span>
-                          )}
+                      <span
+                        className={
+                          removed
+                            ? "truncate text-text-muted"
+                            : "truncate"
+                        }
+                      >
+                        {displayName(id)}
+                      </span>
+                      {removed ? (
+                        <span className="text-[10px] font-semibold text-red-400 bg-red-400/10 border border-red-400/30 rounded px-1 py-px uppercase tracking-wide shrink-0">
+                          Removed
                         </span>
+                      ) : (
+                        price && (
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            <span
+                              className={
+                                free
+                                  ? "text-xs text-green-400 font-medium"
+                                  : "text-xs text-text-muted"
+                              }
+                            >
+                              {price}
+                            </span>
+                            {free && (
+                              <span className="text-[10px] font-semibold text-green-400 bg-green-400/10 border border-green-400/30 rounded px-1 py-px uppercase tracking-wide">
+                                Free
+                              </span>
+                            )}
+                          </span>
+                        )
                       )}
                     </span>
                   </SelectItem>
@@ -513,9 +541,12 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
             </p>
           )}
           {!modelsLoading && !modelsError && models && (
-            <p className="text-xs text-text-muted">
-              {models.length} models available at this endpoint.
-              {provider === "zen" && (
+              <p className="text-xs text-text-muted">
+                {models.length} models available at this endpoint.
+                {provider === "zen" && removedIds.size > 0 && (
+                  <> {removedIds.size} of them are no longer offered by Zen and likely won't work.</>
+                )}
+                {provider === "zen" && (
                 <>
                   {" "}
                   Prices per 1M tokens are imported automatically from{" "}
@@ -625,6 +656,12 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
                   . Using it will be billed to your account. Are you sure you
                   want to use it?
                 </>
+              )}
+              {pendingSelection && removedIds.has(pendingSelection) && (
+                <span className="mt-1 block text-destructive">
+                  Note: this model is no longer offered by Zen and likely
+                  won't work.
+                </span>
               )}
             </DialogDescription>
           </DialogHeader>
