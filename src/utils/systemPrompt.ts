@@ -305,7 +305,6 @@ function hasProfileContent(profile: ProfileData | null): boolean {
     profile.city.trim().length > 0 ||
     profile.country.trim().length > 0 ||
     profile.linkedinUrl.trim().length > 0 ||
-    profile.bio.trim().length > 0 ||
     profile.interests.length > 0 ||
     profile.education.length > 0 ||
     profile.workExperience.length > 0 ||
@@ -408,9 +407,6 @@ function renderProfileSections(profile: ProfileData): string[] {
   if (details.length > 0) {
     sections.push("- Personal Details:", ...details.map((d) => `  * ${d}`));
   }
-  if (profile.bio.trim()) {
-    sections.push(`- Bio: ${profile.bio.trim()}`);
-  }
   if (profile.education.length > 0) {
     sections.push("- Education:");
     profile.education.forEach((e) => {
@@ -439,9 +435,23 @@ function renderProfileSections(profile: ProfileData): string[] {
       if (w.jobDescription) {
         parts.push(`    Responsibilities: ${w.jobDescription}`);
       }
-      const projects = w.projects.filter((p) => p.trim().length > 0);
+      const projects = w.projects.filter((p) => p.name.trim().length > 0);
       if (projects.length > 0) {
-        parts.push(`    Projects/Initiatives: ${projects.join(" | ")}`);
+        parts.push("    Projects/Initiatives:");
+        projects.forEach((p) => {
+          const hasRange = p.startYear || p.endYear;
+          const range = hasRange
+            ? ` (${[
+                formatDate(p.startMonth, p.startYear),
+                p.isCurrent
+                  ? "present"
+                  : formatDate(p.endMonth ?? "", p.endYear),
+              ]
+                .filter(Boolean)
+                .join(" – ")})`
+            : "";
+          parts.push(`      - ${p.name.trim()}${range}`);
+        });
       }
       sections.push(parts.join("\n"));
     });
@@ -529,7 +539,7 @@ export function buildCoverLetterSummaryPrompt(profile: ProfileData): string {
     "",
     "Rules:",
     "- Cover everything that is retrievable from the letters: motivations for applying, career interests and goals, enthusiasm toward specific fields or companies, personal fun facts and stories, and details such as involvement in non-profits or volunteering.",
-    "- Omit points that already exist in the rest of the profile (personal details, education, work experience, other engagements, certifications, skills, languages, interests, bio). Those sections reach the chat assistant directly.",
+    "- Omit points that already exist in the rest of the profile (personal details, education, work experience, other engagements, certifications, skills, languages, interests). Those sections reach the chat assistant directly.",
     "- When in doubt whether a point is fully covered by another profile section, keep it anyway — the summary is the only way the chat assistant sees the letters.",
     "- Keep specific details intact: names of organizations, places, numbers, dates, and distinctive phrases from the letters.",
     "- Never invent content that is not in the letters.",
@@ -545,94 +555,3 @@ export function buildCoverLetterSummaryPrompt(profile: ProfileData): string {
   return sections.join("\n");
 }
 
-/**
- * Build the system prompt for generating a CV bio.
- * Renders a compact summary of the candidate profile and instructs the
- * model to write a first-person bio of roughly 50-100 words, applying the
- * same style rules as the chat agent.
- */
-export function buildBioPrompt(profile: ProfileData): string {
-  const sections: string[] = [
-    "You are an expert CV writer. Write a short professional bio for the user's CV.",
-    "",
-    "A CV bio is the summary paragraph a recruiter reads first: who the person is, what they do, their strongest experience and skills, and what they are looking for. Write it in the first person, as if the user wrote it themselves, in a single paragraph of roughly 50-100 words.",
-    "",
-    "Rules:",
-    "- Ground everything in the profile below. Never invent facts, employers, roles, dates, skills, or achievements that are not in it. If the profile is sparse, write a shorter bio rather than fabricating.",
-    "- Do not include the user's name, contact details, or links; the bio is the summary section of a CV.",
-    "- Write direct, affirmative sentences. Avoid formulaic AI phrasing: empty buzzwords and hype, empty openings like \"I am writing to express my interest,\" and setups like \"X is more than just Y.\"",
-    ...ANTI_SLOP_RULES,
-    "- Output only the bio text, with no headings, labels, or commentary.",
-  ];
-
-  if (hasProfileContent(profile)) {
-    sections.push("", "Candidate Profile");
-    const details: string[] = [];
-    if (profile.fullName.trim()) {
-      details.push(`- Name: ${profile.fullName.trim()}`);
-    }
-    if (profile.city.trim() || profile.country.trim()) {
-      details.push(
-        `- Location: ${[profile.city.trim(), profile.country.trim()]
-          .filter(Boolean)
-          .join(", ")}`,
-      );
-    }
-    if (details.length > 0) sections.push(...details);
-
-    if (profile.education.length > 0) {
-      sections.push(
-        "- Education: " +
-          profile.education
-            .map((e) => `${e.degree} in ${e.major} at ${e.school}`)
-            .join(" | "),
-      );
-    }
-    if (profile.workExperience.length > 0) {
-      sections.push(
-        "- Work Experience: " +
-          profile.workExperience
-            .map((w) => `${w.role} at ${w.company}`)
-            .join(" | "),
-      );
-    }
-    if (profile.otherEngagements.length > 0) {
-      sections.push(
-        "- Other Engagements: " +
-          profile.otherEngagements
-            .map((oe) => `${oe.role} at ${oe.organization}`)
-            .join(" | "),
-      );
-    }
-    if (profile.certifications.length > 0) {
-      sections.push(
-        "- Certifications: " +
-          profile.certifications.map((c) => c.name).join(", "),
-      );
-    }
-    if (profile.skills.length > 0) {
-      sections.push(
-        "- Skills: " + profile.skills.map((s) => s.name).join(", "),
-      );
-    }
-    if (profile.languages.length > 0) {
-      sections.push(
-        "- Languages: " +
-          profile.languages.map((l) => `${l.name} (${l.fluency})`).join(", "),
-      );
-    }
-    const interests = profile.interests
-      .map((i) => i.name.trim())
-      .filter((n) => n.length > 0);
-    if (interests.length > 0) {
-      sections.push("- Interests: " + interests.join(", "));
-    }
-  } else {
-    sections.push(
-      "",
-      "The user has not filled in their profile yet. Keep the bio generic but honest, and note that the user should add details later.",
-    );
-  }
-
-  return sections.join("\n");
-}

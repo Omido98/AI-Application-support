@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Separator } from "@/components/ui/separator";
 import PersonalDetailsSection from "@/components/profile/PersonalDetailsSection";
-import BioSection from "@/components/profile/BioSection";
 import EducationSection from "@/components/profile/EducationSection";
 import CoverLettersSection from "@/components/profile/CoverLettersSection";
 import WorkExperienceSection from "@/components/profile/WorkExperienceSection";
@@ -36,8 +35,6 @@ export default function ProfileTab() {
         <h1 className="text-2xl font-bold text-text-primary">Profile</h1>
 
         <PersonalDetailsSection />
-        <Separator className="bg-border" />
-        <BioSection />
         <Separator className="bg-border" />
         <EducationSection />
         <Separator className="bg-border" />

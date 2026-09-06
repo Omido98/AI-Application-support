@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus, ChevronDown, ChevronUp } from "lucide-react";
-import type { WorkExperience } from "@/types";
+import type { WorkExperience, Project } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,18 @@ function createEmptyWorkExperience(): WorkExperience {
   };
 }
 
+function createEmptyProject(): Project {
+  return {
+    id: crypto.randomUUID(),
+    name: "",
+    startMonth: "January",
+    startYear: "2024",
+    isCurrent: false,
+    endMonth: "June",
+    endYear: "2024",
+  };
+}
+
 const inputClass =
   "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 h-9 transition-[border-color,box-shadow]";
 const selectClass =
@@ -48,7 +60,7 @@ function isWorkExperienceEmpty(w: WorkExperience): boolean {
     !w.company.trim() &&
     !w.role.trim() &&
     !w.jobDescription.trim() &&
-    w.projects.every((p) => !p.trim())
+    w.projects.every((p) => !p.name.trim())
   );
 }
 
@@ -86,13 +98,13 @@ export default function WorkExperienceSection() {
 
   const requestDeleteProject = (we: WorkExperience, projectIndex: number) => {
     const project = we.projects[projectIndex];
-    if (!project.trim()) {
+    if (!project.name.trim()) {
       const next = we.projects.filter((_, i) => i !== projectIndex);
       updateWorkExperience(we.id, { projects: next });
       return;
     }
     setDeleteTarget({
-      label: `the project "${truncateLabel(project)}"`,
+      label: `the project "${truncateLabel(project.name)}"`,
       onConfirm: () => {
         const next = we.projects.filter((_, i) => i !== projectIndex);
         updateWorkExperience(we.id, { projects: next });
@@ -322,7 +334,7 @@ export default function WorkExperienceSection() {
                           className="text-primary hover:text-primary/80 h-6 px-2 text-xs"
                           onClick={() =>
                             updateWorkExperience(we.id, {
-                              projects: [...we.projects, ""],
+                              projects: [...we.projects, createEmptyProject()],
                             })
                           }
                         >
@@ -331,25 +343,130 @@ export default function WorkExperienceSection() {
                         </Button>
                       </div>
                       {we.projects.map((proj, pi) => (
-                        <div key={pi} className="flex items-start gap-2">
-                          <Textarea
-                            className={textareaClass + " flex-1 resize-y"}
-                            value={proj}
-                            onChange={(e) => {
-                              const next = [...we.projects];
-                              next[pi] = e.target.value;
-                              updateWorkExperience(we.id, { projects: next });
-                            }}
-                            placeholder="Describe the project / initiative — add as much detail as you like…"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => requestDeleteProject(we, pi)}
-                            className="text-destructive hover:text-red-400 transition-colors shrink-0 mt-2"
-                            title="Remove project"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                        <div
+                          key={proj.id}
+                          className="rounded-md border border-border bg-surface p-3 space-y-3"
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="grid gap-1.5 flex-1">
+                              <Label className="text-text-secondary text-xs">
+                                Project Name
+                              </Label>
+                              <Input
+                                className={inputClass}
+                                value={proj.name}
+                                onChange={(e) => {
+                                  const next = [...we.projects];
+                                  next[pi] = { ...proj, name: e.target.value };
+                                  updateWorkExperience(we.id, { projects: next });
+                                }}
+                                placeholder="e.g. Migration to microservices"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => requestDeleteProject(we, pi)}
+                              className="text-destructive hover:text-red-400 transition-colors shrink-0 mt-6"
+                              title="Remove project"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="grid gap-1.5">
+                              <Label className="text-text-secondary text-xs">
+                                Start Date
+                              </Label>
+                              <div className="flex gap-2">
+                                <select
+                                  className={selectClass}
+                                  value={proj.startMonth || "January"}
+                                  onChange={(e) => {
+                                    const next = [...we.projects];
+                                    next[pi] = { ...proj, startMonth: e.target.value };
+                                    updateWorkExperience(we.id, { projects: next });
+                                  }}
+                                >
+                                  {MONTHS.map((m) => (
+                                    <option key={m} value={m}>{m}</option>
+                                  ))}
+                                </select>
+                                <select
+                                  className={selectClass}
+                                  value={proj.startYear || "2024"}
+                                  onChange={(e) => {
+                                    const next = [...we.projects];
+                                    next[pi] = { ...proj, startYear: e.target.value };
+                                    updateWorkExperience(we.id, { projects: next });
+                                  }}
+                                >
+                                  {YEARS.map((y) => (
+                                    <option key={y} value={y}>{y}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            {!proj.isCurrent && (
+                              <div className="grid gap-1.5">
+                                <Label className="text-text-secondary text-xs">
+                                  End Date
+                                </Label>
+                                <div className="flex gap-2">
+                                  <select
+                                    className={selectClass}
+                                    value={proj.endMonth ?? "June"}
+                                    onChange={(e) => {
+                                      const next = [...we.projects];
+                                      next[pi] = { ...proj, endMonth: e.target.value };
+                                      updateWorkExperience(we.id, { projects: next });
+                                    }}
+                                  >
+                                    {MONTHS.map((m) => (
+                                      <option key={m} value={m}>{m}</option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    className={selectClass}
+                                    value={proj.endYear ?? "2024"}
+                                    onChange={(e) => {
+                                      const next = [...we.projects];
+                                      next[pi] = { ...proj, endYear: e.target.value };
+                                      updateWorkExperience(we.id, { projects: next });
+                                    }}
+                                  >
+                                    {YEARS.map((y) => (
+                                      <option key={y} value={y}>{y}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id={`project-current-${proj.id}`}
+                              checked={proj.isCurrent}
+                              onCheckedChange={(checked) => {
+                                const next = [...we.projects];
+                                next[pi] = {
+                                  ...proj,
+                                  isCurrent: checked === true,
+                                  endMonth: checked === true ? undefined : proj.endMonth,
+                                  endYear: checked === true ? undefined : proj.endYear,
+                                };
+                                updateWorkExperience(we.id, { projects: next });
+                              }}
+                            />
+                            <Label
+                              htmlFor={`project-current-${proj.id}`}
+                              className="text-text-secondary text-sm cursor-pointer"
+                            >
+                              This project is ongoing
+                            </Label>
+                          </div>
                         </div>
                       ))}
                     </div>

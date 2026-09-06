@@ -39,7 +39,18 @@ export interface WorkExperience {
   endMonth?: string;
   endYear?: string;
   jobDescription: string;
-  projects: string[];
+  projects: Project[];
+}
+
+/** A project or initiative within a work experience entry. */
+export interface Project {
+  id: string;
+  name: string;
+  startMonth: string;
+  startYear: string;
+  isCurrent: boolean;
+  endMonth?: string;
+  endYear?: string;
 }
 
 /** A private/non-employment engagement, e.g. volunteering, civil society work, merits. */
@@ -96,8 +107,6 @@ export interface ProfileData {
   country: string;
   /** Public profile URL (e.g. LinkedIn) the AI can reference for extra context. */
   linkedinUrl: string;
-  /** Short CV intro written by the user (or AI-generated). */
-  bio: string;
   /** AI-extracted highlights from the previous cover letters, deduplicated
    * against the rest of the profile. The chat agent reads this instead of
    * the full letters when it is non-empty. */

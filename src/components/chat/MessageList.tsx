@@ -217,7 +217,6 @@ export default function MessageList({
       city: p.city,
       country: p.country,
       linkedinUrl: p.linkedinUrl,
-      bio: p.bio,
       coverLetterSummary: p.coverLetterSummary,
       interests: p.interests,
       education: p.education,

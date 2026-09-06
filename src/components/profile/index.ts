@@ -7,4 +7,3 @@ export { default as SkillsSection } from "./SkillsSection";
 export { default as InterestsSection } from "./InterestsSection";
 export { default as LanguagesSection } from "./LanguagesSection";
 export { default as PersonalDetailsSection } from "./PersonalDetailsSection";
-export { default as BioSection } from "./BioSection";
