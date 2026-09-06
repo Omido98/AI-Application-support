@@ -161,3 +161,20 @@ export function formatModelPrice(
   if (!price) return null;
   return `$${price.input} in / $${price.output} out per 1M`;
 }
+
+/**
+ * Models the Zen /models endpoint still advertises but the Zen docs no
+ * longer list (endpoints + pricing tables): they were removed or
+ * deprecated upstream and likely no longer work.
+ *
+ * Returns an empty set when pricing is null/empty (docs scrape failed and
+ * no cache exists) so nothing gets flagged without evidence.
+ */
+export function computeRemovedModelIds(
+  models: string[],
+  pricing: { id: string }[] | null,
+): Set<string> {
+  if (!pricing || pricing.length === 0) return new Set();
+  const documented = new Set(pricing.map((entry) => entry.id));
+  return new Set(models.filter((id) => !documented.has(id)));
+}

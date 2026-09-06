@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isFreeModel,
   formatModelPrice,
+  computeRemovedModelIds,
   ZEN_MODEL_PRICES,
 } from "@/utils/zenPricing";
 
@@ -45,5 +46,34 @@ describe("formatModelPrice", () => {
 
   it("contains entries for the default Zen model", () => {
     expect(ZEN_MODEL_PRICES["deepseek-v4-flash"]).toBeDefined();
+  });
+});
+
+describe("computeRemovedModelIds", () => {
+  const pricing = [{ id: "glm-5.2" }, { id: "big-pickle" }];
+
+  it("flags ids the docs no longer list", () => {
+    const removed = computeRemovedModelIds(
+      ["glm-5.2", "deepseek-v4-flash-free", "big-pickle"],
+      pricing,
+    );
+    expect(removed.has("deepseek-v4-flash-free")).toBe(true);
+    expect(removed.has("glm-5.2")).toBe(false);
+    expect(removed.has("big-pickle")).toBe(false);
+    expect(removed.size).toBe(1);
+  });
+
+  it("returns an empty set when pricing is null", () => {
+    expect(computeRemovedModelIds(["glm-5.2"], null).size).toBe(0);
+  });
+
+  it("returns an empty set when pricing is empty", () => {
+    expect(computeRemovedModelIds(["glm-5.2"], []).size).toBe(0);
+  });
+
+  it("flags every id when the docs list nothing the API returns", () => {
+    const removed = computeRemovedModelIds(["a", "b"], [{ id: "c" }]);
+    expect(removed.has("a")).toBe(true);
+    expect(removed.has("b")).toBe(true);
   });
 });
