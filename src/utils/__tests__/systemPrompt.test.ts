@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   buildSystemPrompt,
-  buildBioPrompt,
   buildDeslopPrompt,
   buildDraftReviewPrompt,
   buildDraftRevisionPrompt,
@@ -35,7 +34,6 @@ function makeProfile(overrides: Partial<ProfileData> = {}): ProfileData {
     city: "",
     country: "",
     linkedinUrl: "",
-    bio: "",
     coverLetterSummary: "",
     interests: [],
     education: [],
@@ -361,7 +359,7 @@ describe("buildSystemPrompt", () => {
           startYear: "2022",
           isCurrent: true,
           jobDescription: "Built features",
-          projects: ["Project X", "Project Y"],
+          projects: [],
         },
       ],
       skills: [{ id: "s1", name: "TypeScript" }],
@@ -372,10 +370,77 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("BSc in Computer Science at DTU");
     expect(prompt).toContain("2019");
     expect(prompt).toContain("Developer at Startup A");
-    expect(prompt).toContain("Project X");
     expect(prompt).toContain("- Skills: TypeScript");
     expect(prompt).toContain("- Languages: English (Fluent)");
     expect(prompt).toContain("linkedin.com/in/test");
+  });
+
+  it("renders projects with their date ranges", () => {
+    const profile = makeProfile({
+      workExperience: [
+        {
+          id: "w1",
+          company: "Startup A",
+          role: "Developer",
+          startMonth: "July",
+          startYear: "2022",
+          isCurrent: true,
+          jobDescription: "",
+          projects: [
+            {
+              id: "p1",
+              name: "Billing migration",
+              startMonth: "January",
+              startYear: "2023",
+              isCurrent: false,
+              endMonth: "June",
+              endYear: "2024",
+            },
+            {
+              id: "p2",
+              name: "On-call rotation",
+              startMonth: "March",
+              startYear: "2024",
+              isCurrent: true,
+            },
+          ],
+        },
+      ],
+    });
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).toContain("Projects/Initiatives:");
+    expect(prompt).toContain(
+      "- Billing migration (January 2023 – June 2024)"
+    );
+    expect(prompt).toContain("- On-call rotation (March 2024 – present)");
+  });
+
+  it("renders legacy projects without dates as plain names", () => {
+    const profile = makeProfile({
+      workExperience: [
+        {
+          id: "w1",
+          company: "Startup A",
+          role: "Developer",
+          startMonth: "July",
+          startYear: "2022",
+          isCurrent: true,
+          jobDescription: "",
+          projects: [
+            {
+              id: "p1",
+              name: "Project X",
+              startMonth: "",
+              startYear: "",
+              isCurrent: false,
+            },
+          ],
+        },
+      ],
+    });
+    const prompt = buildSystemPrompt(baseApplication, profile);
+    expect(prompt).toContain("- Project X\n");
+    expect(prompt).not.toContain("Project X (");
   });
 
   it("renders other engagements with description and achievements", () => {
@@ -400,14 +465,13 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("Achievements/Merits: Organized 20+ drives");
   });
 
-  it("renders personal details, bio and interests", () => {
+  it("renders personal details and interests", () => {
     const profile = makeProfile({
       fullName: "Jane Doe",
       email: "jane@example.com",
       city: "Copenhagen",
       country: "Denmark",
       linkedinUrl: "https://linkedin.com/in/jane",
-      bio: "I am a developer who loves Rust.",
       interests: [{ id: "i1", name: "Trail running" }],
     });
     const prompt = buildSystemPrompt(baseApplication, profile);
@@ -416,7 +480,6 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("email: jane@example.com");
     expect(prompt).toContain("location: Copenhagen, Denmark");
     expect(prompt).toContain("LinkedIn: https://linkedin.com/in/jane");
-    expect(prompt).toContain("- Bio: I am a developer who loves Rust.");
     expect(prompt).toContain("- Interests: Trail running");
   });
 
@@ -544,51 +607,6 @@ describe("buildSystemPrompt", () => {
       fitEvaluation: true,
     });
     expect(prompt).not.toContain("Initial fit evaluation");
-  });
-});
-
-describe("buildBioPrompt", () => {
-  it("includes the writing instructions and style rules", () => {
-    const prompt = buildBioPrompt(makeProfile());
-    expect(prompt).toContain("roughly 50-100 words");
-    expect(prompt).toContain("first person");
-    expect(prompt).toContain("Never invent facts");
-    expect(prompt).toContain("Never use em dashes");
-    expect(prompt).toContain("Anti-slop writing rules");
-    expect(prompt).toContain("Output only the bio text");
-  });
-
-  it("includes the candidate's profile data", () => {
-    const profile = makeProfile({
-      fullName: "Jane Doe",
-      city: "Copenhagen",
-      country: "Denmark",
-      workExperience: [
-        {
-          id: "w1",
-          company: "Startup A",
-          role: "Developer",
-          startMonth: "July",
-          startYear: "2022",
-          isCurrent: true,
-          jobDescription: "",
-          projects: [],
-        },
-      ],
-      skills: [{ id: "s1", name: "TypeScript" }],
-      interests: [{ id: "i1", name: "Trail running" }],
-    });
-    const prompt = buildBioPrompt(profile);
-    expect(prompt).toContain("Jane Doe");
-    expect(prompt).toContain("Copenhagen, Denmark");
-    expect(prompt).toContain("Developer at Startup A");
-    expect(prompt).toContain("TypeScript");
-    expect(prompt).toContain("Trail running");
-  });
-
-  it("handles an empty profile gracefully", () => {
-    const prompt = buildBioPrompt(makeProfile());
-    expect(prompt).toContain("has not filled in their profile yet");
   });
 });
 

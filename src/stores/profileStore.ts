@@ -4,6 +4,7 @@ import type {
   Education,
   CoverLetter,
   WorkExperience,
+  Project,
   OtherEngagement,
   Certification,
   Skill,
@@ -26,7 +27,6 @@ function writeSnapshot() {
     city: s.city,
     country: s.country,
     linkedinUrl: s.linkedinUrl,
-    bio: s.bio,
     coverLetterSummary: s.coverLetterSummary,
     interests: s.interests,
     education: s.education,
@@ -46,6 +46,29 @@ function debouncedSave() {
     saveTimer = null;
     await writeSnapshot();
   }, 500);
+}
+
+function normalizeProject(p: Project | string): Project {
+  if (typeof p === "string") {
+    return {
+      id: crypto.randomUUID(),
+      name: p,
+      startMonth: "",
+      startYear: "",
+      isCurrent: false,
+      endMonth: undefined,
+      endYear: undefined,
+    };
+  }
+  return {
+    id: p.id ?? crypto.randomUUID(),
+    name: p.name ?? "",
+    startMonth: p.startMonth ?? "",
+    startYear: p.startYear ?? "",
+    isCurrent: p.isCurrent ?? false,
+    endMonth: p.endMonth ?? undefined,
+    endYear: p.endYear ?? undefined,
+  };
 }
 
 /** Flush any pending debounced save immediately (called on window close). */
@@ -73,9 +96,6 @@ interface ProfileState extends ProfileData {
       Pick<ProfileData, "fullName" | "email" | "city" | "country" | "linkedinUrl">
     >,
   ) => void;
-
-  /** Set the CV bio text */
-  setBio: (value: string) => void;
 
   /** Set the AI-extracted cover letter summary text */
   setCoverLetterSummary: (value: string) => void;
@@ -140,7 +160,6 @@ export const useProfileStore = create<ProfileState>((set) => ({
   city: "",
   country: "",
   linkedinUrl: "",
-  bio: "",
   coverLetterSummary: "",
   interests: [],
   education: [],
@@ -162,12 +181,14 @@ export const useProfileStore = create<ProfileState>((set) => ({
         city: data.city ?? "",
         country: data.country ?? "",
         linkedinUrl: data.linkedinUrl ?? "",
-        bio: data.bio ?? "",
         coverLetterSummary: data.coverLetterSummary ?? "",
         interests: data.interests ?? [],
         education: data.education ?? [],
         coverLetters: data.coverLetters ?? [],
-        workExperience: data.workExperience ?? [],
+        workExperience: (data.workExperience ?? []).map((w) => ({
+          ...w,
+          projects: (w.projects ?? []).map(normalizeProject),
+        })),
         otherEngagements: data.otherEngagements ?? [],
         certifications: data.certifications ?? [],
         skills: data.skills ?? [],
@@ -182,12 +203,6 @@ export const useProfileStore = create<ProfileState>((set) => ({
   // ── Personal details ──
   setPersonalDetails: (patch) => {
     set(patch);
-    debouncedSave();
-  },
-
-  // ── Bio ──
-  setBio: (value) => {
-    set({ bio: value });
     debouncedSave();
   },
 
