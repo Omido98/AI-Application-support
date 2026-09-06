@@ -350,17 +350,17 @@ export default function WorkExperienceSection() {
                           <div className="flex items-start gap-2">
                             <div className="grid gap-1.5 flex-1">
                               <Label className="text-text-secondary text-xs">
-                                Project Name
+                                Project / initiative description
                               </Label>
-                              <Input
-                                className={inputClass}
+                              <Textarea
+                                className={textareaClass}
                                 value={proj.name}
                                 onChange={(e) => {
                                   const next = [...we.projects];
                                   next[pi] = { ...proj, name: e.target.value };
                                   updateWorkExperience(we.id, { projects: next });
                                 }}
-                                placeholder="e.g. Migration to microservices"
+                                placeholder="Describe what you did in this project / initiative…"
                               />
                             </div>
                             <button
