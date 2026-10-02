@@ -19,8 +19,9 @@ code on main is never touched until the user explicitly merges.
 4. Commit and push the branch: `git push -u origin release-vX.Y.Z`
 5. Tag and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
    - CI (`.github/workflows/release.yml`) automatically builds and uploads a
-     DRAFT release with all three installers: windows-x64 (.exe + .msi),
-     windows-arm64 (native .exe), macos-arm64 (.dmg). Drafts are invisible to
+DRAFT release with all four platform installers: windows-x64 (.exe +
+   .msi), windows-arm64 (native .exe), macos-arm64 (.dmg), linux-x64
+   (.AppImage). Drafts are invisible to
      the auto-updater, so users never see unreleased builds.
 6. Open a Pull Request from the branch into main, then STOP.
    - Do NOT merge the PR.

@@ -17,6 +17,8 @@ All installers live on the GitHub Releases page:
 - **Windows**: the `.exe` installer (pick the one matching your PC:
   `x64` for Intel/AMD chips, `arm64` for Snapdragon/ARM chips). Avoid the
   `.msi` on a work laptop — it asks for administrator rights.
+- **Linux**: the `.AppImage` file (x86-64/AMD). No installation needed — see
+  the Linux section below.
 
 ## macOS
 
@@ -91,6 +93,44 @@ When you run a downloaded `.exe` for the first time, SmartScreen may show
 If the installer starts but Windows blocks the file another way, right-click
 the file → **Properties** → check **Unblock** (under General) → OK.
 
+## Linux
+
+The Linux build is a single **AppImage** for x86-64 (AMD/Intel) machines.
+There is no install step and no administrator rights needed.
+
+1. Download the `.AppImage` file.
+2. Make it executable: right-click → **Properties** → **Permissions** → tick
+   **Allow executing file as program** → **Close**. (Or in a terminal:
+   `chmod +x <file>.AppImage`.)
+3. Double-click it. If Mint instead offers to *extract* the file or does
+   nothing, right-click → **Open With** → pick the app once; afterwards it
+   launches normally.
+
+### Updates
+
+The app updates itself the same way as on Windows and macOS: new versions are
+offered in-app. The updater replaces the AppImage **in place**, so keep the
+file somewhere writable — your home folder or Downloads is fine, but not a
+read-only or system location.
+
+### Saving API keys
+
+Your API key is stored in the operating system's secret store — GNOME
+Keyring or KWallet on Linux — not in a file next to the app. You may be asked
+to unlock the keyring with your login password the first time you save a key;
+that is the keyring doing its job.
+
+Older versions of the app kept the key in a plain `config.json` file. The
+first launch of this version moves it into the keyring and deletes the plain
+copy, and only if the keyring confirms it stored the key first.
+
+### Requirements
+
+Linux Mint 22.x, Ubuntu 24.04+, Debian 12+, Fedora 39+ or any other distro
+with a recent enough base. The app needs WebKitGTK 4.1, which all of those
+ship. Older releases (Ubuntu 20.04, Debian 11, RHEL/Rocky 8–9) do not have
+it and cannot run this app.
+
 ## Is it safe?
 
 You can verify the file you downloaded is genuinely this project's build
@@ -103,6 +143,7 @@ Get-FileHash "path\to\file.exe" -Algorithm SHA256   # Windows
 
 ```bash
 shasum -a 256 "path/to/file.tar.gz"               # macOS
+sha256sum "path/to/file.AppImage"                 # Linux
 ```
 
 Compare the output with the file's hash shown on the release page. Matching

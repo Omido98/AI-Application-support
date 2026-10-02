@@ -33,6 +33,8 @@ const baseConfig: ApiConfig = {
   webSearchEnabled: true,
   systemPromptMode: "standard",
   customSystemPrompt: "",
+  keychainAccount: "api_key",
+  sessionKeyOnly: false,
 };
 
 function openaiMessage(message: unknown): unknown {
