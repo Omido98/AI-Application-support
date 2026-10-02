@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { saveJson, loadJson, deleteFile } from "@/utils/storage";
 import {
+  API_KEY_ACCOUNT,
   deleteApiKeyFromKeychain,
   loadApiKeyFromKeychain,
-  saveApiKeyToKeychain,
+  saveVerifiedApiKey,
 } from "@/utils/keychain";
 import {
   inferProviderFromBaseUrl,
@@ -39,6 +40,9 @@ export interface ApiConfig {
   /** Which LLM provider this config targets (determines endpoint & auth). */
   provider: ProviderId;
   baseUrl: string;
+  /** In-memory only. The persisted config carries this ONLY when the key
+   * could not be stored securely (see `sessionKeyOnly`); normally the key
+   * lives in the OS keychain and the file holds just the account reference. */
   apiKey: string;
   model: string;
   reasoningEffort: string | null;
@@ -48,6 +52,12 @@ export interface ApiConfig {
   systemPromptMode: "standard" | "custom";
   /** The user's custom prompt, used when systemPromptMode is "custom". */
   customSystemPrompt: string;
+  /** Credential reference (NOT the secret): the keychain account holding the
+   * key. Null when no credential is stored. */
+  keychainAccount: string | null;
+  /** True when the key could NOT be stored securely and therefore lives in
+   * memory for this session only. */
+  sessionKeyOnly: boolean;
 }
 
 export const ZEN_DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
@@ -61,7 +71,19 @@ const defaultApiConfig: ApiConfig = {
   webSearchEnabled: false,
   systemPromptMode: "standard",
   customSystemPrompt: "",
+  keychainAccount: null,
+  sessionKeyOnly: false,
 };
+
+/**
+ * The config as written to disk: the key is stripped whenever the keychain
+ * holds a verified copy, so config.json never carries a secret that is
+ * already stored safely. A session-only key is the exception — it exists
+ * nowhere else, so dropping it would lose it on the next launch.
+ */
+function persistableConfig(config: ApiConfig): ApiConfig {
+  return config.sessionKeyOnly ? config : { ...config, apiKey: "" };
+}
 
 // ──────────────────────────────────────────────
 // Debounced thread save (per application)
@@ -233,24 +255,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setConfig: async (cfg) => {
     const next = { ...get().config, ...cfg };
-    set({ config: next });
-    // Store the key in BOTH the OS keychain and config.json, so the config
-    // survives even when the keychain is unavailable or fails to read back.
-    // The keychain is still preferred when loading (see loadConfig).
+    // The key goes to the OS keychain, verified. Only if that fails does the
+    // persisted config keep a plaintext copy (see persistableConfig), which
+    // makes the file the exception rather than the rule.
     if (cfg.apiKey) {
-      await saveApiKeyToKeychain(cfg.apiKey);
-    } else {
-      // Key cleared: remove any stale keychain entry so an old key cannot
+      const stored = await saveVerifiedApiKey(cfg.apiKey);
+      next.keychainAccount = stored ? API_KEY_ACCOUNT : null;
+      next.sessionKeyOnly = !stored;
+    } else if (cfg.apiKey !== undefined) {
+      // Key explicitly cleared: remove the stored entry so an old key cannot
       // resurface on the next launch.
       await deleteApiKeyFromKeychain();
+      next.keychainAccount = null;
+      next.sessionKeyOnly = false;
     }
-    await saveJson("config.json", next);
+    set({ config: next });
+    await saveJson("config.json", persistableConfig(next));
   },
 
   loadConfig: async () => {
     const data = await loadJson<ApiConfig>("config.json");
-    // Prefer a key stored in the OS keychain over the one in the file.
-    const keychainKey = await loadApiKeyFromKeychain();
+    // Prefer a key in the OS keychain over one in the file.
+    let keychainKey = await loadApiKeyFromKeychain();
+    let sessionKeyOnly = false;
+    if (keychainKey == null && data?.apiKey) {
+      // A pre-upgrade install (or a session that could not use the
+      // keychain) still has the key in config.json. Move it into the
+      // keychain and drop the plaintext copy ONLY after a verified write;
+      // if the keychain refuses it, the key stays usable this session and
+      // the file is left untouched (recoverability beats cleanup).
+      if (await saveVerifiedApiKey(data.apiKey)) {
+        keychainKey = data.apiKey;
+        await saveJson("config.json", persistableConfig({ ...data, apiKey: "" }));
+      } else {
+        sessionKeyOnly = true;
+      }
+    }
+    const key = keychainKey ?? data?.apiKey ?? "";
+    const withDefaults = (base: ApiConfig): ApiConfig => ({
+      ...base,
+      apiKey: key,
+      keychainAccount: keychainKey != null ? API_KEY_ACCOUNT : null,
+      sessionKeyOnly,
+      reasoningEffort: base.reasoningEffort ?? null,
+      webSearchEnabled: base.webSearchEnabled ?? false,
+      systemPromptMode: base.systemPromptMode ?? "standard",
+      customSystemPrompt: base.customSystemPrompt ?? "",
+    });
     if (data) {
       // Migrate the old, non-existent endpoint to the real OpenCode Zen URL
       if (
@@ -264,22 +315,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!isKnownProviderId(data.provider)) {
         data.provider = inferProviderFromBaseUrl(data.baseUrl);
       }
-      set({
-        config: {
-          ...data,
-          apiKey: keychainKey ?? data.apiKey ?? "",
-          reasoningEffort: data.reasoningEffort ?? null,
-          webSearchEnabled: data.webSearchEnabled ?? false,
-          systemPromptMode: data.systemPromptMode ?? "standard",
-          customSystemPrompt: data.customSystemPrompt ?? "",
-        },
-        configLoaded: true,
-      });
+      set({ config: withDefaults(data), configLoaded: true });
     } else {
-      set({
-        config: { ...defaultApiConfig, apiKey: keychainKey ?? "" },
-        configLoaded: true,
-      });
+      set({ config: withDefaults({ ...defaultApiConfig }), configLoaded: true });
     }
   },
   resetConfig: () => {

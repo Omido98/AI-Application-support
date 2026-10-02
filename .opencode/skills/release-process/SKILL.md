@@ -20,7 +20,7 @@ The authoritative source is AGENTS.md; this skill is the executable distillation
 2. Make the code changes.
 3. Bump the version in the 5 files listed above.
 4. Commit and push the branch: `git push -u origin release-vX.Y.Z`.
-5. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z` — CI builds a DRAFT release with all three installers (windows-x64 .exe + .msi, windows-arm64 .exe, macos-arm64 .dmg). Drafts are invisible to the auto-updater, so users never see unreleased builds.
+5. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z` — CI builds a DRAFT release with all four platform installers (windows-x64 .exe + .msi, windows-arm64 .exe, macos-arm64 .dmg, linux-x64 .AppImage). Drafts are invisible to the auto-updater, so users never see unreleased builds.
 6. Open a Pull Request from the branch into main, then STOP. Do not merge. Do not publish. Tell the user to test the draft installers (Release page → draft → assets) and merge the PR when satisfied.
 7. After the user merges, the draft can be published (Releases → draft → Publish release). Only then does the auto-updater offer it. Publishing is the user's action — offer to remind them, never do it yourself.
 8. Bugs after testing: fix on the same branch, bump to a NEW version, commit, re-tag, re-push. Never reuse a tag.
