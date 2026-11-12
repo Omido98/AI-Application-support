@@ -58,7 +58,10 @@ All data lives in your system's app-data directory as plain JSON files:
 - `settings.json` — theme and accent
 - `zen-prices.json` — cached model prices from the Zen docs
 
-Changes are auto-saved (debounced) and flushed when you close the app.
+Changes are auto-saved (debounced) and flushed when you close the app. Writes
+are atomic and keep a `.bak` copy of the previous version; if a file is
+damaged, the app restores it from the backup and shows a warning instead of
+silently starting empty. Exported backups never include your API key.
 
 ## Development
 

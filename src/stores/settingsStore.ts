@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { saveJson, loadJson } from "@/utils/storage";
+import { saveJson, loadJson, reportDataIssue } from "@/utils/storage";
+import { normalizeSettingsData } from "@/utils/dataValidation";
 
 // ──────────────────────────────────────────────
 // Settings types
@@ -55,11 +56,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   isLoaded: false,
 
   loadSettings: async () => {
-    const data = await loadJson<Settings>("settings.json");
+    const data = await loadJson<unknown>("settings.json");
     if (data) {
+      const normalized = normalizeSettingsData(data);
+      if (!normalized) {
+        reportDataIssue(
+          "settings.json",
+          "The file has an unexpected structure. Default appearance settings were used.",
+        );
+      }
       set({
-        theme: data.theme === "light" ? "light" : "dark",
-        accent: data.accent || DEFAULT_ACCENT,
+        theme: normalized?.theme ?? DEFAULT_SETTINGS.theme,
+        accent: normalized?.accent || DEFAULT_ACCENT,
         isLoaded: true,
       });
     } else {

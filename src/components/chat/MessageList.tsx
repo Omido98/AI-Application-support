@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useChatStore, messageKey } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { deepImproveDraft, deslopText, improveDraft, reviewDraft } from "@/utils/api";
 import type { ImproveStep } from "@/utils/api";
 import { cn } from "@/lib/utils";
+import Markdown from "@/components/chat/Markdown";
 import { Button } from "@/components/ui/button";
 import {
   Copy,
@@ -59,7 +58,7 @@ export default function MessageList({
   const selectedId = useApplicationStore((s) => s.selectedApplicationId);
   const addCoverLetter = useProfileStore((s) => s.addCoverLetter);
   const config = useChatStore((s) => s.config);
-  const addMessage = useChatStore((s) => s.addMessage);
+  const appendMessageToThread = useChatStore((s) => s.appendMessageToThread);
   const setError = useChatStore((s) => s.setError);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -75,6 +74,25 @@ export default function MessageList({
   const anyActionPending = !!(
     deslopPendingId || reviewPendingId || improvePendingId || deepImprovePendingId
   );
+
+  /** Refine actions must not overlap a chat generation or another action. */
+  const actionsBlocked = isSending || anyActionPending;
+
+  /** Refuse to write a result into an application that was deleted meanwhile. */
+  const threadStillExists = (threadId: string) =>
+    useApplicationStore.getState().applications.some((app) => app.id === threadId);
+
+  /**
+   * Errors belong to the thread the action started in. If the user has moved
+   * on, keep the current thread calm and leave a breadcrumb for debugging.
+   */
+  const reportActionError = (threadId: string, message: string) => {
+    if (useChatStore.getState().activeThreadId === threadId) {
+      setError(message);
+    } else {
+      console.warn(`[chat] Action failed in inactive thread ${threadId}: ${message}`);
+    }
+  };
 
   const STEP_LABELS: Record<ImproveStep, string> = {
     review: "Reviewing draft…",
@@ -156,17 +174,26 @@ export default function MessageList({
   };
 
   const handleDeslop = async (msgId: string, content: string) => {
-    if (!content.trim() || deslopPendingId) return;
+    const threadId = useChatStore.getState().activeThreadId;
+    if (
+      !content.trim() ||
+      deslopPendingId ||
+      anyActionPending ||
+      !threadId ||
+      useChatStore.getState().isSending
+    ) {
+      return;
+    }
     setDeslopPendingId(msgId);
     setError(null);
     const result = await deslopText(content, config);
     setDeslopPendingId(null);
     if (result.error) {
-      setError(result.error);
+      reportActionError(threadId, result.error);
       return;
     }
-    if (result.content.trim()) {
-      addMessage({
+    if (result.content.trim() && threadStillExists(threadId)) {
+      await appendMessageToThread(threadId, {
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
@@ -175,7 +202,17 @@ export default function MessageList({
   };
 
   const handleReview = async (msgId: string, content: string) => {
-    if (!content.trim() || reviewPendingId || !application) return;
+    const threadId = useChatStore.getState().activeThreadId;
+    if (
+      !content.trim() ||
+      reviewPendingId ||
+      anyActionPending ||
+      !application ||
+      !threadId ||
+      useChatStore.getState().isSending
+    ) {
+      return;
+    }
     setReviewPendingId(msgId);
     setError(null);
 
@@ -192,11 +229,11 @@ export default function MessageList({
     const result = await reviewDraft(content, appCtx, profileData, config);
     setReviewPendingId(null);
     if (result.error) {
-      setError(result.error);
+      reportActionError(threadId, result.error);
       return;
     }
-    if (result.content.trim()) {
-      addMessage({
+    if (result.content.trim() && threadStillExists(threadId)) {
+      await appendMessageToThread(threadId, {
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
@@ -239,8 +276,18 @@ export default function MessageList({
     content: string,
     depth: "quick" | "deep",
   ) => {
+    const threadId = useChatStore.getState().activeThreadId;
     const pending = depth === "deep" ? deepImprovePendingId : improvePendingId;
-    if (!content.trim() || pending || !application) return;
+    if (
+      !content.trim() ||
+      pending ||
+      anyActionPending ||
+      !application ||
+      !threadId ||
+      useChatStore.getState().isSending
+    ) {
+      return;
+    }
     if (depth === "deep") setDeepImprovePendingId(msgId);
     else setImprovePendingId(msgId);
     setImproveStep("review");
@@ -276,11 +323,11 @@ export default function MessageList({
     setImproveStep(null);
     setImprovePreview("");
     if (result.error) {
-      setError(result.error);
+      reportActionError(threadId, result.error);
       return;
     }
-    if (result.content.trim()) {
-      addMessage({
+    if (result.content.trim() && threadStillExists(threadId)) {
+      await appendMessageToThread(threadId, {
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
@@ -357,11 +404,7 @@ export default function MessageList({
               {isUser ? (
                 <p>{msg.content}</p>
               ) : (
-                <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.content}
-                  </ReactMarkdown>
-                </div>
+                <Markdown>{msg.content}</Markdown>
               )}
             </div>
 
@@ -412,7 +455,7 @@ export default function MessageList({
                 <button
                   type="button"
                   onClick={() => handleDeslop(key, msg.content)}
-                  disabled={anyActionPending}
+                  disabled={actionsBlocked}
                   className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
                   title={
                     deslopPendingId === key
@@ -430,7 +473,7 @@ export default function MessageList({
                 <button
                   type="button"
                   onClick={() => handleReview(key, msg.content)}
-                  disabled={anyActionPending}
+                  disabled={actionsBlocked}
                   className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
                   title={
                     reviewPendingId === key
@@ -448,7 +491,7 @@ export default function MessageList({
                 <button
                   type="button"
                   onClick={() => runImprove(key, msg.content, "quick")}
-                  disabled={anyActionPending}
+                  disabled={actionsBlocked}
                   className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
                   title={
                     improvePendingId === key
@@ -466,7 +509,7 @@ export default function MessageList({
                 <button
                   type="button"
                   onClick={() => runImprove(key, msg.content, "deep")}
-                  disabled={anyActionPending}
+                  disabled={actionsBlocked}
                   className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
                   title={
                     deepImprovePendingId === key
@@ -490,11 +533,7 @@ export default function MessageList({
       {isSending && streamingText ? (
         <div className="flex justify-start">
           <div className="max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3 break-words">
-            <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {streamingText}
-              </ReactMarkdown>
-            </div>
+            <Markdown>{streamingText}</Markdown>
             <span
               className="inline-block w-2 h-4 align-middle bg-primary/70 animate-pulse ml-0.5"
               aria-hidden="true"
@@ -513,11 +552,7 @@ export default function MessageList({
         <div className="flex justify-start">
           {improvePreview ? (
             <div className="max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3 break-words">
-              <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {improvePreview}
-                </ReactMarkdown>
-              </div>
+              <Markdown>{improvePreview}</Markdown>
               <span
                 className="inline-block w-2 h-4 align-middle bg-primary/70 animate-pulse ml-0.5"
                 aria-hidden="true"

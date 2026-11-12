@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { saveJson, loadJson, deleteFile } from "@/utils/storage";
+import { saveJson, loadJson, deleteFile, reportDataIssue } from "@/utils/storage";
+import { normalizeApplicationsPayload } from "@/utils/dataValidation";
 import type { JobApplication } from "@/types";
 
 // ──────────────────────────────────────────────
@@ -25,12 +26,13 @@ function debouncedSave() {
 }
 
 /** Flush any pending debounced save immediately (called on window close). */
-export async function flushApplicationSave(): Promise<void> {
+export async function flushApplicationSave(): Promise<boolean> {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    await writeSnapshot();
+    return writeSnapshot();
   }
+  return true;
 }
 
 // ──────────────────────────────────────────────
@@ -53,11 +55,6 @@ interface ApplicationState {
   selectApplication: (id: string | null) => void;
 }
 
-interface PersistedApplications {
-  applications: JobApplication[];
-  selectedApplicationId: string | null;
-}
-
 // ──────────────────────────────────────────────
 // Store implementation
 // ──────────────────────────────────────────────
@@ -70,46 +67,50 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
 
   // ── Load ──
   loadApplications: async () => {
-    const data = await loadJson<PersistedApplications>("applications.json");
+    const data = await loadJson<unknown>("applications.json");
 
     if (data) {
-      if (data.applications.length > 0) {
-        const valid = data.selectedApplicationId
-          ? data.applications.some((a) => a.id === data.selectedApplicationId)
-          : false;
-        set({
-          applications: data.applications,
-          selectedApplicationId: valid
-            ? data.selectedApplicationId
-            : data.applications[0].id,
-          isLoaded: true,
-        });
-      } else {
-        set({ applications: [], selectedApplicationId: null, isLoaded: true });
+      const normalized = normalizeApplicationsPayload(data);
+      if (!normalized) {
+        reportDataIssue(
+          "applications.json",
+          "The file has an unexpected structure. The application list was left empty and the file was not modified.",
+        );
+        set({ isLoaded: true });
+        return;
       }
+      set({ ...normalized, isLoaded: true });
       return;
     }
 
     // First run — migrate the legacy single-application file if present.
-    const legacy = await loadJson<{
-      companyName?: string;
-      jobDescription?: string;
-      applicationLanguage?: string;
-      requirements?: string;
-      companyResearch?: string;
-    }>("current_application.json");
+    const legacy = await loadJson<Record<string, unknown>>(
+      "current_application.json",
+    );
+    const legacyCompany =
+      typeof legacy?.companyName === "string" ? legacy.companyName : "";
+    const legacyJobDescription =
+      typeof legacy?.jobDescription === "string" ? legacy.jobDescription : "";
+    const legacyLanguage =
+      typeof legacy?.applicationLanguage === "string"
+        ? legacy.applicationLanguage
+        : "";
+    const legacyRequirements =
+      typeof legacy?.requirements === "string" ? legacy.requirements : "";
+    const legacyResearch =
+      typeof legacy?.companyResearch === "string" ? legacy.companyResearch : "";
 
-    if (legacy && (legacy.companyName || legacy.jobDescription)) {
+    if (legacyCompany || legacyJobDescription) {
       const app: JobApplication = {
         id: crypto.randomUUID(),
-        companyName: legacy.companyName ?? "",
+        companyName: legacyCompany,
         jobTitle: "",
         applicationUrl: "",
         status: "wishlist",
-        jobDescription: legacy.jobDescription ?? "",
-        applicationLanguage: legacy.applicationLanguage ?? "",
-        requirements: legacy.requirements ?? "",
-        companyResearch: legacy.companyResearch ?? "",
+        jobDescription: legacyJobDescription,
+        applicationLanguage: legacyLanguage,
+        requirements: legacyRequirements,
+        companyResearch: legacyResearch,
         notes: "",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

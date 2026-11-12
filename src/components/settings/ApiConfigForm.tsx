@@ -29,6 +29,7 @@ import {
   type ModelPrice,
 } from "@/utils/zenPricing";
 import { saveJson, loadJson } from "@/utils/storage";
+import { openExternalUrl } from "@/utils/links";
 import {
   RefreshCw,
   RotateCcw,
@@ -550,14 +551,15 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
                 <>
                   {" "}
                   Prices per 1M tokens are imported automatically from{" "}
-                  <a
-                    href="https://opencode.ai/docs/zen"
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openExternalUrl("https://opencode.ai/docs/zen")
+                    }
                     className="text-primary hover:text-primary/80"
                   >
                     opencode.ai/docs/zen
-                  </a>{" "}
+                  </button>{" "}
                   every time you reload models — may change.
                 </>
               )}

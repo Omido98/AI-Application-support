@@ -4,10 +4,14 @@ use keyring::Entry;
 use scraper::{ElementRef, Node, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{Manager, State};
 use tokio_util::sync::CancellationToken;
 
 /// Service name under which API keys are stored in the OS keychain.
@@ -1147,6 +1151,388 @@ async fn zen_fetch_zen_pricing(clients: State<'_, HttpClients>) -> Result<Vec<Ze
     Ok(entries)
 }
 
+// ──────────────────────────────────────────────
+// Crash-safe JSON data files
+// ──────────────────────────────────────────────
+
+/// Upper bound for one JSON data file accepted from the frontend. Everything
+/// this app stores is text; a file this large is either a bug or an attack.
+const MAX_DATA_FILE_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Counter used to make temporary file names unique within a process.
+static DATA_FILE_TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Result of loading a data file. `recovered` is true when the main file was
+/// missing or damaged and the `.bak` copy was used instead.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadDataFileResult {
+    data: Option<serde_json::Value>,
+    recovered: bool,
+    error: Option<String>,
+}
+
+enum DataFileRead {
+    Missing,
+    Invalid(String),
+    Valid(serde_json::Value),
+}
+
+/// Reject anything that is not a plain `*.json` file name in the app data
+/// directory. This blocks path traversal and accidental subdirectory writes
+/// before the path is ever joined.
+fn validate_data_file_name(name: &str) -> Result<(), String> {
+    if name.len() > 160 {
+        return Err("Data file name is too long.".to_string());
+    }
+    let Some(stem) = name.strip_suffix(".json") else {
+        return Err(format!("Refusing to access \"{name}\": not a .json file."));
+    };
+    if stem.is_empty() || stem == "." || stem == ".." {
+        return Err(format!("Refusing to access \"{name}\": invalid file name."));
+    }
+    if !stem
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(format!(
+            "Refusing to access \"{name}\": only letters, digits, '.', '_' and '-' are allowed."
+        ));
+    }
+    Ok(())
+}
+
+fn app_data_file_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
+    validate_data_file_name(name)?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Could not resolve the app data directory: {err}"))?;
+    fs::create_dir_all(&dir)
+        .map_err(|err| format!("Could not create {}: {err}", dir.display()))?;
+    Ok(dir.join(name))
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".bak");
+    PathBuf::from(name)
+}
+
+fn timestamp_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
+}
+
+fn temp_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("data.json");
+    let counter = DATA_FILE_TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    path.with_file_name(format!(
+        ".{file_name}.{}.{}.tmp",
+        std::process::id(),
+        counter
+    ))
+}
+
+/// Read and parse one file into the three states the loader cares about.
+/// Missing files are a normal first-run state; invalid JSON is recoverable
+/// through the backup; I/O errors are fatal for this load.
+fn read_json_file(path: &Path) -> Result<DataFileRead, String> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DataFileRead::Missing)
+        }
+        Err(err) => {
+            return Err(format!("Could not inspect {}: {err}", path.display()));
+        }
+    };
+    if metadata.len() > MAX_DATA_FILE_BYTES {
+        return Err(format!(
+            "{} is larger than the {} MB data-file limit.",
+            path.display(),
+            MAX_DATA_FILE_BYTES / 1024 / 1024
+        ));
+    }
+    let bytes = fs::read(path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+    match serde_json::from_slice(&bytes) {
+        Ok(value) => Ok(DataFileRead::Valid(value)),
+        Err(err) => Ok(DataFileRead::Invalid(err.to_string())),
+    }
+}
+
+/// Move a damaged file aside instead of deleting it, so a user (or support
+/// session) can still recover its contents by hand.
+fn quarantine_file(path: &Path) -> Result<PathBuf, String> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("data.json");
+    let target = path.with_file_name(format!(
+        "{file_name}.corrupt-{}.json",
+        timestamp_nanos()
+    ));
+    fs::rename(path, &target)
+        .map_err(|err| format!("Could not quarantine {}: {err}", path.display()))?;
+    Ok(target)
+}
+
+fn describe_quarantine(path: Option<&Path>) -> String {
+    match path {
+        Some(path) => format!("a copy was kept at {}", path.display()),
+        None => "the damaged file could not be moved aside".to_string(),
+    }
+}
+
+/// Load a data file, transparently restoring it from the `.bak` copy when the
+/// main file is missing or invalid. A corrupt main file is quarantined, never
+/// overwritten in place, and the last known-good backup is preserved.
+fn load_data_file_at(path: &Path) -> Result<LoadDataFileResult, String> {
+    let backup = backup_path(path);
+    match read_json_file(path)? {
+        DataFileRead::Valid(value) => Ok(LoadDataFileResult {
+            data: Some(value),
+            recovered: false,
+            error: None,
+        }),
+        DataFileRead::Missing => match read_json_file(&backup)? {
+            DataFileRead::Valid(value) => {
+                fs::copy(&backup, path).map_err(|err| {
+                    format!(
+                        "Recovered data from {}, but could not restore {}: {err}",
+                        backup.display(),
+                        path.display()
+                    )
+                })?;
+                Ok(LoadDataFileResult {
+                    data: Some(value),
+                    recovered: true,
+                    error: None,
+                })
+            }
+            DataFileRead::Invalid(backup_error) => {
+                let quarantined = quarantine_file(&backup).ok();
+                Ok(LoadDataFileResult {
+                    data: None,
+                    recovered: false,
+                    error: Some(format!(
+                        "{} is missing and its backup is not valid JSON ({backup_error}); {}.",
+                        path.display(),
+                        describe_quarantine(quarantined.as_deref())
+                    )),
+                })
+            }
+            DataFileRead::Missing => Ok(LoadDataFileResult {
+                data: None,
+                recovered: false,
+                error: None,
+            }),
+        },
+        DataFileRead::Invalid(main_error) => match read_json_file(&backup)? {
+            DataFileRead::Valid(value) => {
+                let quarantined = quarantine_file(path).ok();
+                fs::copy(&backup, path).map_err(|err| {
+                    format!(
+                        "Recovered data from {}, but could not restore {}: {err}",
+                        backup.display(),
+                        path.display()
+                    )
+                })?;
+                let _ = quarantined;
+                Ok(LoadDataFileResult {
+                    data: Some(value),
+                    recovered: true,
+                    error: None,
+                })
+            }
+            DataFileRead::Invalid(backup_error) => {
+                let main_quarantine = quarantine_file(path).ok();
+                let backup_quarantine = quarantine_file(&backup).ok();
+                Ok(LoadDataFileResult {
+                    data: None,
+                    recovered: false,
+                    error: Some(format!(
+                        "{} is not valid JSON ({main_error}) and neither is its backup ({backup_error}); {} and {}.",
+                        path.display(),
+                        describe_quarantine(main_quarantine.as_deref()),
+                        describe_quarantine(backup_quarantine.as_deref())
+                    )),
+                })
+            }
+            DataFileRead::Missing => {
+                let quarantined = quarantine_file(path).ok();
+                Ok(LoadDataFileResult {
+                    data: None,
+                    recovered: false,
+                    error: Some(format!(
+                        "{} is not valid JSON ({main_error}) and no backup exists; {}.",
+                        path.display(),
+                        describe_quarantine(quarantined.as_deref())
+                    )),
+                })
+            }
+        },
+    }
+}
+
+#[cfg(unix)]
+fn sync_directory(dir: &Path) {
+    if let Ok(handle) = fs::File::open(dir) {
+        let _ = handle.sync_all();
+    }
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_dir: &Path) {}
+
+/// Write `bytes` to `path` via a synced temporary file, preserving the last
+/// valid file as `path.bak`. The destination is never truncated in place.
+///
+/// Ordering: write+sync temp -> verify/rotate main to .bak -> rename temp over
+/// main. A crash between the last two steps leaves the backup recoverable on
+/// the next launch.
+fn save_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() as u64 > MAX_DATA_FILE_BYTES {
+        return Err(format!(
+            "Refusing to write {}: data is larger than the {} MB limit.",
+            path.display(),
+            MAX_DATA_FILE_BYTES / 1024 / 1024
+        ));
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Invalid data file path: {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|err| format!("Could not create {}: {err}", parent.display()))?;
+
+    let temp = temp_path(path);
+    let result = (|| -> Result<(), String> {
+        {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .map_err(|err| format!("Could not create {}: {err}", temp.display()))?;
+            file.write_all(bytes)
+                .map_err(|err| format!("Could not write {}: {err}", temp.display()))?;
+            file.sync_all()
+                .map_err(|err| format!("Could not flush {}: {err}", temp.display()))?;
+        }
+
+        let backup = backup_path(path);
+        if path.exists() {
+            match read_json_file(path)? {
+                DataFileRead::Valid(_) => {
+                    if backup.exists() {
+                        fs::remove_file(&backup).map_err(|err| {
+                            format!("Could not replace backup {}: {err}", backup.display())
+                        })?;
+                    }
+                    fs::rename(path, &backup).map_err(|err| {
+                        format!("Could not rotate {} to backup: {err}", path.display())
+                    })?;
+                }
+                DataFileRead::Invalid(_) | DataFileRead::Missing => {
+                    // Never let a corrupt main file destroy the last known-good
+                    // backup: move it aside instead of rotating it over .bak.
+                    let _ = quarantine_file(path);
+                }
+            }
+        }
+
+        if let Err(err) = fs::rename(&temp, path) {
+            // Put the old version back if the final rename failed, so a failed
+            // save does not leave the main file missing until the next load.
+            if !path.exists() && backup.exists() {
+                let _ = fs::rename(&backup, path);
+            }
+            return Err(format!("Could not replace {}: {err}", path.display()));
+        }
+        sync_directory(parent);
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+#[tauri::command]
+async fn load_data_file(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<LoadDataFileResult, String> {
+    let path = app_data_file_path(&app, &name)?;
+    tauri::async_runtime::spawn_blocking(move || load_data_file_at(&path))
+        .await
+        .map_err(|err| format!("Data load task failed: {err}"))?
+}
+
+#[tauri::command]
+async fn save_data_file(
+    app: tauri::AppHandle,
+    name: String,
+    data: serde_json::Value,
+) -> Result<(), String> {
+    let path = app_data_file_path(&app, &name)?;
+    let bytes = serde_json::to_vec_pretty(&data)
+        .map_err(|err| format!("Could not serialize {name}: {err}"))?;
+    tauri::async_runtime::spawn_blocking(move || save_bytes_atomic(&path, &bytes))
+        .await
+        .map_err(|err| format!("Data save task failed: {err}"))?
+}
+
+#[tauri::command]
+async fn delete_data_file(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let path = app_data_file_path(&app, &name)?;
+    let backup = backup_path(&path);
+    tauri::async_runtime::spawn_blocking(move || {
+        for target in [path, backup] {
+            match fs::remove_file(&target) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => {
+                    return Err(format!("Could not delete {}: {err}", target.display()));
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|err| format!("Data delete task failed: {err}"))?
+}
+
+/// The only origins the main webview may navigate to. External links are
+/// intercepted by the frontend and opened in the system browser; anything
+/// else that tries to navigate the app away is blocked here as a backstop.
+fn is_allowed_app_url(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "about" => true,
+        "http" | "https" => {
+            let host = url.host_str().unwrap_or_default();
+            if host == "tauri.localhost" {
+                return true;
+            }
+            // Vite's dev server is pinned to port 1420 by vite.config.ts.
+            matches!(host, "localhost" | "127.0.0.1") && url.port() == Some(1420)
+        }
+        _ => false,
+    }
+}
+
+fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(|_webview, url| is_allowed_app_url(url))
+        .build()
+}
+
 /// Get a secret (e.g. the API key) from the OS keychain.
 /// Returns `null` when no entry exists. Errors if the keychain is unusable,
 /// so the frontend can fall back to storing secrets in config.json.
@@ -1193,6 +1579,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(navigation_guard())
         .invoke_handler(tauri::generate_handler![
             zen_list_models,
             zen_chat,
@@ -1201,6 +1588,9 @@ pub fn run() {
             zen_web_search,
             zen_fetch_page,
             zen_fetch_zen_pricing,
+            load_data_file,
+            save_data_file,
+            delete_data_file,
             keyring_get,
             keyring_set,
             keyring_delete
@@ -1380,5 +1770,122 @@ mod tests {
     fn malformed_sse_payload_is_an_error_not_a_panic() {
         let mut acc = StreamAccumulator::new("openai");
         assert!(acc.feed("this is not json").is_err());
+    }
+
+    fn test_data_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "aas-{label}-{}-{}",
+            std::process::id(),
+            timestamp_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("create test dir");
+        dir
+    }
+
+    #[test]
+    fn data_file_names_reject_traversal_and_non_json() {
+        assert!(validate_data_file_name("applications.json").is_ok());
+        assert!(validate_data_file_name("chat_6f1d2d0e-aaaa.json").is_ok());
+        assert!(validate_data_file_name("../applications.json").is_err());
+        assert!(validate_data_file_name("sub/applications.json").is_err());
+        assert!(validate_data_file_name("..\\applications.json").is_err());
+        assert!(validate_data_file_name("applications.txt").is_err());
+        assert!(validate_data_file_name(".json").is_err());
+    }
+
+    #[test]
+    fn save_keeps_the_previous_version_as_backup() {
+        let dir = test_data_dir("backup");
+        let path = dir.join("applications.json");
+
+        save_bytes_atomic(&path, br#"{"version":1}"#).unwrap();
+        save_bytes_atomic(&path, br#"{"version":2}"#).unwrap();
+
+        let current: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let backup: serde_json::Value =
+            serde_json::from_slice(&fs::read(backup_path(&path)).unwrap()).unwrap();
+        assert_eq!(current["version"], 2);
+        assert_eq!(backup["version"], 1);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_recovers_a_corrupt_main_file_from_backup() {
+        let dir = test_data_dir("recover");
+        let path = dir.join("applications.json");
+
+        save_bytes_atomic(&path, br#"{"version":1}"#).unwrap();
+        save_bytes_atomic(&path, br#"{"version":2}"#).unwrap();
+        fs::write(&path, b"{ this is not json").unwrap();
+
+        let loaded = load_data_file_at(&path).unwrap();
+        assert!(loaded.recovered);
+        assert!(loaded.error.is_none());
+        assert_eq!(loaded.data.unwrap()["version"], 1);
+
+        // The damaged file was preserved under a .corrupt-* name and the valid
+        // backup was copied back into place.
+        let restored: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(restored["version"], 1);
+        let corrupt_files = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".corrupt-")
+            })
+            .count();
+        assert_eq!(corrupt_files, 1);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_does_not_replace_a_good_backup_with_a_corrupt_main() {
+        let dir = test_data_dir("keep-backup");
+        let path = dir.join("profile.json");
+
+        save_bytes_atomic(&path, br#"{"version":1}"#).unwrap();
+        save_bytes_atomic(&path, br#"{"version":2}"#).unwrap();
+        fs::write(&path, b"corrupt").unwrap();
+
+        save_bytes_atomic(&path, br#"{"version":3}"#).unwrap();
+
+        let backup: serde_json::Value =
+            serde_json::from_slice(&fs::read(backup_path(&path)).unwrap()).unwrap();
+        assert_eq!(backup["version"], 1);
+        let current: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(current["version"], 3);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_data_file_is_a_normal_first_run() {
+        let dir = test_data_dir("missing");
+        let loaded = load_data_file_at(&dir.join("applications.json")).unwrap();
+        assert!(!loaded.recovered);
+        assert!(loaded.error.is_none());
+        assert!(loaded.data.is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn navigation_guard_allows_only_app_origins() {
+        let allow = |raw: &str| is_allowed_app_url(&tauri::Url::parse(raw).unwrap());
+        assert!(allow("tauri://localhost/"));
+        assert!(allow("http://tauri.localhost/"));
+        assert!(allow("https://tauri.localhost/"));
+        assert!(allow("about:blank"));
+        assert!(allow("http://localhost:1420/"));
+        assert!(!allow("https://example.com/"));
+        assert!(!allow("http://localhost:9999/"));
+        assert!(!allow("file:///C:/Windows/System32/"));
     }
 }

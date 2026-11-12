@@ -13,6 +13,8 @@ import {
   parseBackupBundle,
   restoreBackupBundle,
 } from "@/utils/backup";
+import { saveJson } from "@/utils/storage";
+import { flushAllSaves } from "@/utils/flushSaves";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
@@ -67,6 +69,10 @@ export default function SettingsDialog({
   const [showPalette, setShowPalette] = useState(false);
 
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  // Bumped after an import so the API form remounts from the restored config
+  // instead of writing its pre-import local state back over it.
+  const [configFormKey, setConfigFormKey] = useState(0);
+  const isSending = useChatStore((s) => s.isSending);
 
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [update, setUpdate] = useState<Update | null>(null);
@@ -76,7 +82,18 @@ export default function SettingsDialog({
 
   const handleExport = async () => {
     setBackupStatus(null);
+    if (isSending) {
+      setBackupStatus("Wait for the current AI reply to finish before exporting.");
+      return;
+    }
     try {
+      // Make sure the last 500 ms of edits are in the bundle, not just on screen.
+      if (!(await flushAllSaves())) {
+        setBackupStatus(
+          "Some changes could not be saved to disk, so the export was cancelled.",
+        );
+        return;
+      }
       const bundle = await buildBackupBundle();
       const filePath = await save({
         defaultPath: `ai-application-support-backup-${new Date()
@@ -87,7 +104,7 @@ export default function SettingsDialog({
       if (!filePath) return;
       await writeTextFile(filePath, JSON.stringify(bundle, null, 2));
       setBackupStatus(
-        `Backup exported (${Object.keys(bundle.files).length} files).`,
+        `Backup exported (${Object.keys(bundle.files).length} files). Your API key is not included.`,
       );
     } catch (err) {
       setBackupStatus(
@@ -98,7 +115,17 @@ export default function SettingsDialog({
 
   const handleImport = async () => {
     setBackupStatus(null);
+    if (isSending) {
+      setBackupStatus("Wait for the current AI reply to finish before importing.");
+      return;
+    }
     try {
+      if (!(await flushAllSaves())) {
+        setBackupStatus(
+          "Some changes could not be saved to disk, so the import was cancelled.",
+        );
+        return;
+      }
       const filePath = await openDialog({
         multiple: false,
         filters: [{ name: "JSON", extensions: ["json"] }],
@@ -112,10 +139,20 @@ export default function SettingsDialog({
       }
       const count = Object.keys(bundle.files).length;
       const confirmed = await ask(
-        `This will overwrite all current applications, chat threads, profile and settings with the contents of the backup (${count} files). This cannot be undone. Continue?`,
+        `This will overwrite all current applications, chat threads, profile and settings with the contents of the backup (${count} files). A safety copy of the current data is saved as backup-before-import.json first. Continue?`,
         { title: "Import backup", kind: "warning" },
       );
       if (!confirmed) return;
+
+      // Keep a recovery point in the app-data directory before overwriting.
+      const safetyCopy = await buildBackupBundle();
+      if (!(await saveJson("backup-before-import.json", safetyCopy))) {
+        setBackupStatus(
+          "Could not create a safety copy of the current data, so the import was cancelled.",
+        );
+        return;
+      }
+
       await restoreBackupBundle(bundle);
       // Reload every store so the restored data shows immediately.
       await useApplicationStore.getState().loadApplications();
@@ -123,9 +160,12 @@ export default function SettingsDialog({
       await useChatStore.getState().loadConfig();
       await useChatStore
         .getState()
-        .switchThread(useApplicationStore.getState().selectedApplicationId);
+        .switchThread(useApplicationStore.getState().selectedApplicationId, true);
       await useSettingsStore.getState().loadSettings();
-      setBackupStatus(`Import complete — ${count} files restored.`);
+      setConfigFormKey((key) => key + 1);
+      setBackupStatus(
+        `Import complete — ${count} files restored. A safety copy of the previous data was kept as backup-before-import.json.`,
+      );
     } catch (err) {
       setBackupStatus(
         `Import failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -283,6 +323,7 @@ export default function SettingsDialog({
               <Button
                 variant="outline"
                 onClick={() => void handleExport()}
+                disabled={isSending}
                 className="justify-center"
               >
                 <Download className="size-4 mr-1.5" />
@@ -291,6 +332,7 @@ export default function SettingsDialog({
               <Button
                 variant="outline"
                 onClick={() => void handleImport()}
+                disabled={isSending}
                 className="justify-center"
               >
                 <Upload className="size-4 mr-1.5" />
@@ -307,7 +349,7 @@ export default function SettingsDialog({
             <Label className="text-text-secondary text-xs">
               API configuration
             </Label>
-            <ApiConfigForm />
+            <ApiConfigForm key={configFormKey} />
           </div>
 
           {/* Updates */}

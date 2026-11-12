@@ -1,16 +1,14 @@
 import { create } from "zustand";
-import { saveJson, loadJson, deleteFile } from "@/utils/storage";
+import { saveJson, loadJson, deleteFile, reportDataIssue } from "@/utils/storage";
+import { normalizeApiConfigData } from "@/utils/dataValidation";
 import {
   API_KEY_ACCOUNT,
   deleteApiKeyFromKeychain,
   loadApiKeyFromKeychain,
   saveVerifiedApiKey,
 } from "@/utils/keychain";
-import {
-  inferProviderFromBaseUrl,
-  isKnownProviderId,
-  type ProviderId,
-} from "@/utils/providers";
+import type { ProviderId } from "@/utils/providers";
+import { getProvider } from "@/utils/providers";
 
 // ──────────────────────────────────────────────
 // Chat message type (lighter than the full Message type)
@@ -22,6 +20,13 @@ export interface ChatMessage {
   timestamp: string;
   /** True when the send failed (no reply landed); shows a re-send action. */
   failed?: boolean;
+  /**
+   * Marks the user message that started the conversation through the
+   * "Help me answer my application" starter. Keeping the intent on the
+   * message means a failed first send can be retried without losing the
+   * fit-evaluation prompt (and its forced web research).
+   */
+  purpose?: "fit-evaluation";
 }
 
 /**
@@ -30,6 +35,40 @@ export interface ChatMessage {
  */
 export function messageKey(msg: { timestamp: string; content: string }): string {
   return msg.timestamp + msg.content.slice(0, 40);
+}
+
+/**
+ * Validate a thread loaded from disk. A malformed or hand-edited file must
+ * never crash the chat UI; invalid entries are dropped and the storage layer
+ * reports the underlying problem.
+ */
+export function normalizeChatMessages(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) return [];
+  const messages: ChatMessage[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const role = candidate.role;
+    const content = candidate.content;
+    const timestamp = candidate.timestamp;
+    if (
+      (role !== "user" && role !== "assistant") ||
+      typeof content !== "string" ||
+      typeof timestamp !== "string"
+    ) {
+      continue;
+    }
+    messages.push({
+      role,
+      content,
+      timestamp,
+      ...(candidate.failed === true ? { failed: true } : {}),
+      ...(candidate.purpose === "fit-evaluation"
+        ? { purpose: "fit-evaluation" as const }
+        : {}),
+    });
+  }
+  return messages;
 }
 
 // ──────────────────────────────────────────────
@@ -92,6 +131,11 @@ function persistableConfig(config: ApiConfig): ApiConfig {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingThreadId: string | null = null;
 let pendingSnapshot: ChatMessage[] = [];
+/**
+ * Monotonic token for thread loads. A slow load that finishes after the user
+ * switched again must not overwrite the newer thread's messages.
+ */
+let threadLoadGeneration = 0;
 
 /** Write the current thread to disk, debounced. */
 function scheduleThreadSave() {
@@ -103,7 +147,12 @@ function scheduleThreadSave() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     saveTimer = null;
-    await saveJson(`chat_${pendingThreadId}.json`, pendingSnapshot);
+    const snapshotThreadId = pendingThreadId;
+    const snapshot = pendingSnapshot;
+    pendingThreadId = null;
+    pendingSnapshot = [];
+    if (!snapshotThreadId) return;
+    await saveJson(`chat_${snapshotThreadId}.json`, snapshot);
   }, 400);
 }
 
@@ -112,17 +161,23 @@ function cancelPendingSave() {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
+  pendingThreadId = null;
+  pendingSnapshot = [];
 }
 
-/** Flush any pending debounced thread save immediately (called on window close). */
-export async function flushChatSave(): Promise<void> {
-  if (saveTimer && pendingThreadId) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    const threadId = pendingThreadId;
-    pendingThreadId = null;
-    await saveJson(`chat_${threadId}.json`, pendingSnapshot);
-  }
+/**
+ * Flush any pending debounced thread save immediately.
+ * Returns false when the write failed; the storage banner reports the reason.
+ */
+export async function flushChatSave(): Promise<boolean> {
+  if (!saveTimer || !pendingThreadId) return true;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  const threadId = pendingThreadId;
+  const snapshot = pendingSnapshot;
+  pendingThreadId = null;
+  pendingSnapshot = [];
+  return saveJson(`chat_${threadId}.json`, snapshot);
 }
 
 // ──────────────────────────────────────────────
@@ -160,9 +215,23 @@ interface ChatState {
     key: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => void;
+  /**
+   * Append a message to a specific thread. If that thread is no longer active
+   * (the user switched applications while a refine action was running), the
+   * message is appended to that thread's file instead of leaking into the
+   * thread currently on screen.
+   */
+  appendMessageToThread: (threadId: string, msg: ChatMessage) => Promise<void>;
+  /** Replace a message in a specific thread, active or not. */
+  updateMessageInThread: (
+    threadId: string,
+    key: string,
+    updater: (msg: ChatMessage) => ChatMessage,
+  ) => Promise<void>;
   clearMessages: () => Promise<void>;
-  /** Load (or reset) the chat thread for an application */
-  switchThread: (applicationId: string | null) => Promise<void>;
+  /** Load (or reset) the chat thread for an application. `force` reloads even
+   * when the same thread is already loaded (used after importing a backup). */
+  switchThread: (applicationId: string | null, force?: boolean) => Promise<void>;
 
   // Config actions
   /** Merge the given fields into the stored config and persist the result. */
@@ -213,43 +282,101 @@ export const useChatStore = create<ChatState>((set, get) => ({
     scheduleThreadSave();
   },
 
-  clearMessages: async () => {
-    cancelPendingSave();
-    set({ messages: [] });
-    const threadId = get().activeThreadId;
-    if (threadId) {
-      set((s) => {
-        const drafts = { ...s.drafts };
-        delete drafts[threadId];
-        return { drafts };
+  appendMessageToThread: async (threadId, msg) => {
+    const current = get();
+    if (current.activeThreadId === threadId) {
+      set((s) => ({ messages: [...s.messages, msg] }));
+      scheduleThreadSave();
+      return;
+    }
+    const data = await loadJson<unknown>(`chat_${threadId}.json`);
+    const messages = [...normalizeChatMessages(data), msg];
+    await saveJson(`chat_${threadId}.json`, messages);
+  },
+
+  updateMessageInThread: async (threadId, key, updater) => {
+    const current = get();
+    if (current.activeThreadId === threadId) {
+      let changed = false;
+      const messages = current.messages.map((msg) => {
+        if (messageKey(msg) !== key) return msg;
+        changed = true;
+        return updater(msg);
       });
-      await deleteFile(`chat_${threadId}.json`);
+      if (changed) {
+        set({ messages });
+        scheduleThreadSave();
+      }
+      return;
+    }
+    const data = await loadJson<unknown>(`chat_${threadId}.json`);
+    let changed = false;
+    const messages = normalizeChatMessages(data).map((msg) => {
+      if (messageKey(msg) !== key) return msg;
+      changed = true;
+      return updater(msg);
+    });
+    if (changed) {
+      await saveJson(`chat_${threadId}.json`, messages);
     }
   },
 
-    switchThread: async (applicationId) => {
-      const current = get();
-      if (current.activeThreadId === applicationId && current.threadLoaded) {
-        return;
-      }
-      cancelPendingSave();
-      if (!applicationId) {
-        set({
-          messages: [],
-          activeThreadId: null,
-          threadLoaded: true,
-          streamingText: "",
-        });
-        return;
-      }
+  clearMessages: async () => {
+    const threadId = get().activeThreadId;
+    // Invalidate any in-flight load so it cannot repopulate the cleared thread.
+    threadLoadGeneration += 1;
+    cancelPendingSave();
+    set({ messages: [], threadLoaded: true, error: null });
+    if (!threadId) return;
+    set((s) => {
+      const drafts = { ...s.drafts };
+      delete drafts[threadId];
+      return { drafts };
+    });
+    await deleteFile(`chat_${threadId}.json`);
+  },
+
+  switchThread: async (applicationId, force = false) => {
+    const current = get();
+    if (
+      !force &&
+      current.activeThreadId === applicationId &&
+      current.threadLoaded
+    ) {
+      return;
+    }
+    const generation = ++threadLoadGeneration;
+    // Persist the outgoing thread before its messages are replaced. Without
+    // this, a message sent inside the 400 ms debounce window is lost.
+    await flushChatSave();
+    if (generation !== threadLoadGeneration) return;
+
+    if (!applicationId) {
       set({
-        threadLoaded: false,
-        activeThreadId: applicationId,
+        messages: [],
+        activeThreadId: null,
+        threadLoaded: true,
         streamingText: "",
+        error: null,
       });
-      const data = await loadJson<ChatMessage[]>(`chat_${applicationId}.json`);
-      set({ messages: data ?? [], threadLoaded: true });
-    },
+      return;
+    }
+
+    set({
+      messages: [],
+      threadLoaded: false,
+      activeThreadId: applicationId,
+      streamingText: "",
+      error: null,
+    });
+    const data = await loadJson<unknown>(`chat_${applicationId}.json`);
+    // A newer switch (or a reset) won the race: discard this result.
+    if (generation !== threadLoadGeneration) return;
+    set({
+      messages: normalizeChatMessages(data),
+      threadLoaded: true,
+    });
+  },
 
   // ── Config ──
 
@@ -274,7 +401,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   loadConfig: async () => {
-    const data = await loadJson<ApiConfig>("config.json");
+    const raw = await loadJson<unknown>("config.json");
+    const data = raw ? normalizeApiConfigData(raw) : null;
+    if (raw && !data) {
+      reportDataIssue(
+        "config.json",
+        "The file has an unexpected structure. Default API settings were used.",
+      );
+    }
     // Prefer a key in the OS keychain over one in the file.
     let keychainKey = await loadApiKeyFromKeychain();
     let sessionKeyOnly = false;
@@ -292,28 +426,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
     const key = keychainKey ?? data?.apiKey ?? "";
-    const withDefaults = (base: ApiConfig): ApiConfig => ({
-      ...base,
-      apiKey: key,
-      keychainAccount: keychainKey != null ? API_KEY_ACCOUNT : null,
-      sessionKeyOnly,
-      reasoningEffort: base.reasoningEffort ?? null,
-      webSearchEnabled: base.webSearchEnabled ?? false,
-      systemPromptMode: base.systemPromptMode ?? "standard",
-      customSystemPrompt: base.customSystemPrompt ?? "",
-    });
+    const withDefaults = (base: ApiConfig): ApiConfig => {
+      const provider = getProvider(base.provider);
+      return {
+        ...base,
+        baseUrl: base.baseUrl || provider.defaultBaseUrl,
+        model: base.model || provider.defaultModel,
+        apiKey: key,
+        keychainAccount: keychainKey != null ? API_KEY_ACCOUNT : null,
+        sessionKeyOnly,
+        reasoningEffort: base.reasoningEffort ?? null,
+        webSearchEnabled: base.webSearchEnabled ?? false,
+        systemPromptMode: base.systemPromptMode ?? "standard",
+        customSystemPrompt: base.customSystemPrompt ?? "",
+      };
+    };
     if (data) {
       // Migrate the old, non-existent endpoint to the real OpenCode Zen URL
       if (
-        data.baseUrl &&
         data.baseUrl.includes("api.opencode.ai") &&
         !data.baseUrl.includes("opencode.ai/zen")
       ) {
         data.baseUrl = ZEN_DEFAULT_BASE_URL;
-      }
-      // Infer the provider from the stored base URL when it's missing
-      if (!isKnownProviderId(data.provider)) {
-        data.provider = inferProviderFromBaseUrl(data.baseUrl);
+        data.provider = "zen";
       }
       set({ config: withDefaults(data), configLoaded: true });
     } else {

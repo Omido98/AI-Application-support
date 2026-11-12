@@ -154,14 +154,23 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       const isResend = !!opts.resendKey;
       const isRegenerate = !!opts.regenerateKey;
 
-      if (isSending || !application) return;
+      // Read the live flag, not the render-closure value: two fast Enter
+      // presses must not start two overlapping generations.
+      if (useChatStore.getState().isSending || !application) return;
 
+      const threadAtStart = useChatStore.getState().activeThreadId;
+      if (!threadAtStart) return;
+      const messagesBefore = useChatStore.getState().messages;
+
+      let targetIndex = -1;
+      let target: ChatMessage | null = null;
       let trimmed = "";
       if (isResend || isRegenerate) {
-        const store = useChatStore.getState();
-        const target = store.messages.find(
-          (m) => messageKey(m) === (opts.resendKey ?? opts.regenerateKey),
+        const lookupKey = opts.resendKey ?? opts.regenerateKey;
+        targetIndex = messagesBefore.findIndex(
+          (m) => messageKey(m) === lookupKey,
         );
+        target = messagesBefore[targetIndex] ?? null;
         if (!target || !target.content.trim()) return;
         trimmed = target.content.trim();
       } else {
@@ -169,17 +178,30 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       }
       if (!trimmed) return;
 
+      // The starter intent lives on the first user message, so a failed first
+      // send (or a regeneration of the first answer) still gets the fit
+      // evaluation prompt and its forced company research.
+      const isFitEvaluation =
+        opts.triggerFitEvaluation === true ||
+        target?.purpose === "fit-evaluation" ||
+        (isRegenerate &&
+          targetIndex > 0 &&
+          messagesBefore[targetIndex - 1]?.purpose === "fit-evaluation");
+
       // Clear the input only for a freshly typed send; re-sends and
       // regenerations reuse a message that is already in the thread.
       if (!isResend && !isRegenerate) {
         setDraft("");
       }
 
-      // Web search runs only on the first message of a thread (company
-      // research for the fit evaluation); later messages only search when
-      // the user enabled it in the chat settings.
-      const threadIsEmpty = useChatStore.getState().messages.length === 0;
-      const webSearchEnabled = threadIsEmpty || config.webSearchEnabled;
+      // Web search runs on the first message of a thread (company research
+      // for the fit evaluation); later messages only search when the user
+      // enabled it in the chat settings.
+      const noAssistantReply = !messagesBefore.some(
+        (m) => m.role === "assistant",
+      );
+      const webSearchEnabled =
+        isFitEvaluation || noAssistantReply || config.webSearchEnabled;
 
       // A re-send clears the failed marker immediately so the button
       // disappears while the request is in flight.
@@ -196,11 +218,13 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
           role: "user",
           content: trimmed,
           timestamp: new Date().toISOString(),
+          ...(isFitEvaluation ? { purpose: "fit-evaluation" as const } : {}),
         };
         addMessage(userMsg);
       }
 
-      // Send to API
+      // Send to API. The controller exists before any await so a thread
+      // switch can still abort this request.
       const controller = new AbortController();
       controllerRef.current = controller;
       setStreamingText("");
@@ -220,6 +244,17 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       // App startup loads it too; this covers sends racing that load.
       if (!profile.isLoaded) {
         await loadProfile();
+      }
+      // The user switched threads (or stopped) while the profile was loading:
+      // do not send this request with the old application's context.
+      if (
+        controller.signal.aborted ||
+        useChatStore.getState().activeThreadId !== threadAtStart
+      ) {
+        setIsSending(false);
+        setStreamingText("");
+        controllerRef.current = null;
+        return;
       }
       const freshProfile = useProfileStore.getState();
       const profileData = {
@@ -242,10 +277,10 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       const systemPrompt = buildSystemPrompt(appCtx, profileData, {
         mode: config.systemPromptMode ?? "standard",
         customPrompt: config.customSystemPrompt ?? "",
-        fitEvaluation: opts.triggerFitEvaluation ?? false,
+        fitEvaluation: isFitEvaluation,
       });
 
-      const threadAtSend = useChatStore.getState().activeThreadId;
+      const threadAtSend = threadAtStart;
       const { messages } = useChatStore.getState();
       // A regeneration drops the old reply from the history so the model
       // answers afresh; the stored message itself stays until replaced.

@@ -2,18 +2,19 @@ import { useEffect, useState } from "react";
 import { Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/plugin-process";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "@/stores/useAppStore";
 import {
   useSettingsStore,
   getAccentForeground,
 } from "@/stores/settingsStore";
-import { flushApplicationSave } from "@/stores/applicationStore";
-import { flushProfileSave, useProfileStore } from "@/stores/profileStore";
-import { flushChatSave } from "@/stores/chatStore";
+import { useProfileStore } from "@/stores/profileStore";
+import { flushAllSaves } from "@/utils/flushSaves";
 import ApplicationTab from "@/components/tabs/ApplicationTab";
 import ChatTab from "@/components/tabs/ChatTab";
 import ProfileTab from "@/components/tabs/ProfileTab";
 import SettingsDialog from "@/components/settings/SettingsDialog";
+import StorageAlert from "@/components/StorageAlert";
 import { Button } from "@/components/ui/button";
 
 type TabId = "application" | "chat" | "profile";
@@ -25,9 +26,7 @@ const tabs: { id: TabId; label: string }[] = [
 ];
 
 function flushPendingSaves() {
-  void flushApplicationSave();
-  void flushProfileSave();
-  void flushChatSave();
+  void flushAllSaves();
 }
 
 function App() {
@@ -60,13 +59,29 @@ function App() {
     void (async () => {
       try {
         const win = getCurrentWindow();
+        let closing = false;
         unlisten = await win.onCloseRequested(async (event) => {
           event.preventDefault();
-          await Promise.all([
-            flushApplicationSave(),
-            flushProfileSave(),
-            flushChatSave(),
-          ]);
+          if (closing) return;
+          closing = true;
+          // Never strand the user with unsaved work silently: if a write
+          // fails, ask before closing anyway.
+          const saved = await flushAllSaves();
+          if (!saved) {
+            let closeAnyway = false;
+            try {
+              closeAnyway = await ask(
+                "Some changes could not be saved to disk. Close the app anyway and lose them?",
+                { title: "Save failed", kind: "warning" },
+              );
+            } catch {
+              closeAnyway = false;
+            }
+            if (!closeAnyway) {
+              closing = false;
+              return;
+            }
+          }
           try {
             await win.destroy();
           } catch {
@@ -178,6 +193,7 @@ function App() {
       </header>
 
       {/* Content Area */}
+      <StorageAlert />
       <main className="flex-1 overflow-auto" role="tabpanel" id="tabpanel-main">
         {renderTab()}
       </main>

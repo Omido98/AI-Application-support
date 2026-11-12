@@ -7,7 +7,7 @@ import {
   ExternalLink,
   Archive,
 } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openExternalUrl } from "@/utils/links";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useAppStore } from "@/stores/useAppStore";
 import type { ApplicationStatus } from "@/types";
@@ -54,13 +54,8 @@ function StatusBadge({ status }: { status: ApplicationStatus }) {
   );
 }
 
-async function openInBrowser(url: string) {
-  try {
-    await openUrl(url);
-  } catch {
-    // Not running inside Tauri — fall back to a plain browser tab.
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
+function openInBrowser(url: string) {
+  openExternalUrl(url);
 }
 
 /** Statuses that appear in the active (non-archive) list. */
