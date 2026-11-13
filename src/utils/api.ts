@@ -9,13 +9,24 @@ import {
   buildDraftVerifyPrompt,
 } from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
-import type { ProfileData } from "@/types";
+import type { ProfileData, TokenUsage, WebSource } from "@/types";
 
 export interface ApiResponse {
   content: string;
   error?: string;
   /** True when the user stopped generation; `content` holds the partial answer. */
   stopped?: boolean;
+  /** Provider stop reason, e.g. "length"/"max_tokens" when the reply truncated. */
+  finishReason?: string | null;
+  /** Token usage reported by the provider, when available. */
+  usage?: TokenUsage;
+}
+
+/** A tool the agent is currently running, shown as live status in the UI. */
+export interface ToolActivity {
+  tool: "web_search" | "fetch_page";
+  /** Query for a search, URL for a page fetch. */
+  detail: string;
 }
 
 /** The reviewer's verdict on a draft, parsed from its feedback report. */
@@ -31,6 +42,10 @@ export type ImproveDraftDepth = "quick" | "deep";
 export interface SendMessageOptions {
   /** Called with each chunk of text as it streams in (live rendering). */
   onDelta?: (text: string) => void;
+  /** Called when a web tool starts (and cleared by the caller on new text). */
+  onToolActivity?: (activity: ToolActivity) => void;
+  /** Called for every source the agent actually consulted. */
+  onSource?: (source: WebSource) => void;
   /** Aborting the signal stops generation; whatever was streamed is returned. */
   signal?: AbortSignal;
 }
@@ -114,11 +129,36 @@ interface ToolCall {
 
 interface ChatResponse {
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
       content?: string | null;
       tool_calls?: ToolCall[];
     };
   }>;
+}
+
+function numericToken(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+/** Read token usage from either an OpenAI-shaped or Anthropic-shaped body. */
+function extractUsage(data: unknown): TokenUsage | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const usage = (data as Record<string, unknown>).usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  const record = usage as Record<string, unknown>;
+  const inputTokens =
+    numericToken(record.input_tokens) ?? numericToken(record.prompt_tokens);
+  const outputTokens =
+    numericToken(record.output_tokens) ??
+    numericToken(record.completion_tokens);
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+  };
 }
 
 const MAX_TOOL_ROUNDS = 15;
@@ -195,6 +235,7 @@ export async function listModels(
   } catch (err) {
     throw new Error(
       typeof err === "string" ? err : "Failed to load the model list.",
+      { cause: err },
     );
   }
 }
@@ -211,6 +252,7 @@ export async function fetchZenPricing(): Promise<ZenPricingEntry[]> {
   } catch (err) {
     throw new Error(
       typeof err === "string" ? err : "Failed to import model prices.",
+      { cause: err },
     );
   }
 }
@@ -284,7 +326,13 @@ export async function reviewDraft(
   options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   return sendMessage(
-    [{ role: "user", content: "Review the draft above.", timestamp: new Date().toISOString() }],
+    [
+      {
+        role: "user",
+        content: "Review the draft above.",
+        timestamp: new Date().toISOString(),
+      },
+    ],
     config,
     buildDraftReviewPrompt(draft, application, profile),
     options,
@@ -325,7 +373,14 @@ export async function verifyDraft(
   options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   return sendMessage(
-    [{ role: "user", content: "Verify whether the revised draft above addresses the feedback below.", timestamp: new Date().toISOString() }],
+    [
+      {
+        role: "user",
+        content:
+          "Verify whether the revised draft above addresses the feedback below.",
+        timestamp: new Date().toISOString(),
+      },
+    ],
     { ...config, webSearchEnabled: false },
     buildDraftVerifyPrompt(draft, feedback),
     options,
@@ -356,7 +411,13 @@ export async function reviseDraft(
   options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   return sendMessage(
-    [{ role: "user", content: "Revise the draft above.", timestamp: new Date().toISOString() }],
+    [
+      {
+        role: "user",
+        content: "Revise the draft above.",
+        timestamp: new Date().toISOString(),
+      },
+    ],
     { ...config, webSearchEnabled: false },
     buildDraftRevisionPrompt(draft, review, profile),
     options,
@@ -389,7 +450,14 @@ export async function improveDraft(
   config: ApiConfig,
   options: ImproveDraftOptions = {},
 ): Promise<ImproveDraftResponse> {
-  return runImprovePipeline("quick", draft, application, profile, config, options);
+  return runImprovePipeline(
+    "quick",
+    draft,
+    application,
+    profile,
+    config,
+    options,
+  );
 }
 
 /**
@@ -412,7 +480,14 @@ export async function deepImproveDraft(
   config: ApiConfig,
   options: ImproveDraftOptions = {},
 ): Promise<ImproveDraftResponse> {
-  return runImprovePipeline("deep", draft, application, profile, config, options);
+  return runImprovePipeline(
+    "deep",
+    draft,
+    application,
+    profile,
+    config,
+    options,
+  );
 }
 
 async function runImprovePipeline(
@@ -427,20 +502,28 @@ async function runImprovePipeline(
 
   // The reviewer's feedback every revision round must apply. Rounds always
   // revise against the original review report; the verifier only checks it.
-  let reviewFeedback = "";
-
   await pace();
   options.onStep?.("review");
   const firstReview = await reviewDraft(draft, application, profile, config, {
     signal: options.signal,
   });
   if (firstReview.error) {
-    return { content: "", error: firstReview.error, rounds: 0, verdict: "unknown" };
+    return {
+      content: "",
+      error: firstReview.error,
+      rounds: 0,
+      verdict: "unknown",
+    };
   }
   if (firstReview.stopped) {
-    return { content: firstReview.content ?? "", stopped: true, rounds: 0, verdict: "unknown" };
+    return {
+      content: firstReview.content ?? "",
+      stopped: true,
+      rounds: 0,
+      verdict: "unknown",
+    };
   }
-  reviewFeedback = firstReview.content;
+  const reviewFeedback = firstReview.content;
 
   let current = draft;
   let verdict = parseReviewVerdict(reviewFeedback);
@@ -458,15 +541,26 @@ async function runImprovePipeline(
 
     await pace();
     options.onStep?.("revise");
-    const revised = await reviseDraft(current, reviewFeedback, profile, config, {
-      signal: options.signal,
-      onDelta: options.onDelta,
-    });
+    const revised = await reviseDraft(
+      current,
+      reviewFeedback,
+      profile,
+      config,
+      {
+        signal: options.signal,
+        onDelta: options.onDelta,
+      },
+    );
     if (revised.error) {
       return { content: "", error: revised.error, rounds, verdict: "unknown" };
     }
     if (revised.stopped) {
-      return { content: revised.content ?? "", stopped: true, rounds, verdict: "unknown" };
+      return {
+        content: revised.content ?? "",
+        stopped: true,
+        rounds,
+        verdict: "unknown",
+      };
     }
     current = revised.content;
     rounds++;
@@ -507,14 +601,25 @@ function finishWithDeslop(
   return (async () => {
     await pace();
     options.onStep?.("deslop");
-    const cleaned = await deslopText(current, config, { signal: options.signal });
+    const cleaned = await deslopText(current, config, {
+      signal: options.signal,
+    });
     if (cleaned.error) {
       return { content: "", error: cleaned.error, rounds: 0, verdict };
     }
     if (cleaned.stopped) {
-      return { content: cleaned.content ?? "", stopped: true, rounds: 0, verdict };
+      return {
+        content: cleaned.content ?? "",
+        stopped: true,
+        rounds: 0,
+        verdict,
+      };
     }
-    return { content: applyDeslop(current, cleaned.content), rounds: 0, verdict };
+    return {
+      content: applyDeslop(current, cleaned.content),
+      rounds: 0,
+      verdict,
+    };
   })();
 }
 
@@ -548,8 +653,62 @@ async function streamChat(
     return { stopped: true };
   }
 
-  const channel = new Channel<ChatStreamEvent>();
   let requestId = "";
+  let aborted = false;
+  let settled = false;
+  let resolveResult!: (result: {
+    data?: unknown;
+    error?: string;
+    stopped?: boolean;
+  }) => void;
+  const resultPromise = new Promise<{
+    data?: unknown;
+    error?: string;
+    stopped?: boolean;
+  }>((resolve) => {
+    resolveResult = resolve;
+  });
+
+  function finish(result: {
+    data?: unknown;
+    error?: string;
+    stopped?: boolean;
+  }) {
+    if (settled) return;
+    settled = true;
+    options.signal?.removeEventListener("abort", onAbort);
+    resolveResult(result);
+  }
+
+  function onAbort() {
+    aborted = true;
+    if (requestId) {
+      // Best-effort: tell Rust to close the HTTP connection.
+      void invoke("zen_chat_stream_cancel", { id: requestId }).catch(() => {});
+    }
+    finish({ stopped: true });
+  }
+
+  const channel = new Channel<ChatStreamEvent>();
+  // Attach the handler BEFORE invoking the backend: the first SSE chunk can
+  // arrive before `invoke` resolves, and Tauri's Channel drops messages that
+  // have no handler yet.
+  channel.onmessage = (event: ChatStreamEvent) => {
+    switch (event.type) {
+      case "delta":
+        if (!settled) onChunk(event.text);
+        break;
+      case "done":
+        finish({ data: event.data });
+        break;
+      case "error":
+        finish({ error: event.message });
+        break;
+    }
+  };
+
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+
   try {
     requestId = await invoke<string>("zen_chat_stream", {
       baseUrl,
@@ -558,49 +717,18 @@ async function streamChat(
       payload,
       onEvent: channel,
     });
+    // The user aborted while the backend was still starting the request; now
+    // that we have an id, cancel the actual stream.
+    if (aborted) {
+      void invoke("zen_chat_stream_cancel", { id: requestId }).catch(() => {});
+    }
   } catch (err) {
-    return {
+    finish({
       error: typeof err === "string" ? err : "An unknown error occurred.",
-    };
+    });
   }
 
-  return new Promise((resolve) => {
-    let settled = false;
-
-    function cleanup() {
-      options.signal?.removeEventListener("abort", onAbort);
-    }
-
-    function onAbort() {
-      if (requestId) {
-        // Best-effort: tell Rust to close the HTTP connection.
-        void invoke("zen_chat_stream_cancel", { id: requestId }).catch(() => {});
-      }
-      finish({ stopped: true });
-    }
-
-    function finish(result: { data?: unknown; error?: string; stopped?: boolean }) {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(result);
-    }
-
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    channel.onmessage = (event: ChatStreamEvent) => {
-      switch (event.type) {
-        case "delta":
-          onChunk(event.text);
-          break;
-        case "done":
-          finish({ data: event.data });
-          break;
-        case "error":
-          finish({ error: event.message });
-          break;
-      }
-    };
-  });
+  return resultPromise;
 }
 
 /**
@@ -660,17 +788,28 @@ async function sendOpenAICompatMessage(
   // that failed or came back truncated.
   const callCounts = new Map<string, number>();
 
-  const buildPayload = (withTools: boolean, stream: boolean): Record<string, unknown> => {
+  const buildPayload = (
+    withTools: boolean,
+    stream: boolean,
+  ): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
       model: model || "deepseek-v4-flash-free",
       messages: [
         { role: "system", content: systemPrompt },
         ...history.map((m) => {
           if (m.role === "tool") {
-            return { role: "tool", tool_call_id: m.tool_call_id, content: m.content };
+            return {
+              role: "tool",
+              tool_call_id: m.tool_call_id,
+              content: m.content,
+            };
           }
           if (m.tool_calls) {
-            return { role: m.role, content: m.content, tool_calls: m.tool_calls };
+            return {
+              role: m.role,
+              content: m.content,
+              tool_calls: m.tool_calls,
+            };
           }
           return { role: m.role, content: m.content };
         }),
@@ -716,7 +855,9 @@ async function sendOpenAICompatMessage(
    * one final round so it writes its answer with what it already has. Errors
    * only if even that round writes nothing.
    */
-  const finishWithoutTools = async (fallbackError: string): Promise<ApiResponse> => {
+  const finishWithoutTools = async (
+    fallbackError: string,
+  ): Promise<ApiResponse> => {
     useTools = false;
     // Drop tool artifacts from the history so the tools-free request parses.
     for (let i = history.length - 1; i >= 0; i--) {
@@ -748,10 +889,17 @@ async function sendOpenAICompatMessage(
     }
 
     let result = useStream
-      ? await streamChat(baseUrl, apiKey, config.provider, buildPayload(useTools, true), options, (text) => {
-          streamedContent += text;
-          options.onDelta?.(text);
-        })
+      ? await streamChat(
+          baseUrl,
+          apiKey,
+          config.provider,
+          buildPayload(useTools, true),
+          options,
+          (text) => {
+            streamedContent += text;
+            options.onDelta?.(text);
+          },
+        )
       : await runNonStreamingRound(useTools);
 
     if (result.stopped) {
@@ -769,7 +917,6 @@ async function sendOpenAICompatMessage(
       if (result.error) {
         // Some models reject the `tools` field; retry once without it.
         if (useTools && /tool/i.test(result.error)) {
-          useTools = false;
           // Drop tool artifacts from the history so plain models can parse it.
           for (let i = history.length - 1; i >= 0; i--) {
             if (history[i].role === "tool") {
@@ -840,7 +987,7 @@ async function sendOpenAICompatMessage(
       });
 
       for (const call of toolCalls) {
-        const result = await executeTool(call);
+        const result = await executeTool(call, options);
         history.push({
           role: "tool",
           tool_call_id: call.id,
@@ -856,7 +1003,13 @@ async function sendOpenAICompatMessage(
         error: "API response did not contain a message.",
       };
     }
-    return { content: drafted };
+    const finishReason = data?.choices?.[0]?.finish_reason ?? null;
+    const usage = extractUsage(data);
+    return {
+      content: drafted,
+      ...(finishReason ? { finishReason } : {}),
+      ...(usage ? { usage } : {}),
+    };
   }
 
   // Ran out of tool rounds: force a tools-free final answer instead of
@@ -966,7 +1119,10 @@ async function sendAnthropicMessage(
   // that failed or came back truncated.
   const callCounts = new Map<string, number>();
 
-  const buildPayload = (withTools: boolean, stream: boolean): Record<string, unknown> => {
+  const buildPayload = (
+    withTools: boolean,
+    stream: boolean,
+  ): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
       model: model || ANTHROPIC_DEFAULT_MODEL,
       max_tokens: ANTHROPIC_MAX_TOKENS,
@@ -986,7 +1142,11 @@ async function sendAnthropicMessage(
 
   const runNonStreamingRound = async (
     withTools: boolean,
-  ): Promise<{ data?: AnthropicResponse; error?: string; stopped?: boolean }> => {
+  ): Promise<{
+    data?: AnthropicResponse;
+    error?: string;
+    stopped?: boolean;
+  }> => {
     try {
       const data = await invoke<AnthropicResponse>("zen_chat", {
         baseUrl,
@@ -1008,7 +1168,9 @@ async function sendAnthropicMessage(
    * one final round so it writes its answer with what it already has. Errors
    * only if even that round writes nothing.
    */
-  const finishWithoutTools = async (fallbackError: string): Promise<ApiResponse> => {
+  const finishWithoutTools = async (
+    fallbackError: string,
+  ): Promise<ApiResponse> => {
     useTools = false;
     toolContext = [];
 
@@ -1033,10 +1195,17 @@ async function sendAnthropicMessage(
     }
 
     let result = useStream
-      ? await streamChat(baseUrl, apiKey, "anthropic", buildPayload(useTools, true), options, (text) => {
-          streamedContent += text;
-          options.onDelta?.(text);
-        })
+      ? await streamChat(
+          baseUrl,
+          apiKey,
+          "anthropic",
+          buildPayload(useTools, true),
+          options,
+          (text) => {
+            streamedContent += text;
+            options.onDelta?.(text);
+          },
+        )
       : await runNonStreamingRound(useTools);
 
     if (result.stopped) {
@@ -1054,7 +1223,6 @@ async function sendAnthropicMessage(
       if (result.error) {
         // Some models reject the `tools` field; retry once without it.
         if (useTools && /tool/i.test(result.error)) {
-          useTools = false;
           toolContext = [];
 
           const retry = await runNonStreamingRound(false);
@@ -1114,7 +1282,7 @@ async function sendAnthropicMessage(
       toolContext.push({ role: "assistant", content: blocks });
       const results: AnthropicContentBlock[] = [];
       for (const call of toolUses) {
-        const result = await executeAnthropicTool(call);
+        const result = await executeAnthropicTool(call, options);
         results.push({
           type: "tool_result",
           tool_use_id: call.id,
@@ -1132,7 +1300,12 @@ async function sendAnthropicMessage(
         error: "API response did not contain a message.",
       };
     }
-    return { content: text };
+    const usage = extractUsage(data);
+    return {
+      content: text,
+      ...(data?.stop_reason ? { finishReason: data.stop_reason } : {}),
+      ...(usage ? { usage } : {}),
+    };
   }
 
   // Ran out of tool rounds: force a tools-free final answer instead of
@@ -1154,12 +1327,53 @@ function textFromAnthropicBlocks(
   return text || null;
 }
 
+function sourceTitle(url: string): string {
+  try {
+    return new URL(url).hostname || url;
+  } catch {
+    return url;
+  }
+}
+
+async function searchWeb(
+  query: string,
+  options: SendMessageOptions,
+): Promise<string> {
+  options.onToolActivity?.({ tool: "web_search", detail: query });
+  const results = await invoke<WebResult[]>("zen_web_search", { query });
+  if (!results || results.length === 0) {
+    return "The web search returned no results.";
+  }
+  for (const result of results) {
+    if (result.url) {
+      options.onSource?.({
+        title: result.title.trim() || result.url,
+        url: result.url,
+      });
+    }
+  }
+  return results
+    .map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`)
+    .join("\n\n");
+}
+
+async function fetchPage(
+  url: string,
+  options: SendMessageOptions,
+): Promise<string> {
+  options.onToolActivity?.({ tool: "fetch_page", detail: url });
+  const text = await invoke<string>("zen_fetch_page", { url });
+  options.onSource?.({ title: sourceTitle(url), url });
+  return text;
+}
+
 /**
  * Execute a single Anthropic tool_use block via the Rust backend and return
  * its text result (either the formatted search results or the fetched page).
  */
 async function executeAnthropicTool(
   call: AnthropicContentBlock,
+  options: SendMessageOptions = {},
 ): Promise<string> {
   const name = call.name ?? "";
   const args = call.input ?? {};
@@ -1169,18 +1383,7 @@ async function executeAnthropicTool(
       if (!query) {
         return "Error: web_search requires a 'query' string argument.";
       }
-      const results = await invoke<WebResult[]>("zen_web_search", {
-        query,
-      });
-      if (!results || results.length === 0) {
-        return "The web search returned no results.";
-      }
-      return results
-        .map(
-          (r, i) =>
-            `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`,
-        )
-        .join("\n\n");
+      return await searchWeb(query, options);
     }
 
     if (name === "fetch_page") {
@@ -1188,13 +1391,12 @@ async function executeAnthropicTool(
       if (!url) {
         return "Error: fetch_page requires a 'url' string argument.";
       }
-      return await invoke<string>("zen_fetch_page", { url });
+      return await fetchPage(url, options);
     }
 
     return `Error: unknown tool "${name}".`;
   } catch (err) {
-    const message =
-      typeof err === "string" ? err : "unknown error";
+    const message = typeof err === "string" ? err : "unknown error";
     return `Error while running ${name}: ${message}`;
   }
 }
@@ -1203,7 +1405,10 @@ async function executeAnthropicTool(
  * Execute a single tool call via the Rust backend and return its text result
  * (either the formatted search results or the fetched page text).
  */
-async function executeTool(call: ToolCall): Promise<string> {
+async function executeTool(
+  call: ToolCall,
+  options: SendMessageOptions = {},
+): Promise<string> {
   try {
     let args: Record<string, unknown>;
     try {
@@ -1220,18 +1425,7 @@ async function executeTool(call: ToolCall): Promise<string> {
       if (!query) {
         return "Error: web_search requires a 'query' string argument.";
       }
-      const results = await invoke<WebResult[]>("zen_web_search", {
-        query,
-      });
-      if (!results || results.length === 0) {
-        return "The web search returned no results.";
-      }
-      return results
-        .map(
-          (r, i) =>
-            `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`,
-        )
-        .join("\n\n");
+      return await searchWeb(query, options);
     }
 
     if (call.function.name === "fetch_page") {
@@ -1239,13 +1433,12 @@ async function executeTool(call: ToolCall): Promise<string> {
       if (!url) {
         return "Error: fetch_page requires a 'url' string argument.";
       }
-      return await invoke<string>("zen_fetch_page", { url });
+      return await fetchPage(url, options);
     }
 
     return `Error: unknown tool "${call.function.name}".`;
   } catch (err) {
-    const message =
-      typeof err === "string" ? err : "unknown error";
+    const message = typeof err === "string" ? err : "unknown error";
     return `Error while running ${call.function.name}: ${message}`;
   }
 }

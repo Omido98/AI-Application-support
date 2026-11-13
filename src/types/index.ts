@@ -25,6 +25,8 @@ export interface CoverLetter {
   id: string;
   /** Optional name of the company/organization the letter was written for */
   company?: string;
+  /** Application this letter was saved from, when it came from chat. */
+  applicationId?: string;
   content: string;
   addedAt: string;
 }
@@ -121,12 +123,31 @@ export interface ProfileData {
   languages: Language[];
 }
 
+/** A source the agent consulted through web_search / fetch_page. */
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
+/** Provider-reported token usage for one assistant reply, when available. */
+export interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 export type ApplicationStatus =
-  | "wishlist"
-  | "applied"
-  | "interview"
-  | "offer"
-  | "rejected";
+  "wishlist" | "applied" | "interview" | "offer" | "rejected";
+
+export type ApplicationPriority = "low" | "medium" | "high";
+
+export type WorkMode = "onsite" | "hybrid" | "remote" | "";
+
+/** One status change, recorded so the pipeline history survives restarts. */
+export interface StatusHistoryEntry {
+  status: ApplicationStatus;
+  /** ISO timestamp of the change. */
+  at: string;
+}
 
 /** A single tracked job application, with its own chat thread. */
 export interface JobApplication {
@@ -140,6 +161,20 @@ export interface JobApplication {
   requirements: string;
   companyResearch: string;
   notes: string;
+  /** Phase 2 tracker fields. Empty strings mean "not set". */
+  location: string;
+  workMode: WorkMode;
+  salary: string;
+  source: string;
+  priority: ApplicationPriority;
+  tags: string[];
+  /** Date-only (YYYY-MM-DD) values, kept as strings for plain-JSON storage. */
+  appliedAt: string;
+  deadline: string;
+  followUpAt: string;
+  contactName: string;
+  contactEmail: string;
+  statusHistory: StatusHistoryEntry[];
   createdAt: string;
   updatedAt: string;
 }

@@ -1,24 +1,39 @@
-import { useState } from "react";
-import { Check, Moon, Plus, Sun, Download, Upload } from "lucide-react";
-import { save, open as openDialog, ask } from "@tauri-apps/plugin-dialog";
-import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
+import { useEffect, useState } from "react";
+import {
+  Check,
+  ClipboardCopy,
+  FolderOpen,
+  Monitor,
+  Moon,
+  Plus,
+  Sun,
+  Download,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import {
-  useSettingsStore,
-  getAccentForeground,
-} from "@/stores/settingsStore";
+import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
+import { useSettingsStore, getAccentForeground } from "@/stores/settingsStore";
 import {
   buildBackupBundle,
   parseBackupBundle,
   restoreBackupBundle,
 } from "@/utils/backup";
+import { saveJson, deleteFile } from "@/utils/storage";
+import { exportBackupFile, importBackupFile } from "@/utils/backupFiles";
+import { flushAllSaves } from "@/utils/flushSaves";
+import { copyDiagnostics, logToFileInBackground } from "@/utils/diagnostics";
+import { isTauriRuntime } from "@/utils/runtime";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
 import ApiConfigForm from "./ApiConfigForm";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -43,12 +58,7 @@ const PRESET_ACCENTS = [
 ];
 
 type UpdateStatus =
-  | "idle"
-  | "checking"
-  | "none"
-  | "available"
-  | "downloading"
-  | "failed";
+  "idle" | "checking" | "none" | "available" | "downloading" | "failed";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -63,10 +73,26 @@ export default function SettingsDialog({
   const accent = useSettingsStore((s) => s.accent);
   const setTheme = useSettingsStore((s) => s.setTheme);
   const setAccent = useSettingsStore((s) => s.setAccent);
+  const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
+  const setAutoUpdateCheck = useSettingsStore((s) => s.setAutoUpdateCheck);
+  const skippedUpdateVersion = useSettingsStore((s) => s.skippedUpdateVersion);
+  const setSkippedUpdateVersion = useSettingsStore(
+    (s) => s.setSkippedUpdateVersion,
+  );
 
   const [showPalette, setShowPalette] = useState(false);
 
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [diagnosticsStatus, setDiagnosticsStatus] = useState<string | null>(
+    null,
+  );
+  const [folderStatus, setFolderStatus] = useState<string | null>(null);
+  const [resetStatus, setResetStatus] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  // Bumped after an import so the API form remounts from the restored config
+  // instead of writing its pre-import local state back over it.
+  const [configFormKey, setConfigFormKey] = useState(0);
+  const isSending = useChatStore((s) => s.isSending);
 
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [update, setUpdate] = useState<Update | null>(null);
@@ -76,60 +102,105 @@ export default function SettingsDialog({
 
   const handleExport = async () => {
     setBackupStatus(null);
-    try {
-      const bundle = await buildBackupBundle();
-      const filePath = await save({
-        defaultPath: `ai-application-support-backup-${new Date()
-          .toISOString()
-          .slice(0, 10)}.json`,
-        filters: [{ name: "JSON", extensions: ["json"] }],
-      });
-      if (!filePath) return;
-      await writeTextFile(filePath, JSON.stringify(bundle, null, 2));
+    if (isSending) {
       setBackupStatus(
-        `Backup exported (${Object.keys(bundle.files).length} files).`,
+        "Wait for the current AI reply to finish before exporting.",
+      );
+      return;
+    }
+    try {
+      // Make sure the last 500 ms of edits are in the bundle, not just on screen.
+      if (!(await flushAllSaves())) {
+        setBackupStatus(
+          "Some changes could not be saved to disk, so the export was cancelled.",
+        );
+        return;
+      }
+      const bundle = await buildBackupBundle();
+      const defaultName = `ai-application-support-backup-${new Date()
+        .toISOString()
+        .slice(0, 10)}.json`;
+      const filePath = await exportBackupFile(
+        defaultName,
+        JSON.stringify(bundle, null, 2),
+      );
+      if (!filePath) return;
+      const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
+      setBackupStatus(
+        `Backup exported to ${fileName} (${Object.keys(bundle.files).length} files). Your API key is not included.`,
       );
     } catch (err) {
-      setBackupStatus(
-        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      const message = err instanceof Error ? err.message : String(err);
+      setBackupStatus(`Export failed: ${message}`);
+      logToFileInBackground(`[backup] Export failed: ${message}`);
     }
   };
 
   const handleImport = async () => {
     setBackupStatus(null);
+    if (isSending) {
+      setBackupStatus(
+        "Wait for the current AI reply to finish before importing.",
+      );
+      return;
+    }
     try {
-      const filePath = await openDialog({
-        multiple: false,
-        filters: [{ name: "JSON", extensions: ["json"] }],
-      });
-      if (!filePath) return;
-      const raw = await readTextFile(String(filePath));
+      if (!(await flushAllSaves())) {
+        setBackupStatus(
+          "Some changes could not be saved to disk, so the import was cancelled.",
+        );
+        return;
+      }
+      const raw = await importBackupFile();
+      if (raw == null) return;
       const bundle = parseBackupBundle(raw);
       if (!bundle) {
-        setBackupStatus("That file is not a valid AI Application Support backup.");
+        setBackupStatus(
+          "That file is not a valid AI Application Support backup.",
+        );
         return;
       }
       const count = Object.keys(bundle.files).length;
       const confirmed = await ask(
-        `This will overwrite all current applications, chat threads, profile and settings with the contents of the backup (${count} files). This cannot be undone. Continue?`,
+        `This will overwrite all current applications, chat threads, profile and settings with the contents of the backup (${count} files). A safety copy of the current data is saved as backup-before-import.json first. Continue?`,
         { title: "Import backup", kind: "warning" },
       );
       if (!confirmed) return;
+
+      // Keep a recovery point in the app-data directory before overwriting.
+      const safetyCopy = await buildBackupBundle();
+      if (!(await saveJson("backup-before-import.json", safetyCopy))) {
+        setBackupStatus(
+          "Could not create a safety copy of the current data, so the import was cancelled.",
+        );
+        return;
+      }
+
       await restoreBackupBundle(bundle);
+      // A backup without drafts means "no drafts", not "keep the old ones".
+      if (!("drafts.json" in bundle.files)) {
+        await deleteFile("drafts.json");
+      }
       // Reload every store so the restored data shows immediately.
       await useApplicationStore.getState().loadApplications();
       await useProfileStore.getState().loadProfile();
       await useChatStore.getState().loadConfig();
+      await useChatStore.getState().loadDrafts(true);
       await useChatStore
         .getState()
-        .switchThread(useApplicationStore.getState().selectedApplicationId);
+        .switchThread(
+          useApplicationStore.getState().selectedApplicationId,
+          true,
+        );
       await useSettingsStore.getState().loadSettings();
-      setBackupStatus(`Import complete — ${count} files restored.`);
-    } catch (err) {
+      setConfigFormKey((key) => key + 1);
       setBackupStatus(
-        `Import failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Import complete — ${count} files restored. A safety copy of the previous data was kept as backup-before-import.json.`,
       );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setBackupStatus(`Import failed: ${message}`);
+      logToFileInBackground(`[backup] Import failed: ${message}`);
     }
   };
 
@@ -151,6 +222,9 @@ export default function SettingsDialog({
       setUpdateMessage(
         err instanceof Error ? err.message : "Could not check for updates.",
       );
+      logToFileInBackground(
+        `[update] Check failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -167,6 +241,58 @@ export default function SettingsDialog({
         err instanceof Error
           ? err.message
           : "The update failed to install. Try again later.",
+      );
+      logToFileInBackground(
+        `[update] Install failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  // ── Diagnostics ──
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion(null));
+  }, []);
+
+  const handleOpenDataFolder = async () => {
+    setFolderStatus(null);
+    try {
+      await invoke("open_data_folder");
+    } catch (err) {
+      setFolderStatus(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleResetData = async () => {
+    setResetStatus(null);
+    const confirmed = await ask(
+      "This permanently deletes all applications, chats, drafts, profile and settings after the app restarts. This cannot be undone. Continue?",
+      { title: "Reset all data", kind: "warning" },
+    );
+    if (!confirmed) return;
+    try {
+      await invoke("request_data_reset");
+      await relaunch();
+    } catch (err) {
+      setResetStatus(
+        `Reset is scheduled, but the restart failed (${
+          err instanceof Error ? err.message : String(err)
+        }). Restart the app to finish clearing your data.`,
+      );
+    }
+  };
+
+  const handleCopyDiagnostics = async () => {
+    setDiagnosticsStatus(null);
+    try {
+      await copyDiagnostics();
+      setDiagnosticsStatus("Diagnostics copied to the clipboard.");
+    } catch (err) {
+      setDiagnosticsStatus(
+        err instanceof Error ? err.message : "Could not copy diagnostics.",
       );
     }
   };
@@ -185,8 +311,8 @@ export default function SettingsDialog({
         <div className="space-y-6 py-2">
           {/* Theme */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">Theme</Label>
-            <div className="grid grid-cols-2 gap-2">
+            <h3 className="text-xs font-medium text-text-secondary">Theme</h3>
+            <div className="grid grid-cols-3 gap-2">
               <Button
                 variant={theme === "light" ? "default" : "outline"}
                 onClick={() => setTheme("light")}
@@ -203,21 +329,30 @@ export default function SettingsDialog({
                 <Moon className="size-4 mr-1.5" />
                 Dark
               </Button>
+              <Button
+                variant={theme === "system" ? "default" : "outline"}
+                onClick={() => setTheme("system")}
+                title="Follow the operating system theme"
+                className="justify-center"
+              >
+                <Monitor className="size-4 mr-1.5" />
+                System
+              </Button>
             </div>
           </div>
 
           {/* Accent colour */}
           <div className="space-y-2">
             <div className="flex items-center gap-3">
-              <Label className="text-text-secondary text-xs">
+              <h3 className="text-xs font-medium text-text-secondary">
                 Accent colour:
-              </Label>
+              </h3>
               <button
                 type="button"
                 title="Choose accent colour"
                 aria-label="Choose accent colour"
                 onClick={() => setShowPalette((v) => !v)}
-                className="size-7 rounded-md border border-border shadow-sm transition-transform hover:scale-105"
+                className="size-8 rounded-md border border-border shadow-sm transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 style={{ backgroundColor: accent }}
               />
             </div>
@@ -234,7 +369,7 @@ export default function SettingsDialog({
                       aria-label={c.name}
                       onClick={() => setAccent(c.value)}
                       className={cn(
-                        "size-7 rounded-md border transition-transform hover:scale-105",
+                        "size-8 rounded-md border transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                         selected
                           ? "border-foreground ring-2 ring-primary/50"
                           : "border-border",
@@ -256,8 +391,10 @@ export default function SettingsDialog({
                   title="Custom colour"
                   aria-label="Custom colour"
                   className={cn(
-                    "flex items-center justify-center size-7 rounded-md border border-dashed cursor-pointer transition-transform hover:scale-105",
-                    PRESET_ACCENTS.every((c) => accent.toLowerCase() !== c.value)
+                    "flex items-center justify-center size-8 rounded-md border border-dashed cursor-pointer transition-transform hover:scale-105 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
+                    PRESET_ACCENTS.every(
+                      (c) => accent.toLowerCase() !== c.value,
+                    )
                       ? "border-foreground ring-2 ring-primary/50 bg-field"
                       : "border-border",
                   )}
@@ -276,13 +413,14 @@ export default function SettingsDialog({
 
           {/* Backup & restore */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">
+            <h3 className="text-xs font-medium text-text-secondary">
               Backup &amp; restore
-            </Label>
+            </h3>
             <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="outline"
                 onClick={() => void handleExport()}
+                disabled={isSending}
                 className="justify-center"
               >
                 <Download className="size-4 mr-1.5" />
@@ -291,6 +429,7 @@ export default function SettingsDialog({
               <Button
                 variant="outline"
                 onClick={() => void handleImport()}
+                disabled={isSending}
                 className="justify-center"
               >
                 <Upload className="size-4 mr-1.5" />
@@ -304,21 +443,63 @@ export default function SettingsDialog({
 
           {/* API configuration */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">
+            <h3 className="text-xs font-medium text-text-secondary">
               API configuration
-            </Label>
-            <ApiConfigForm />
+            </h3>
+            <ApiConfigForm key={configFormKey} />
           </div>
 
           {/* Updates */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">
+            <h3 className="text-xs font-medium text-text-secondary">
               Software updates
-            </Label>
+            </h3>
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="auto-update-check"
+                checked={autoUpdateCheck}
+                onCheckedChange={(checked) =>
+                  setAutoUpdateCheck(checked === true)
+                }
+                className="mt-0.5"
+              />
+              <div className="space-y-1">
+                <Label
+                  htmlFor="auto-update-check"
+                  className="text-text-secondary text-xs cursor-pointer"
+                >
+                  Check for updates on startup
+                </Label>
+                <p className="text-xs text-text-muted">
+                  A quiet check runs a few seconds after launch and only shows a
+                  notice when a newer version exists.
+                </p>
+              </div>
+            </div>
+            {skippedUpdateVersion && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-field/50 px-3 py-1.5">
+                <p className="text-xs text-text-muted">
+                  Skipped version:{" "}
+                  <span className="font-mono text-text-secondary">
+                    {skippedUpdateVersion}
+                  </span>
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSkippedUpdateVersion("")}
+                  title="Show update notices for this version again"
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
             <Button
               variant="outline"
               onClick={() => void handleCheckForUpdates()}
-              disabled={updateStatus === "checking" || updateStatus === "downloading"}
+              disabled={
+                updateStatus === "checking" || updateStatus === "downloading"
+              }
               className="justify-center w-full"
             >
               {updateStatus === "checking"
@@ -338,8 +519,8 @@ export default function SettingsDialog({
             )}
             {updateStatus === "downloading" && (
               <p className="text-xs text-text-muted">
-                Downloading and installing the update… The app will restart
-                when done.
+                Downloading and installing the update… The app will restart when
+                done.
               </p>
             )}
             {updateStatus === "none" && (
@@ -351,6 +532,69 @@ export default function SettingsDialog({
               updateMessage && (
                 <p className="text-xs text-destructive">{updateMessage}</p>
               )}
+          </div>
+
+          {/* Diagnostics */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium text-text-secondary">
+              Diagnostics
+            </h3>
+            {appVersion && (
+              <p className="font-mono text-[11px] text-text-muted">
+                AI Application Support {appVersion}
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void handleCopyDiagnostics()}
+                className="justify-center"
+              >
+                <ClipboardCopy className="size-4 mr-1.5" />
+                Copy diagnostics
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void handleOpenDataFolder()}
+                className="justify-center"
+              >
+                <FolderOpen className="size-4 mr-1.5" />
+                Open data folder
+              </Button>
+            </div>
+            <p className="text-xs text-text-muted">
+              Diagnostics include app and OS versions, data-file names and
+              sizes, and the recent log. API keys and chat contents are never
+              included.
+            </p>
+            {diagnosticsStatus && (
+              <p className="text-xs text-text-muted">{diagnosticsStatus}</p>
+            )}
+            {folderStatus && (
+              <p className="text-xs text-destructive">{folderStatus}</p>
+            )}
+          </div>
+
+          {/* Danger zone */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium text-destructive">
+              Danger zone
+            </h3>
+            <Button
+              variant="destructive"
+              onClick={() => void handleResetData()}
+              className="justify-center w-full"
+            >
+              <Trash2 className="size-4 mr-1.5" />
+              Reset all data
+            </Button>
+            <p className="text-xs text-text-muted">
+              Deletes applications, chats, drafts, profile and settings on the
+              next start. Your API key stays in the OS keychain.
+            </p>
+            {resetStatus && (
+              <p className="text-xs text-destructive">{resetStatus}</p>
+            )}
           </div>
         </div>
       </DialogContent>

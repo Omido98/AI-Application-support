@@ -16,11 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  listModels,
-  fetchZenPricing,
-  type ZenPricingEntry,
-} from "@/utils/api";
+import { listModels, fetchZenPricing, type ZenPricingEntry } from "@/utils/api";
 import {
   computeRemovedModelIds,
   formatModelPrice,
@@ -28,7 +24,9 @@ import {
   ZEN_MODEL_NAMES,
   type ModelPrice,
 } from "@/utils/zenPricing";
+import { DEFAULT_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW } from "@/utils/tokens";
 import { saveJson, loadJson } from "@/utils/storage";
+import { openExternalUrl } from "@/utils/links";
 import {
   RefreshCw,
   RotateCcw,
@@ -87,14 +85,18 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
     config.baseUrl || getProvider(config.provider ?? "zen").defaultBaseUrl,
   );
   const [urlCustomized, setUrlCustomized] = useState(false);
-  const [detectedProvider, setDetectedProvider] =
-    useState<ProviderId | null>(null);
+  const [detectedProvider, setDetectedProvider] = useState<ProviderId | null>(
+    null,
+  );
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [model] = useState(config.model || "");
   const [customModel, setCustomModel] = useState("");
   const [selection, setSelection] = useState<string>(model);
   const [reasoningEffort, setReasoningEffort] = useState(
     config.reasoningEffort ?? "",
+  );
+  const [contextWindowInput, setContextWindowInput] = useState(
+    String(config.contextWindow ?? DEFAULT_CONTEXT_WINDOW),
   );
 
   const [models, setModels] = useState<string[] | null>(null);
@@ -145,7 +147,9 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
   // no cache) so nothing is flagged without evidence.
   const removedIds = useMemo(
     () =>
-      provider === "zen" ? computeRemovedModelIds(models ?? [], pricing) : new Set<string>(),
+      provider === "zen"
+        ? computeRemovedModelIds(models ?? [], pricing)
+        : new Set<string>(),
     [models, pricing, provider],
   );
 
@@ -198,7 +202,9 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
       const cached = await loadJson<ZenPricingEntry[]>("zen-prices.json");
       if (cached && cached.length > 0) {
         setPricing(cached);
-        setPricingStatus(`Using ${cached.length} prices from a previous import`);
+        setPricingStatus(
+          `Using ${cached.length} prices from a previous import`,
+        );
       }
     })();
     return () => {
@@ -228,7 +234,15 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
       list.sort((a, b) => rank(a) - rank(b));
     }
     return list;
-  }, [models, model, selection, provider, config.provider, fetchedFree, removedIds]);
+  }, [
+    models,
+    model,
+    selection,
+    provider,
+    config.provider,
+    fetchedFree,
+    removedIds,
+  ]);
 
   const resolvedModel =
     selection === CUSTOM_MODEL ? customModel.trim() : selection;
@@ -308,13 +322,21 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
   };
 
   const handleSave = async () => {
+    const parsedContextWindow = Number.parseInt(contextWindowInput, 10);
+    const contextWindow =
+      Number.isFinite(parsedContextWindow) &&
+      parsedContextWindow >= MIN_CONTEXT_WINDOW
+        ? parsedContextWindow
+        : DEFAULT_CONTEXT_WINDOW;
     await setConfig({
       provider,
       baseUrl: baseUrl.trim() || getProvider(provider).defaultBaseUrl,
       apiKey: apiKey.trim(),
       model: resolvedModel,
       reasoningEffort: reasoningEffort.trim() !== "" ? reasoningEffort : null,
+      contextWindow,
     });
+    setContextWindowInput(String(contextWindow));
     onDone?.();
   };
 
@@ -323,12 +345,17 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
       <div className="space-y-4">
         {/* Provider */}
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-xs">Provider</Label>
+          <Label htmlFor="api-provider" className="text-text-secondary text-xs">
+            Provider
+          </Label>
           <Select
             value={provider}
             onValueChange={(v) => applyProvider((v ?? "zen") as ProviderId)}
           >
-            <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+            <SelectTrigger
+              id="api-provider"
+              className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+            >
               <SelectValue>
                 {(v) => getProvider((v as ProviderId) || provider).label}
               </SelectValue>
@@ -345,9 +372,12 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
 
         {/* API Base URL */}
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-xs">API Base URL</Label>
+          <Label htmlFor="api-base-url" className="text-text-secondary text-xs">
+            API Base URL
+          </Label>
           <div className="flex gap-2">
             <Input
+              id="api-base-url"
               value={baseUrl}
               onChange={(e) => {
                 setBaseUrl(e.target.value);
@@ -384,8 +414,11 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
 
         {/* API Key */}
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-xs">API Key</Label>
+          <Label htmlFor="api-key" className="text-text-secondary text-xs">
+            API Key
+          </Label>
           <Input
+            id="api-key"
             type="password"
             value={apiKey}
             onChange={(e) => handleApiKeyChange(e.target.value)}
@@ -438,7 +471,9 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
         {/* Model */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <Label className="text-text-secondary text-xs">Model</Label>
+            <Label htmlFor="api-model" className="text-text-secondary text-xs">
+              Model
+            </Label>
             <button
               onClick={() => loadModels(baseUrl)}
               disabled={modelsLoading}
@@ -459,7 +494,10 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
             onValueChange={(v) => handleModelSelect(v ?? "")}
             disabled={modelsLoading}
           >
-            <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+            <SelectTrigger
+              id="api-model"
+              className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+            >
               <SelectValue>
                 {(v) => (v ? displayName(v) : "Select a model…")}
               </SelectValue>
@@ -481,9 +519,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
                     <span className="flex items-center justify-between gap-3 flex-1">
                       <span
                         className={
-                          removed
-                            ? "truncate text-text-muted"
-                            : "truncate"
+                          removed ? "truncate text-text-muted" : "truncate"
                         }
                       >
                         {displayName(id)}
@@ -525,6 +561,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
               value={customModel}
               onChange={(e) => setCustomModel(e.target.value)}
               placeholder="e.g. deepseek-v4-flash-free"
+              aria-label="Custom model ID"
               className={inputClass}
             />
           )}
@@ -541,23 +578,28 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
             </p>
           )}
           {!modelsLoading && !modelsError && models && (
-              <p className="text-xs text-text-muted">
-                {models.length} models available at this endpoint.
-                {provider === "zen" && removedIds.size > 0 && (
-                  <> {removedIds.size} of them are no longer offered by Zen and likely won't work.</>
-                )}
-                {provider === "zen" && (
+            <p className="text-xs text-text-muted">
+              {models.length} models available at this endpoint.
+              {provider === "zen" && removedIds.size > 0 && (
+                <>
+                  {" "}
+                  {removedIds.size} of them are no longer offered by Zen and
+                  likely won't work.
+                </>
+              )}
+              {provider === "zen" && (
                 <>
                   {" "}
                   Prices per 1M tokens are imported automatically from{" "}
-                  <a
-                    href="https://opencode.ai/docs/zen"
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openExternalUrl("https://opencode.ai/docs/zen")
+                    }
                     className="text-primary hover:text-primary/80"
                   >
                     opencode.ai/docs/zen
-                  </a>{" "}
+                  </button>{" "}
                   every time you reload models — may change.
                 </>
               )}
@@ -577,17 +619,48 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
           )}
         </div>
 
+        {/* Context window */}
+        <div className="space-y-1.5">
+          <Label
+            htmlFor="context-window"
+            className="text-text-secondary text-xs"
+          >
+            Context window (tokens)
+          </Label>
+          <Input
+            id="context-window"
+            type="number"
+            min={MIN_CONTEXT_WINDOW}
+            step={1000}
+            value={contextWindowInput}
+            onChange={(e) => setContextWindowInput(e.target.value)}
+            className={inputClass}
+          />
+          <p className="text-xs text-text-muted">
+            Older chat messages are omitted from a request once it would exceed
+            this budget. Set it to your model's total context window (prompt
+            plus reply). Default: {DEFAULT_CONTEXT_WINDOW.toLocaleString()}{" "}
+            tokens; minimum {MIN_CONTEXT_WINDOW.toLocaleString()}.
+          </p>
+        </div>
+
         {/* Reasoning Effort */}
         {provider !== "anthropic" ? (
           <div className="space-y-1.5">
-            <Label className="text-text-secondary text-xs">
+            <Label
+              htmlFor="api-reasoning-effort"
+              className="text-text-secondary text-xs"
+            >
               Reasoning Effort
             </Label>
             <Select
               value={reasoningEffort}
               onValueChange={(v) => setReasoningEffort(v ?? "")}
             >
-              <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+              <SelectTrigger
+                id="api-reasoning-effort"
+                className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+              >
                 <SelectValue>
                   {(v) =>
                     v
@@ -659,8 +732,8 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
               )}
               {pendingSelection && removedIds.has(pendingSelection) && (
                 <span className="mt-1 block text-destructive">
-                  Note: this model is no longer offered by Zen and likely
-                  won't work.
+                  Note: this model is no longer offered by Zen and likely won't
+                  work.
                 </span>
               )}
             </DialogDescription>

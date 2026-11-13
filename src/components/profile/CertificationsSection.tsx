@@ -11,8 +11,18 @@ import ConfirmDeleteDialog, {
 } from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 function createEmptyCertification(): Certification {
@@ -54,7 +64,9 @@ export default function CertificationsSection() {
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <CardTitle className="text-text-primary text-lg">Certifications</CardTitle>
+        <CardTitle className="text-text-primary text-lg">
+          Certifications
+        </CardTitle>
         <Button
           variant="outline"
           size="sm"
@@ -72,14 +84,20 @@ export default function CertificationsSection() {
           </p>
         )}
 
-        {certifications.map((cert) => (
+        {certifications.map((cert, index) => (
           <div
             key={cert.id}
             className="flex items-center gap-3 bg-field border border-border rounded-lg p-3 transition-[border-color] hover:border-primary/20"
           >
             <div className="grid gap-1.5 flex-1 min-w-0">
-              <Label className="text-text-secondary text-xs">Certification</Label>
+              <Label
+                htmlFor={`certification-${index}-name`}
+                className="text-text-secondary text-xs"
+              >
+                Certification
+              </Label>
               <Input
+                id={`certification-${index}-name`}
                 className={inputClass}
                 value={cert.name}
                 onChange={(e) =>
@@ -89,8 +107,14 @@ export default function CertificationsSection() {
               />
             </div>
             <div className="grid gap-1.5">
-              <Label className="text-text-secondary text-xs">Expiry Month</Label>
+              <Label
+                htmlFor={`certification-${index}-expiry-month`}
+                className="text-text-secondary text-xs"
+              >
+                Expiry Month
+              </Label>
               <select
+                id={`certification-${index}-expiry-month`}
                 className={selectClass}
                 value={cert.expiryMonth}
                 onChange={(e) =>
@@ -98,13 +122,21 @@ export default function CertificationsSection() {
                 }
               >
                 {MONTHS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
                 ))}
               </select>
             </div>
             <div className="grid gap-1.5 w-24">
-              <Label className="text-text-secondary text-xs">Expiry Year</Label>
+              <Label
+                htmlFor={`certification-${index}-expiry-year`}
+                className="text-text-secondary text-xs"
+              >
+                Expiry Year
+              </Label>
               <Input
+                id={`certification-${index}-expiry-year`}
                 className={inputClass}
                 value={cert.expiryYear}
                 onChange={(e) =>

@@ -4,18 +4,59 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  verify:
+  frontend:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
-      # Tauri 2's Linux build (gtk/webkit2gtk) needs system development
-      # libraries; the runner image does not ship them. Without this the
-      # cargo steps fail before any test runs. `libdbus-1-dev` is the Secret
-      # Service client the keyring crate links on Linux — dropping the
-      # `sync-secret-service` feature must fail here, not at release time.
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Version consistency
+        run: npm run version:check
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Prompt eval harness
+        run: npm run eval
+
+      - name: Production build
+        run: npm run build
+
+  rust:
+    name: Rust (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri's Linux build links against gtk/webkit2gtk; the runner image does
+      # not ship them. libdbus is the Secret Service client used by keyring.
       - name: Tauri Linux prerequisites
+        if: matrix.platform == 'ubuntu-24.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -28,36 +69,53 @@ jobs:
             libdbus-1-dev \
             patchelf
 
-      - name: Node 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - name: Install frontend dependencies
-        run: npm ci
+      - name: Format check
+        working-directory: src-tauri
+        run: cargo fmt --check
 
-      - name: Typecheck
-        run: npx tsc --noEmit
-
-      - name: Frontend tests
-        run: npm test
-
-      - name: Frontend build
-        run: npm run build
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --lib -- -D warnings
 
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --lib
 
-      - name: Rust check
-        working-directory: src-tauri
-        run: cargo check
+  e2e:
+    name: Playwright (browser mode)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

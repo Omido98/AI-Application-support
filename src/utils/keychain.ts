@@ -17,9 +17,11 @@ export const API_KEY_ACCOUNT = KEYCHAIN_ACCOUNT;
 
 export async function loadApiKeyFromKeychain(): Promise<string | null> {
   try {
-    return (await invoke<string | null>("keyring_get", {
-      key: KEYCHAIN_ACCOUNT,
-    })) ?? null;
+    return (
+      (await invoke<string | null>("keyring_get", {
+        key: KEYCHAIN_ACCOUNT,
+      })) ?? null
+    );
   } catch (err) {
     console.warn(
       "Keychain read failed; falling back to a session-only key:",
