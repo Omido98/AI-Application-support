@@ -202,10 +202,11 @@ function scheduleDraftsSave() {
   if (draftsSaveTimer) clearTimeout(draftsSaveTimer);
   draftsSaveTimer = setTimeout(async () => {
     draftsSaveTimer = null;
-    await saveJson(
-      DRAFTS_FILE,
-      persistableDrafts(useChatStore.getState().drafts),
-    );
+    const state = useChatStore.getState();
+    // Never overwrite the stored drafts with an empty object before the
+    // startup load has completed.
+    if (!state.draftsLoaded && Object.keys(state.drafts).length === 0) return;
+    await saveJson(DRAFTS_FILE, persistableDrafts(state.drafts));
   }, 500);
 }
 
