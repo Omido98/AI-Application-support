@@ -12,6 +12,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
 use tauri::{Manager, State};
+use tauri_plugin_dialog::DialogExt;
 use tokio_util::sync::CancellationToken;
 
 /// Service name under which API keys are stored in the OS keychain.
@@ -1508,6 +1509,162 @@ async fn delete_data_file(app: tauri::AppHandle, name: String) -> Result<(), Str
     .map_err(|err| format!("Data delete task failed: {err}"))?
 }
 
+// ──────────────────────────────────────────────
+// Backup file dialogs
+// ──────────────────────────────────────────────
+
+/// Upper bound for a backup file. Chat threads plus profile data stay far
+/// below this; a larger file is not something this app produced.
+const MAX_BACKUP_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
+fn sanitize_backup_name(name: &str) -> String {
+    let base = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let base = if base.is_empty() {
+        "ai-application-support-backup.json".to_string()
+    } else {
+        base
+    };
+    if base.to_ascii_lowercase().ends_with(".json") {
+        base
+    } else {
+        format!("{base}.json")
+    }
+}
+
+fn ensure_json_extension(path: &Path) -> Result<(), String> {
+    let is_json = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
+    if !is_json {
+        return Err("Backup files must use the .json extension.".to_string());
+    }
+    Ok(())
+}
+
+/// Write a user-selected backup to disk. This is intentionally separate from
+/// the atomic data-file writer: a backup is a one-off export, not the app's
+/// live state, so it must not create a `.bak` next to the user's chosen file.
+fn write_text_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Invalid backup path: {}", path.display()))?;
+    if !parent.is_dir() {
+        return Err(format!("The folder {} does not exist.", parent.display()));
+    }
+    if path.is_dir() {
+        return Err(format!("{} is a folder, not a file.", path.display()));
+    }
+    let temp = temp_path(path);
+    let result = (|| -> Result<(), String> {
+        {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .map_err(|err| format!("Could not create {}: {err}", temp.display()))?;
+            file.write_all(contents.as_bytes())
+                .map_err(|err| format!("Could not write {}: {err}", temp.display()))?;
+            file.sync_all()
+                .map_err(|err| format!("Could not flush {}: {err}", temp.display()))?;
+        }
+        if path.exists() {
+            fs::remove_file(path)
+                .map_err(|err| format!("Could not replace {}: {err}", path.display()))?;
+        }
+        fs::rename(&temp, path)
+            .map_err(|err| format!("Could not replace {}: {err}", path.display()))?;
+        sync_directory(parent);
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+/// Ask the user where to save a backup and write it there. Returning the path
+/// lets the UI show exactly where the file went; the webview never supplies or
+/// reads a path itself.
+#[tauri::command]
+async fn export_backup_file(
+    app: tauri::AppHandle,
+    default_name: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    if contents.len() as u64 > MAX_BACKUP_FILE_BYTES {
+        return Err("The backup is larger than the 64 MB limit.".to_string());
+    }
+    let file_name = sanitize_backup_name(&default_name);
+    let app_for_dialog = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app_for_dialog
+            .dialog()
+            .file()
+            .add_filter("JSON", &["json"])
+            .set_file_name(file_name)
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|err| format!("Backup dialog failed: {err}"))?;
+
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|err| format!("Invalid backup path: {err}"))?;
+    ensure_json_extension(&path)?;
+    let display_path = path.display().to_string();
+    let written = tauri::async_runtime::spawn_blocking(move || {
+        write_text_file_atomic(&path, &contents)?;
+        Ok::<String, String>(display_path)
+    })
+    .await
+    .map_err(|err| format!("Backup write task failed: {err}"))?;
+
+    written.map(Some)
+}
+
+/// Open a user-selected backup and return its text. The dialog and the read
+/// both happen in Rust; the webview has no filesystem read permission.
+#[tauri::command]
+async fn import_backup_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let app_for_dialog = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app_for_dialog
+            .dialog()
+            .file()
+            .add_filter("JSON", &["json"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|err| format!("Backup dialog failed: {err}"))?;
+
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|err| format!("Invalid backup path: {err}"))?;
+    ensure_json_extension(&path)?;
+
+    let metadata = fs::metadata(&path)
+        .map_err(|err| format!("Could not inspect {}: {err}", path.display()))?;
+    if metadata.len() > MAX_BACKUP_FILE_BYTES {
+        return Err("The selected backup is larger than the 64 MB limit.".to_string());
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|err| format!("Could not read {}: {err}", path.display()))
+}
+
 /// The only origins the main webview may navigate to. External links are
 /// intercepted by the frontend and opened in the system browser; anything
 /// else that tries to navigate the app away is blocked here as a backstop.
@@ -1575,7 +1732,6 @@ pub fn run() {
         .manage(http_clients)
         .manage(StreamState::default())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1591,6 +1747,8 @@ pub fn run() {
             load_data_file,
             save_data_file,
             delete_data_file,
+            export_backup_file,
+            import_backup_file,
             keyring_get,
             keyring_set,
             keyring_delete
@@ -1887,5 +2045,41 @@ mod tests {
         assert!(!allow("https://example.com/"));
         assert!(!allow("http://localhost:9999/"));
         assert!(!allow("file:///C:/Windows/System32/"));
+    }
+
+    #[test]
+    fn backup_names_are_sanitized() {
+        assert_eq!(sanitize_backup_name("backup.json"), "backup.json");
+        assert_eq!(sanitize_backup_name("backup"), "backup.json");
+        assert_eq!(sanitize_backup_name("../../evil.json"), "evil.json");
+        assert_eq!(sanitize_backup_name("C:\\temp\\my-backup.JSON"), "my-backup.JSON");
+        assert_eq!(
+            sanitize_backup_name("   "),
+            "ai-application-support-backup.json"
+        );
+    }
+
+    #[test]
+    fn backup_files_must_be_json() {
+        assert!(ensure_json_extension(Path::new("backup.json")).is_ok());
+        assert!(ensure_json_extension(Path::new("backup.JSON")).is_ok());
+        assert!(ensure_json_extension(Path::new("backup.txt")).is_err());
+        assert!(ensure_json_extension(Path::new("backup")).is_err());
+    }
+
+    #[test]
+    fn backup_writer_round_trips_and_overwrites() {
+        let dir = test_data_dir("backup-writer");
+        let path = dir.join("export.json");
+
+        write_text_file_atomic(&path, r#"{"version":1}"#).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), r#"{"version":1}"#);
+
+        write_text_file_atomic(&path, r#"{"version":2}"#).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), r#"{"version":2}"#);
+        // A one-off export does not create a .bak beside the user's file.
+        assert!(!backup_path(&path).exists());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

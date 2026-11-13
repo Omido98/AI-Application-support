@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Check, Moon, Plus, Sun, Download, Upload } from "lucide-react";
-import { save, open as openDialog, ask } from "@tauri-apps/plugin-dialog";
-import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -14,6 +13,7 @@ import {
   restoreBackupBundle,
 } from "@/utils/backup";
 import { saveJson } from "@/utils/storage";
+import { exportBackupFile, importBackupFile } from "@/utils/backupFiles";
 import { flushAllSaves } from "@/utils/flushSaves";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
@@ -95,16 +95,17 @@ export default function SettingsDialog({
         return;
       }
       const bundle = await buildBackupBundle();
-      const filePath = await save({
-        defaultPath: `ai-application-support-backup-${new Date()
-          .toISOString()
-          .slice(0, 10)}.json`,
-        filters: [{ name: "JSON", extensions: ["json"] }],
-      });
+      const defaultName = `ai-application-support-backup-${new Date()
+        .toISOString()
+        .slice(0, 10)}.json`;
+      const filePath = await exportBackupFile(
+        defaultName,
+        JSON.stringify(bundle, null, 2),
+      );
       if (!filePath) return;
-      await writeTextFile(filePath, JSON.stringify(bundle, null, 2));
+      const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
       setBackupStatus(
-        `Backup exported (${Object.keys(bundle.files).length} files). Your API key is not included.`,
+        `Backup exported to ${fileName} (${Object.keys(bundle.files).length} files). Your API key is not included.`,
       );
     } catch (err) {
       setBackupStatus(
@@ -126,12 +127,8 @@ export default function SettingsDialog({
         );
         return;
       }
-      const filePath = await openDialog({
-        multiple: false,
-        filters: [{ name: "JSON", extensions: ["json"] }],
-      });
-      if (!filePath) return;
-      const raw = await readTextFile(String(filePath));
+      const raw = await importBackupFile();
+      if (raw == null) return;
       const bundle = parseBackupBundle(raw);
       if (!bundle) {
         setBackupStatus("That file is not a valid AI Application Support backup.");
