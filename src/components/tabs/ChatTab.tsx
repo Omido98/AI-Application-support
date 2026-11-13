@@ -109,6 +109,57 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   // Aborts the in-flight generation (used by the Stop button / Escape).
   const controllerRef = useRef<AbortController | null>(null);
 
+  // Streamed deltas are buffered and flushed at most once per animation frame.
+  // Rendering every SSE chunk is what made long threads feel sluggish.
+  const streamBufferRef = useRef("");
+  const streamRafRef = useRef<number | null>(null);
+
+  const cancelStreamBuffer = useCallback(() => {
+    if (streamRafRef.current !== null) {
+      cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = null;
+    }
+    streamBufferRef.current = "";
+  }, []);
+
+  const flushStreamBuffer = useCallback(() => {
+    if (streamRafRef.current !== null) {
+      cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = null;
+    }
+    const buffered = streamBufferRef.current;
+    streamBufferRef.current = "";
+    if (buffered) {
+      setStreamingText((previous) => previous + buffered);
+    }
+  }, [setStreamingText]);
+
+  const queueStreamDelta = useCallback(
+    (chunk: string) => {
+      streamBufferRef.current += chunk;
+      if (streamRafRef.current !== null) return;
+      streamRafRef.current = requestAnimationFrame(() => {
+        streamRafRef.current = null;
+        const buffered = streamBufferRef.current;
+        streamBufferRef.current = "";
+        if (buffered) {
+          setStreamingText((previous) => previous + buffered);
+        }
+      });
+    },
+    [setStreamingText],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (streamRafRef.current !== null) {
+        cancelAnimationFrame(streamRafRef.current);
+        streamRafRef.current = null;
+      }
+      streamBufferRef.current = "";
+    };
+  }, []);
+
   // ── Load on mount ──
   useEffect(() => {
     if (!configLoaded) loadConfig();
@@ -119,8 +170,9 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     // Abort any generation still in flight for the previous thread.
     controllerRef.current?.abort();
     controllerRef.current = null;
+    cancelStreamBuffer();
     void switchThread(selectedId);
-  }, [selectedId, switchThread]);
+  }, [selectedId, switchThread, cancelStreamBuffer]);
 
   // ── Stop generation (Stop button / Escape key) ──
   const handleStop = useCallback(() => {
@@ -244,6 +296,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       // switch can still abort this request.
       const controller = new AbortController();
       controllerRef.current = controller;
+      cancelStreamBuffer();
       setStreamingText("");
       setIsSending(true);
       setError(null);
@@ -324,21 +377,26 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         systemPrompt,
         {
           signal: controller.signal,
-        onDelta: (chunk) => {
-          // Only render text while still in the thread it was sent from.
-          if (useChatStore.getState().activeThreadId === threadAtSend) {
-            setStreamingText((prev) => prev + chunk);
-          }
+          onDelta: (chunk) => {
+            // Only buffer text while still in the thread it was sent from.
+            if (useChatStore.getState().activeThreadId === threadAtSend) {
+              queueStreamDelta(chunk);
+            }
+          },
         },
-      });
+      );
 
       // Drop the reply if the user switched applications while it was in flight
       if (useChatStore.getState().activeThreadId !== threadAtSend) {
+        cancelStreamBuffer();
         setIsSending(false);
         setStreamingText("");
         controllerRef.current = null;
         return;
       }
+      // Make sure the final buffered chunk reaches the store before the
+      // stopped-partial path reads it.
+      flushStreamBuffer();
 
       if (result.error) {
         // The user's message did not land: flag it so it can be re-sent in
@@ -395,6 +453,9 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       setError,
       setStreamingText,
       setDraft,
+      queueStreamDelta,
+      flushStreamBuffer,
+      cancelStreamBuffer,
     ],
   );
 

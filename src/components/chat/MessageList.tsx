@@ -6,6 +6,7 @@ import { deepImproveDraft, deslopText, improveDraft, reviewDraft } from "@/utils
 import type { ImproveStep } from "@/utils/api";
 import { cn } from "@/lib/utils";
 import Markdown from "@/components/chat/Markdown";
+import StreamingBubble from "@/components/chat/StreamingBubble";
 import { Button } from "@/components/ui/button";
 import {
   Copy,
@@ -22,16 +23,6 @@ import {
 } from "lucide-react";
 import type { ProfileData } from "@/types";
 
-function LoadingDots() {
-  return (
-    <div className="flex items-center gap-1.5 px-4 py-3">
-      <span className="size-2 rounded-full bg-text-muted animate-bounce [animation-delay:0ms]" />
-      <span className="size-2 rounded-full bg-text-muted animate-bounce [animation-delay:150ms]" />
-      <span className="size-2 rounded-full bg-text-muted animate-bounce [animation-delay:300ms]" />
-    </div>
-  );
-}
-
 export default function MessageList({
   onStart,
   onResend,
@@ -45,7 +36,6 @@ export default function MessageList({
 }) {
   const messages = useChatStore((s) => s.messages);
   const isSending = useChatStore((s) => s.isSending);
-  const streamingText = useChatStore((s) => s.streamingText);
   const error = useChatStore((s) => s.error);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -53,6 +43,8 @@ export default function MessageList({
     null,
   );
   const [stickyToBottom, setStickyToBottom] = useState(true);
+  const stickyRef = useRef(true);
+  const scrollRafRef = useRef<number | null>(null);
 
   const applications = useApplicationStore((s) => s.applications);
   const selectedId = useApplicationStore((s) => s.selectedApplicationId);
@@ -120,7 +112,31 @@ export default function MessageList({
         behavior: isSending ? "auto" : "smooth",
       });
     }
-  }, [messages, isSending, streamingText, stickyToBottom]);
+  }, [messages, isSending, stickyToBottom]);
+
+  useEffect(() => {
+    stickyRef.current = stickyToBottom;
+  }, [stickyToBottom]);
+
+  // Follow the streamed text without re-rendering the whole list: subscribe
+  // to the store directly and coalesce scroll work into one animation frame.
+  useEffect(() => {
+    const unsubscribe = useChatStore.subscribe((state, previous) => {
+      if (state.streamingText === previous.streamingText) return;
+      if (!stickyRef.current || scrollRafRef.current !== null) return;
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        bottomRef.current?.scrollIntoView({ behavior: "auto" });
+      });
+    });
+    return () => {
+      unsubscribe();
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, []);
 
   const handleScroll = () => {
     const el = containerRef.current;
@@ -530,23 +546,7 @@ export default function MessageList({
         );
       })}
 
-      {isSending && streamingText ? (
-        <div className="flex justify-start">
-          <div className="max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3 break-words">
-            <Markdown>{streamingText}</Markdown>
-            <span
-              className="inline-block w-2 h-4 align-middle bg-primary/70 animate-pulse ml-0.5"
-              aria-hidden="true"
-            />
-          </div>
-        </div>
-      ) : isSending ? (
-        <div className="flex justify-start">
-          <div className="max-w-[80%] rounded-lg bg-surface text-text-primary border border-border">
-            <LoadingDots />
-          </div>
-        </div>
-      ) : null}
+      <StreamingBubble />
 
       {(improvePendingId || deepImprovePendingId) && improveStep ? (
         <div className="flex justify-start">
