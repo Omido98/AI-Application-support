@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { ApplicationStatus } from "@/types";
 
-export type TabId = "application" | "chat" | "profile";
+export type TabId = "overview" | "application" | "chat" | "profile";
 export type ApplicationViewMode = "active" | "archived";
 export type ApplicationSortMode = "status" | "updated" | "company" | "deadline";
 

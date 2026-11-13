@@ -29,7 +29,7 @@ const STEPS = [
   {
     icon: UserRound,
     title: "Fill in your profile once",
-    body: "Education, experience, skills and previous cover letters live in Profile. Everything stays on this machine and API keys live in the OS keychain. Shortcuts: Ctrl/Cmd+1, 2, 3 switch sections, Ctrl/Cmd+, opens Settings.",
+    body: "Education, experience, skills and previous cover letters live in Profile. Everything stays on this machine and API keys live in the OS keychain. Shortcuts: Ctrl/Cmd+1–4 switch sections, Ctrl/Cmd+, opens Settings.",
   },
 ];
 

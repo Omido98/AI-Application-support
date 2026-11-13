@@ -11,6 +11,7 @@ import {
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
 import { flushAllSaves } from "@/utils/flushSaves";
+import OverviewTab from "@/components/tabs/OverviewTab";
 import ApplicationTab from "@/components/tabs/ApplicationTab";
 import ChatTab from "@/components/tabs/ChatTab";
 import ProfileTab from "@/components/tabs/ProfileTab";
@@ -19,9 +20,10 @@ import OnboardingDialog from "@/components/OnboardingDialog";
 import StorageAlert from "@/components/StorageAlert";
 import { Button } from "@/components/ui/button";
 
-type TabId = "application" | "chat" | "profile";
+type TabId = "overview" | "application" | "chat" | "profile";
 
 const tabs: { id: TabId; label: string }[] = [
+  { id: "overview", label: "Overview" },
   { id: "application", label: "Application" },
   { id: "chat", label: "Cover Letter Developer" },
   { id: "profile", label: "Profile" },
@@ -146,7 +148,7 @@ function App() {
     if (activeTab !== lastTab) setLastTab(activeTab);
   }, [restoredTab, activeTab, lastTab, setLastTab]);
 
-  // Keyboard shortcuts: Ctrl/Cmd+1..3 switch sections, Ctrl/Cmd+, opens Settings.
+  // Keyboard shortcuts: Ctrl/Cmd+1..4 switch sections, Ctrl/Cmd+, opens Settings.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
@@ -155,7 +157,7 @@ function App() {
         setShowSettings(true);
         return;
       }
-      const index = ["1", "2", "3"].indexOf(event.key);
+      const index = ["1", "2", "3", "4"].indexOf(event.key);
       if (index >= 0) {
         event.preventDefault();
         setActiveTab(tabs[index].id);
@@ -182,6 +184,8 @@ function App() {
 
   const renderTab = () => {
     switch (activeTab) {
+      case "overview":
+        return <OverviewTab />;
       case "application":
         return <ApplicationTab />;
       case "chat":

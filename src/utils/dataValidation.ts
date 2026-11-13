@@ -416,7 +416,7 @@ export function normalizeProfileData(value: unknown): ProfileData | null {
 export function normalizeSettingsData(value: unknown): {
   theme: "dark" | "light" | "system";
   accent: string;
-  lastTab: "application" | "chat" | "profile";
+  lastTab: "overview" | "application" | "chat" | "profile";
   onboardingDone: boolean;
   profileSectionOrder: ProfileSectionId[];
 } | null {
@@ -428,7 +428,9 @@ export function normalizeSettingsData(value: unknown): {
       ? value.accent
       : "";
   const lastTab =
-    value.lastTab === "chat" || value.lastTab === "profile"
+    value.lastTab === "overview" ||
+    value.lastTab === "chat" ||
+    value.lastTab === "profile"
       ? value.lastTab
       : "application";
   return {

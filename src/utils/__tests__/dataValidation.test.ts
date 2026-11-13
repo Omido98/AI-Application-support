@@ -188,6 +188,15 @@ describe("normalizeSettingsData", () => {
     expect(normalizeSettingsData("nope")).toBeNull();
   });
 
+  it("keeps every valid last tab, including overview", () => {
+    for (const tab of ["application", "chat", "profile", "overview"] as const) {
+      expect(normalizeSettingsData({ lastTab: tab })?.lastTab).toBe(tab);
+    }
+    expect(normalizeSettingsData({ lastTab: "bogus" })?.lastTab).toBe(
+      "application",
+    );
+  });
+
   it("keeps a custom profile order and appends missing sections", () => {
     const normalized = normalizeSettingsData({
       profileSectionOrder: ["languages", "skills", "bogus", "languages"],
