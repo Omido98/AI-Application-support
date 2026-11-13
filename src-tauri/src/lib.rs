@@ -1833,10 +1833,7 @@ async fn export_backup_file(
 const MAX_CSV_FILE_BYTES: usize = 8 * 1024 * 1024;
 
 fn sanitize_csv_name(name: &str) -> String {
-    let file = Path::new(name)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("");
+    let file = name.rsplit(['/', '\\']).next().unwrap_or("").trim();
     let stem = file
         .trim_end_matches(".csv")
         .trim_end_matches(".CSV")
@@ -1907,11 +1904,7 @@ const MAX_EXPORT_FILE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_IMPORT_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
 
 fn sanitize_document_name(name: &str, extension: &str) -> String {
-    let file = Path::new(name)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("")
-        .trim();
+    let file = name.rsplit(['/', '\\']).next().unwrap_or("").trim();
     let stem = match file.rsplit_once('.') {
         Some((stem, _)) if !stem.trim().is_empty() => stem.trim(),
         _ => file,
@@ -2685,6 +2678,10 @@ mod tests {
         assert_eq!(
             sanitize_document_name("../../evil.docx", "docx"),
             "evil.docx"
+        );
+        assert_eq!(
+            sanitize_document_name("C:\\temp\\Cover.pdf", "pdf"),
+            "Cover.pdf"
         );
         assert_eq!(sanitize_document_name("   ", "pdf"), "cover-letter.pdf");
         assert!(ensure_export_extension(Path::new("a.pdf"), "pdf").is_ok());
