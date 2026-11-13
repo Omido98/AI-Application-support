@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import type { Education } from "@/types";
+import { YEARS } from "@/utils/yearOptions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,8 +16,6 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
-
-const YEARS = Array.from({ length: 31 }, (_, i) => String(2000 + i));
 
 function createEmptyEducation(): Education {
   return {
@@ -122,7 +121,7 @@ export default function EducationSection() {
           </p>
         )}
 
-        {education.map((edu) => {
+        {education.map((edu, index) => {
           const isExpanded = expanded[edu.id] ?? false;
           const title = [edu.degree, edu.school].filter(Boolean).join(" — ");
           const dateRange = `${edu.startMonth} ${edu.startYear} – ${edu.endMonth} ${edu.endYear}`;
@@ -189,8 +188,14 @@ export default function EducationSection() {
                   <div className="space-y-4">
                     {/* School */}
                     <div className="grid gap-1.5">
-                      <Label className="text-text-secondary text-xs">School / University</Label>
+                      <Label
+                        htmlFor={`education-${index}-school`}
+                        className="text-text-secondary text-xs"
+                      >
+                        School / University
+                      </Label>
                       <Input
+                        id={`education-${index}-school`}
                         className={inputClass}
                         value={edu.school}
                         onChange={(e) => updateEducation(edu.id, { school: e.target.value })}
@@ -201,8 +206,14 @@ export default function EducationSection() {
                     {/* Degree + Program Name side by side */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">Degree</Label>
+                        <Label
+                          htmlFor={`education-${index}-degree`}
+                          className="text-text-secondary text-xs"
+                        >
+                          Degree
+                        </Label>
                         <Input
+                          id={`education-${index}-degree`}
                           className={inputClass}
                           value={edu.degree}
                           onChange={(e) => updateEducation(edu.id, { degree: e.target.value })}
@@ -210,8 +221,14 @@ export default function EducationSection() {
                         />
                       </div>
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">Program Name</Label>
+                        <Label
+                          htmlFor={`education-${index}-program-name`}
+                          className="text-text-secondary text-xs"
+                        >
+                          Program Name
+                        </Label>
                         <Input
+                          id={`education-${index}-program-name`}
                           className={inputClass}
                           value={edu.programName}
                           onChange={(e) => updateEducation(edu.id, { programName: e.target.value })}
@@ -222,8 +239,14 @@ export default function EducationSection() {
 
                     {/* Major */}
                     <div className="grid gap-1.5">
-                      <Label className="text-text-secondary text-xs">Major</Label>
+                      <Label
+                        htmlFor={`education-${index}-major`}
+                        className="text-text-secondary text-xs"
+                      >
+                        Major
+                      </Label>
                       <Input
+                        id={`education-${index}-major`}
                         className={inputClass}
                         value={edu.major}
                         onChange={(e) => updateEducation(edu.id, { major: e.target.value })}
@@ -234,9 +257,15 @@ export default function EducationSection() {
                     {/* Start Date + End Date side by side */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">Start Date</Label>
+                        <Label
+                          htmlFor={`education-${index}-start-month`}
+                          className="text-text-secondary text-xs"
+                        >
+                          Start Date
+                        </Label>
                         <div className="flex gap-2">
                           <select
+                            id={`education-${index}-start-month`}
                             className={selectClass}
                             value={edu.startMonth}
                             onChange={(e) => updateEducation(edu.id, { startMonth: e.target.value })}
@@ -246,6 +275,8 @@ export default function EducationSection() {
                             ))}
                           </select>
                           <select
+                            id={`education-${index}-start-year`}
+                            aria-label="Start year"
                             className={selectClass}
                             value={edu.startYear}
                             onChange={(e) => updateEducation(edu.id, { startYear: e.target.value })}
@@ -257,9 +288,15 @@ export default function EducationSection() {
                         </div>
                       </div>
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">End Date</Label>
+                        <Label
+                          htmlFor={`education-${index}-end-month`}
+                          className="text-text-secondary text-xs"
+                        >
+                          End Date
+                        </Label>
                         <div className="flex gap-2">
                           <select
+                            id={`education-${index}-end-month`}
                             className={selectClass}
                             value={edu.endMonth}
                             onChange={(e) => updateEducation(edu.id, { endMonth: e.target.value })}
@@ -269,6 +306,8 @@ export default function EducationSection() {
                             ))}
                           </select>
                           <select
+                            id={`education-${index}-end-year`}
+                            aria-label="End year"
                             className={selectClass}
                             value={edu.endYear}
                             onChange={(e) => updateEducation(edu.id, { endYear: e.target.value })}
@@ -283,8 +322,14 @@ export default function EducationSection() {
 
                     {/* Final Grade */}
                     <div className="grid gap-1.5">
-                      <Label className="text-text-secondary text-xs">Final Grade</Label>
+                      <Label
+                        htmlFor={`education-${index}-final-grade`}
+                        className="text-text-secondary text-xs"
+                      >
+                        Final Grade
+                      </Label>
                       <Input
+                        id={`education-${index}-final-grade`}
                         className={inputClass}
                         value={edu.finalGrade}
                         onChange={(e) => updateEducation(edu.id, { finalGrade: e.target.value })}
@@ -337,8 +382,14 @@ export default function EducationSection() {
 
                     {/* Thesis Title */}
                     <div className="grid gap-1.5">
-                      <Label className="text-text-secondary text-xs">Thesis Title</Label>
+                      <Label
+                        htmlFor={`education-${index}-thesis-title`}
+                        className="text-text-secondary text-xs"
+                      >
+                        Thesis Title
+                      </Label>
                       <Input
+                        id={`education-${index}-thesis-title`}
                         className={inputClass}
                         value={edu.thesisTitle}
                         onChange={(e) => updateEducation(edu.id, { thesisTitle: e.target.value })}

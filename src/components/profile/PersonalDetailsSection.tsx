@@ -23,10 +23,14 @@ export default function PersonalDetailsSection() {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-sm font-medium">
+          <Label
+            htmlFor="personal-full-name"
+            className="text-text-secondary text-sm font-medium"
+          >
             Full name
           </Label>
           <Input
+            id="personal-full-name"
             className={inputClass}
             value={fullName}
             onChange={(e) => setPersonalDetails({ fullName: e.target.value })}
@@ -34,10 +38,14 @@ export default function PersonalDetailsSection() {
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-sm font-medium">
+          <Label
+            htmlFor="personal-email"
+            className="text-text-secondary text-sm font-medium"
+          >
             Email
           </Label>
           <Input
+            id="personal-email"
             className={inputClass}
             type="email"
             value={email}
@@ -47,10 +55,14 @@ export default function PersonalDetailsSection() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <Label className="text-text-secondary text-sm font-medium">
+            <Label
+              htmlFor="personal-city"
+              className="text-text-secondary text-sm font-medium"
+            >
               City
             </Label>
             <Input
+              id="personal-city"
               className={inputClass}
               value={city}
               onChange={(e) => setPersonalDetails({ city: e.target.value })}
@@ -58,10 +70,14 @@ export default function PersonalDetailsSection() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-text-secondary text-sm font-medium">
+            <Label
+              htmlFor="personal-country"
+              className="text-text-secondary text-sm font-medium"
+            >
               Country
             </Label>
             <Input
+              id="personal-country"
               className={inputClass}
               value={country}
               onChange={(e) => setPersonalDetails({ country: e.target.value })}
@@ -70,10 +86,14 @@ export default function PersonalDetailsSection() {
           </div>
         </div>
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-sm font-medium">
+          <Label
+            htmlFor="personal-linkedin-url"
+            className="text-text-secondary text-sm font-medium"
+          >
             LinkedIn profile URL
           </Label>
           <Input
+            id="personal-linkedin-url"
             className={inputClass}
             value={linkedinUrl}
             onChange={(e) =>
