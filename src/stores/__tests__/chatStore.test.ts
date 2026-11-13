@@ -385,6 +385,9 @@ describe("suggestions and reviews", () => {
     expect(
       isConversationMessage({ ...source, kind: "review" }),
     ).toBe(false);
+    expect(
+      isConversationMessage({ ...source, kind: "summary" }),
+    ).toBe(false);
   });
 
   it("accepts a suggestion by replacing the source and removing the card", async () => {

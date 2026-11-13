@@ -12,16 +12,16 @@ function LoadingDots() {
 }
 
 /**
- * The only component that subscribes to `streamingText`.
- *
- * Keeping live tokens here means a delta only re-renders this bubble and its
- * Markdown, not every message in the thread. MessageList subscribes to the
- * store separately for auto-scroll without re-rendering.
+ * Presentational view, separated so it can be rendered in tests without a
+ * DOM or the Zustand store.
  */
-export default function StreamingBubble() {
-  const isSending = useChatStore((s) => s.isSending);
-  const streamingText = useChatStore((s) => s.streamingText);
-
+export function StreamingBubbleView({
+  isSending,
+  streamingText,
+}: {
+  isSending: boolean;
+  streamingText: string;
+}) {
   if (!isSending) return null;
 
   if (!streamingText) {
@@ -44,5 +44,24 @@ export default function StreamingBubble() {
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * The only component that subscribes to `streamingText`.
+ *
+ * Keeping live tokens here means a delta only re-renders this bubble and its
+ * Markdown, not every message in the thread. MessageList subscribes to the
+ * store separately for auto-scroll without re-rendering.
+ */
+export default function StreamingBubble() {
+  const isSending = useChatStore((s) => s.isSending);
+  const streamingText = useChatStore((s) => s.streamingText);
+
+  return (
+    <StreamingBubbleView
+      isSending={isSending}
+      streamingText={streamingText}
+    />
   );
 }
