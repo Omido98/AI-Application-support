@@ -25,6 +25,8 @@ export interface CoverLetter {
   id: string;
   /** Optional name of the company/organization the letter was written for */
   company?: string;
+  /** Application this letter was saved from, when it came from chat. */
+  applicationId?: string;
   content: string;
   addedAt: string;
 }

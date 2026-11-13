@@ -32,6 +32,7 @@ import {
   RefreshCw,
   Link2,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import type { ProfileData, WebSource } from "@/types";
 
@@ -57,6 +58,38 @@ function formatMessageTime(timestamp: string): { label: string; full: string } {
       timeStyle: "short",
     }),
   };
+}
+
+/** One item in the assistant message's "Refine" menu. */
+function RefineItem({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  pending,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  pending?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-secondary transition-colors hover:bg-field hover:text-text-primary disabled:pointer-events-none disabled:opacity-50"
+    >
+      {pending ? (
+        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+      ) : (
+        <Icon className="size-3.5" aria-hidden="true" />
+      )}
+      {label}
+    </button>
+  );
 }
 
 export default function MessageList({
@@ -97,6 +130,7 @@ export default function MessageList({
   const [reviewPendingId, setReviewPendingId] = useState<string | null>(null);
   const [improvePendingId, setImprovePendingId] = useState<string | null>(null);
   const [deepImprovePendingId, setDeepImprovePendingId] = useState<string | null>(null);
+  const [openRefineKey, setOpenRefineKey] = useState<string | null>(null);
   const [improveStep, setImproveStep] = useState<ImproveStep | null>(null);
   const [improvePreview, setImprovePreview] = useState("");
   const [actionActivity, setActionActivity] = useState<ToolActivity | null>(null);
@@ -153,6 +187,15 @@ export default function MessageList({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [anyActionPending]);
+
+  useEffect(() => {
+    if (!openRefineKey) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenRefineKey(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [openRefineKey]);
 
   const handleAcceptSuggestion = async (msg: (typeof messages)[number]) => {
     const threadId = useChatStore.getState().activeThreadId;
@@ -256,6 +299,7 @@ export default function MessageList({
     addCoverLetter({
       id: crypto.randomUUID(),
       company: company || undefined,
+      applicationId: application?.id,
       content,
       addedAt: new Date().toISOString(),
     });
@@ -649,36 +693,36 @@ export default function MessageList({
             </div>
 
             {!isUser && (
-              <div className="flex flex-col gap-1 pl-2 justify-start">
+              <div className="relative flex flex-col gap-0.5 pl-1">
                 {lastConversationKey === key && (
                   <button
                     type="button"
                     onClick={() => onRegenerate?.(key)}
                     disabled={isSending || anyActionPending}
-                    className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
+                    className="rounded p-1 text-text-muted transition-colors hover:text-text-primary disabled:opacity-50"
                     title="Regenerate answer"
                     aria-label="Regenerate answer"
                   >
-                    <RefreshCw className="size-3.5" />
+                    <RefreshCw className="size-4" />
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => handleCopy(key, msg.content)}
-                  className="text-text-muted hover:text-text-primary transition-colors"
+                  className="rounded p-1 text-text-muted transition-colors hover:text-text-primary"
                   title={feedback === "copied" ? "Copied!" : "Copy"}
                   aria-label="Copy message"
                 >
                   {feedback === "copied" ? (
-                    <Check className="size-3.5 text-green-400" />
+                    <Check className="size-4 text-green-400" />
                   ) : (
-                    <Copy className="size-3.5" />
+                    <Copy className="size-4" />
                   )}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSaveAsCoverLetter(key, msg.content)}
-                  className="text-text-muted hover:text-text-primary transition-colors"
+                  className="rounded p-1 text-text-muted transition-colors hover:text-text-primary"
                   title={
                     feedback === "saved"
                       ? "Saved to Profile"
@@ -687,83 +731,85 @@ export default function MessageList({
                   aria-label="Save as cover letter"
                 >
                   {feedback === "saved" ? (
-                    <Check className="size-3.5 text-green-400" />
+                    <Check className="size-4 text-green-400" />
                   ) : (
-                    <BookmarkPlus className="size-3.5" />
+                    <BookmarkPlus className="size-4" />
                   )}
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDeslop(key, msg.content)}
-                  disabled={actionsBlocked}
-                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-                  title={
-                    deslopPendingId === key
-                      ? "Removing AI slop…"
-                      : "Remove AI slop"
+                  onClick={() =>
+                    setOpenRefineKey(openRefineKey === key ? null : key)
                   }
-                  aria-label="Remove AI slop"
+                  disabled={actionsBlocked}
+                  className={
+                    openRefineKey === key
+                      ? "rounded bg-field p-1 text-text-primary transition-colors disabled:opacity-50"
+                      : "rounded p-1 text-text-muted transition-colors hover:text-text-primary disabled:opacity-50"
+                  }
+                  title="Refine draft"
+                  aria-label="Refine draft"
+                  aria-haspopup="menu"
+                  aria-expanded={openRefineKey === key}
                 >
-                  {deslopPendingId === key ? (
-                    <Loader2 className="size-3.5 animate-spin" />
+                  {reviewPendingId === key ||
+                  improvePendingId === key ||
+                  deepImprovePendingId === key ||
+                  deslopPendingId === key ? (
+                    <Loader2 className="size-4 animate-spin" />
                   ) : (
-                    <Sparkles className="size-3.5" />
+                    <Sparkles className="size-4" />
                   )}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleReview(key, msg.content)}
-                  disabled={actionsBlocked}
-                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-                  title={
-                    reviewPendingId === key
-                      ? "Reviewing draft…"
-                      : "Review draft"
-                  }
-                  aria-label="Review draft"
-                >
-                  {reviewPendingId === key ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <ShieldCheck className="size-3.5" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runImprove(key, msg.content, "quick")}
-                  disabled={actionsBlocked}
-                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-                  title={
-                    improvePendingId === key
-                      ? (improveStep ? STEP_LABELS[improveStep] : "Improving draft…")
-                      : "Improve draft"
-                  }
-                  aria-label="Improve draft"
-                >
-                  {improvePendingId === key ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Wand2 className="size-3.5" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runImprove(key, msg.content, "deep")}
-                  disabled={actionsBlocked}
-                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-                  title={
-                    deepImprovePendingId === key
-                      ? (improveStep ? STEP_LABELS[improveStep] : "Deep improving draft…")
-                      : "Deep improve draft"
-                  }
-                  aria-label="Deep improve draft"
-                >
-                  {deepImprovePendingId === key ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Zap className="size-3.5" />
-                  )}
-                </button>
+
+                {openRefineKey === key && (
+                  <div
+                    role="menu"
+                    aria-label="Refine draft"
+                    className="absolute right-full top-0 z-20 mr-1 w-48 rounded-md border border-border bg-popover p-1 shadow-lg"
+                  >
+                    <RefineItem
+                      icon={ShieldCheck}
+                      label="Review draft"
+                      pending={reviewPendingId === key}
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        void handleReview(key, msg.content);
+                      }}
+                    />
+                    <RefineItem
+                      icon={Wand2}
+                      label="Improve draft"
+                      pending={improvePendingId === key}
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        void runImprove(key, msg.content, "quick");
+                      }}
+                    />
+                    <RefineItem
+                      icon={Zap}
+                      label="Deep improve"
+                      pending={deepImprovePendingId === key}
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        void runImprove(key, msg.content, "deep");
+                      }}
+                    />
+                    <RefineItem
+                      icon={Sparkles}
+                      label="Remove AI slop"
+                      pending={deslopPendingId === key}
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        void handleDeslop(key, msg.content);
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

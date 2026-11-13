@@ -153,7 +153,7 @@ describe("normalizeProfileData", () => {
 
 describe("normalizeSettingsData", () => {
   it("falls back to a valid theme and rejects an invalid accent", () => {
-    expect(normalizeSettingsData({ theme: "light", accent: "#34d399" })).toEqual({
+    expect(normalizeSettingsData({ theme: "light", accent: "#34d399" })).toMatchObject({
       theme: "light",
       accent: "#34d399",
       lastTab: "application",
@@ -161,7 +161,7 @@ describe("normalizeSettingsData", () => {
     });
     expect(
       normalizeSettingsData({ theme: "system", accent: "#34d399" }),
-    ).toEqual({
+    ).toMatchObject({
       theme: "system",
       accent: "#34d399",
       lastTab: "application",
@@ -173,19 +173,31 @@ describe("normalizeSettingsData", () => {
         accent: "#34d399",
         lastTab: "chat",
       }),
-    ).toEqual({
+    ).toMatchObject({
       theme: "dark",
       accent: "#34d399",
       lastTab: "chat",
       onboardingDone: false,
     });
-    expect(normalizeSettingsData({ theme: "neon", accent: "red" })).toEqual({
+    expect(normalizeSettingsData({ theme: "neon", accent: "red" })).toMatchObject({
       theme: "dark",
       accent: "",
       lastTab: "application",
       onboardingDone: false,
     });
     expect(normalizeSettingsData("nope")).toBeNull();
+  });
+
+  it("keeps a custom profile order and appends missing sections", () => {
+    const normalized = normalizeSettingsData({
+      profileSectionOrder: ["languages", "skills", "bogus", "languages"],
+    });
+    expect(normalized?.profileSectionOrder.slice(0, 2)).toEqual([
+      "languages",
+      "skills",
+    ]);
+    expect(normalized?.profileSectionOrder).toHaveLength(9);
+    expect(new Set(normalized?.profileSectionOrder).size).toBe(9);
   });
 });
 

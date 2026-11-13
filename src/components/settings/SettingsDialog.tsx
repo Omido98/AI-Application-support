@@ -8,6 +8,7 @@ import {
   Plus,
   Sun,
   Download,
+  Trash2,
   Upload,
 } from "lucide-react";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -89,6 +90,7 @@ export default function SettingsDialog({
     null,
   );
   const [folderStatus, setFolderStatus] = useState<string | null>(null);
+  const [resetStatus, setResetStatus] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   // Bumped after an import so the API form remounts from the restored config
   // instead of writing its pre-import local state back over it.
@@ -256,6 +258,25 @@ export default function SettingsDialog({
     } catch (err) {
       setFolderStatus(
         err instanceof Error ? err.message : String(err),
+      );
+    }
+  };
+
+  const handleResetData = async () => {
+    setResetStatus(null);
+    const confirmed = await ask(
+      "This permanently deletes all applications, chats, drafts, profile and settings after the app restarts. This cannot be undone. Continue?",
+      { title: "Reset all data", kind: "warning" },
+    );
+    if (!confirmed) return;
+    try {
+      await invoke("request_data_reset");
+      await relaunch();
+    } catch (err) {
+      setResetStatus(
+        `Reset is scheduled, but the restart failed (${
+          err instanceof Error ? err.message : String(err)
+        }). Restart the app to finish clearing your data.`,
       );
     }
   };
@@ -501,6 +522,28 @@ export default function SettingsDialog({
             )}
             {folderStatus && (
               <p className="text-xs text-destructive">{folderStatus}</p>
+            )}
+          </div>
+
+          {/* Danger zone */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium text-destructive">
+              Danger zone
+            </h3>
+            <Button
+              variant="destructive"
+              onClick={() => void handleResetData()}
+              className="justify-center w-full"
+            >
+              <Trash2 className="size-4 mr-1.5" />
+              Reset all data
+            </Button>
+            <p className="text-xs text-text-muted">
+              Deletes applications, chats, drafts, profile and settings on the
+              next start. Your API key stays in the OS keychain.
+            </p>
+            {resetStatus && (
+              <p className="text-xs text-destructive">{resetStatus}</p>
             )}
           </div>
         </div>

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import type { Education } from "@/types";
-import { YEARS } from "@/utils/yearOptions";
+import { YEARS, rangeWarning } from "@/utils/yearOptions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -319,6 +319,16 @@ export default function EducationSection() {
                         </div>
                       </div>
                     </div>
+                    {rangeWarning(
+                      edu.startYear,
+                      edu.startMonth,
+                      edu.endYear,
+                      edu.endMonth,
+                    ) !== null && (
+                      <p className="text-xs text-destructive">
+                        End date is before the start date.
+                      </p>
+                    )}
 
                     {/* Final Grade */}
                     <div className="grid gap-1.5">

@@ -48,8 +48,16 @@ interface ApplicationState {
   loadApplications: () => Promise<void>;
   /** Create a new empty application, select it, and return its id */
   addApplication: () => string;
-  /** Delete an application and its chat thread file */
-  removeApplication: (id: string) => Promise<void>;
+  /**
+   * Remove an application from the list and return a snapshot for undo. The
+   * chat file is deleted separately by `deleteApplicationThread` once the undo
+   * window has passed.
+   */
+  removeApplication: (id: string) => JobApplication | null;
+  /** Put a snapshot from `removeApplication` back and select it. */
+  restoreApplication: (application: JobApplication) => void;
+  /** Delete the chat thread file of a removed application. */
+  deleteApplicationThread: (id: string) => Promise<void>;
   /** Patch a single application (touches updatedAt) */
   updateApplication: (id: string, patch: Partial<JobApplication>) => void;
   selectApplication: (id: string | null) => void;
@@ -177,15 +185,29 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
     return app.id;
   },
 
-  removeApplication: async (id) => {
+  removeApplication: (id) => {
     const s = get();
-    const next = s.applications.filter((a) => a.id !== id);
+    const removed = s.applications.find((app) => app.id === id) ?? null;
+    if (!removed) return null;
+    const next = s.applications.filter((app) => app.id !== id);
     const nextSelected =
       s.selectedApplicationId === id
         ? (next[0]?.id ?? null)
         : s.selectedApplicationId;
     set({ applications: next, selectedApplicationId: nextSelected });
     debouncedSave();
+    return removed;
+  },
+
+  restoreApplication: (application) => {
+    set((s) => ({
+      applications: [application, ...s.applications],
+      selectedApplicationId: application.id,
+    }));
+    debouncedSave();
+  },
+
+  deleteApplicationThread: async (id) => {
     await deleteFile(`chat_${id}.json`);
   },
 

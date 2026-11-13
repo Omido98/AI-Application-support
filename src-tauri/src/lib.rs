@@ -2041,6 +2041,52 @@ fn focus_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Marker written by "Reset all data". The actual deletion happens on the next
+/// start, before the webview can load or flush anything, so pending saves from
+/// the old session cannot resurrect the data.
+const RESET_MARKER: &str = ".reset-pending";
+
+fn is_app_data_file(name: &str) -> bool {
+    name.ends_with(".json") || name.ends_with(".json.bak") || name.contains(".corrupt-")
+}
+
+/// Delete the app's own JSON files (including backups and quarantined copies).
+fn clear_app_data_files(dir: &Path) -> Result<usize, String> {
+    let mut removed = 0usize;
+    let entries = fs::read_dir(dir)
+        .map_err(|err| format!("Could not read {}: {err}", dir.display()))?;
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !is_app_data_file(&name) {
+            continue;
+        }
+        fs::remove_file(entry.path())
+            .map_err(|err| format!("Could not remove {name}: {err}"))?;
+        removed += 1;
+    }
+    Ok(removed)
+}
+
+/// Ask for all user data to be cleared on the next launch. The app restarts
+/// immediately after this command; deletion happens in `run`'s setup.
+#[tauri::command]
+fn request_data_reset(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Could not resolve the data directory: {err}"))?;
+    fs::create_dir_all(&dir)
+        .map_err(|err| format!("Could not create the data directory: {err}"))?;
+    fs::write(dir.join(RESET_MARKER), b"reset")
+        .map_err(|err| format!("Could not schedule the reset: {err}"))
+}
+
 /// Open the app-data directory in the system file manager, so users can find
 /// their JSON files without guessing where Tauri stores them.
 #[tauri::command]
@@ -2084,6 +2130,22 @@ pub fn run() {
         .plugin(navigation_guard())
         .setup(|app| {
             logging::init(app.handle());
+            if let Ok(dir) = app.path().app_data_dir() {
+                let marker = dir.join(RESET_MARKER);
+                if marker.exists() {
+                    match clear_app_data_files(&dir) {
+                        Ok(count) => logging::record(
+                            "INFO",
+                            "app",
+                            &format!("Reset removed {count} data files"),
+                        ),
+                        Err(err) => {
+                            logging::record("ERROR", "app", &format!("Reset failed: {err}"))
+                        }
+                    }
+                    let _ = fs::remove_file(&marker);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2104,6 +2166,7 @@ pub fn run() {
             keyring_set,
             keyring_delete,
             open_data_folder,
+            request_data_reset,
             logging::frontend_log,
             logging::get_diagnostics
         ])
@@ -2481,6 +2544,23 @@ mod tests {
         assert!(ensure_csv_extension(Path::new("applications.CSV")).is_ok());
         assert!(ensure_csv_extension(Path::new("applications.json")).is_err());
         assert!(ensure_csv_extension(Path::new("applications")).is_err());
+    }
+
+    #[test]
+    fn reset_removes_only_app_data_files() {
+        let dir = test_data_dir("reset");
+        fs::write(dir.join("applications.json"), b"{}").unwrap();
+        fs::write(dir.join("applications.json.bak"), b"{}").unwrap();
+        fs::write(dir.join("applications.json.corrupt-1.json"), b"x").unwrap();
+        fs::write(dir.join("notes.txt"), b"keep me").unwrap();
+        fs::create_dir(dir.join("nested.json")).unwrap();
+
+        let removed = clear_app_data_files(&dir).unwrap();
+        assert_eq!(removed, 3);
+        assert!(dir.join("notes.txt").exists());
+        assert!(dir.join("nested.json").is_dir());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

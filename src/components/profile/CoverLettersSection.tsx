@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
+import { useApplicationStore } from "@/stores/applicationStore";
+import { useAppStore } from "@/stores/useAppStore";
 import { sendMessage } from "@/utils/api";
 import { buildCoverLetterSummaryPrompt } from "@/utils/systemPrompt";
 import { Trash2, Plus, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
@@ -34,6 +36,10 @@ export default function CoverLettersSection() {
   const addCoverLetter = useProfileStore((s) => s.addCoverLetter);
   const updateCoverLetter = useProfileStore((s) => s.updateCoverLetter);
   const removeCoverLetter = useProfileStore((s) => s.removeCoverLetter);
+
+  const applications = useApplicationStore((s) => s.applications);
+  const selectApplication = useApplicationStore((s) => s.selectApplication);
+  const setActiveTab = useAppStore((s) => s.setActiveTab);
 
   const config = useChatStore((s) => s.config);
   const configLoaded = useChatStore((s) => s.configLoaded);
@@ -184,6 +190,9 @@ export default function CoverLettersSection() {
             month: "short",
             day: "numeric",
           });
+          const linkedApp = cl.applicationId
+            ? (applications.find((app) => app.id === cl.applicationId) ?? null)
+            : null;
 
           return (
             <Card key={cl.id} className="bg-field border-border relative overflow-visible transition-[border-color] hover:border-primary/20">
@@ -214,12 +223,28 @@ export default function CoverLettersSection() {
                     title="Expand cover letter"
                   >
                     <span className="min-w-0">
-                      <span
-                        className={`block text-sm font-medium truncate ${
-                          cl.company ? "text-text-primary" : "text-text-muted italic"
-                        }`}
-                      >
-                        {cl.company || "Empty cover letter"}
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          className={`block text-sm font-medium truncate ${
+                            cl.company ? "text-text-primary" : "text-text-muted italic"
+                          }`}
+                        >
+                          {cl.company || "Empty cover letter"}
+                        </span>
+                        {linkedApp && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              selectApplication(linkedApp.id);
+                              setActiveTab("application");
+                            }}
+                            className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary transition-colors hover:bg-primary/20"
+                            title={`Open ${linkedApp.companyName.trim() || "the linked application"}`}
+                          >
+                            Linked
+                          </button>
+                        )}
                       </span>
                       {cl.content ? (
                         <span className="block text-xs text-text-secondary truncate whitespace-pre-wrap">

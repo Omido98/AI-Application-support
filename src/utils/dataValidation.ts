@@ -25,6 +25,10 @@ import type {
   WorkExperience,
   WorkMode,
 } from "@/types";
+import {
+  normalizeProfileSectionOrder,
+  type ProfileSectionId,
+} from "@/utils/profileSections";
 
 /**
  * Defensive normalization for data read from disk or imported from a backup.
@@ -257,6 +261,7 @@ function normalizeCoverLetter(value: unknown): CoverLetter | null {
   return {
     id: normalizeId(value.id),
     company: asOptionalString(value.company),
+    applicationId: asOptionalString(value.applicationId),
     content: asString(value.content),
     addedAt: asString(value.addedAt, new Date().toISOString()),
   };
@@ -413,6 +418,7 @@ export function normalizeSettingsData(value: unknown): {
   accent: string;
   lastTab: "application" | "chat" | "profile";
   onboardingDone: boolean;
+  profileSectionOrder: ProfileSectionId[];
 } | null {
   if (!isRecord(value)) return null;
   const theme =
@@ -425,7 +431,15 @@ export function normalizeSettingsData(value: unknown): {
     value.lastTab === "chat" || value.lastTab === "profile"
       ? value.lastTab
       : "application";
-  return { theme, accent, lastTab, onboardingDone: value.onboardingDone === true };
+  return {
+    theme,
+    accent,
+    lastTab,
+    onboardingDone: value.onboardingDone === true,
+    profileSectionOrder: normalizeProfileSectionOrder(
+      value.profileSectionOrder,
+    ),
+  };
 }
 
 /**

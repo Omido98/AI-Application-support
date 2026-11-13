@@ -10,13 +10,20 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
 
 - **Application tracking** — manage multiple job applications with company,
   job description, requirements, company research, notes, and a status
-  (Wishlist / Applied / Interview / Offer / Rejected). Search and filter by
-  status, open the application URL in your browser, and delete with
-  confirmation.
+  (Wishlist / Applied / Interview / Offer / Rejected). Track applied,
+  deadline and follow-up dates, location, work mode, salary, source, contact
+  details, priority and tags; status changes are recorded as history.
+  Deadlines and follow-ups due within a week (or overdue) are flagged in the
+  list. Search covers postings, notes and tags, sort by status, recency,
+  company or deadline, export everything to CSV, and undo a deletion for
+  eight seconds.
+- **First-run walkthrough** — a three-step introduction to tracking,
+  chatting and the profile, shown once.
 - **AI chat assistant** — one chat thread per application. The agent knows the
-  full job context and your complete profile (education, work experience,
-  skills, languages, previous cover letters), and can research companies on
-  the web via built-in `web_search` / `fetch_page` tools.
+  full job context (including the new dates/contact/location details) and your
+  complete profile (education, work experience, skills, languages, previous
+  cover letters), and can research companies on the web via built-in
+  `web_search` / `fetch_page` tools.
   - Chat replies can be copied or saved straight into your profile as cover
     letters.
   - Web research shows live tool activity and saves the consulted links as
@@ -30,11 +37,14 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   - Choose between the built-in standard prompt or your own custom prompt.
 - **Profile** — education, work experience, certifications, skills, languages,
   previous cover letters, and a public profile (e.g. LinkedIn) URL that the
-  AI can reference.
+  AI can reference. Sections can be reordered, year pickers cover the relevant
+  range automatically, date ranges are validated, and cover letters saved from
+  chat link back to their application.
 - **Settings** — light, dark or follow-system theme, accent colour, AI
-  provider/model/context window, backup and restore, update checks, and a
+  provider/model/context window, backup and restore, update checks, a
   **Copy diagnostics** report with versions, data-file sizes and the recent
-  log.
+  log, an **Open data folder** shortcut, and a **Reset all data** action that
+  clears everything on the next start.
 - **Backup & restore** — export all your data (applications, chat threads,
   drafts, profile, settings, API config) to a single JSON file and import it
   back. API keys are never included in a backup.
@@ -146,3 +156,6 @@ repository secrets to be set before tagging (generate a key pair with
   pinned for the connection to prevent DNS rebinding.
 - Settings and theme are applied after load to avoid a light/dark flash on
   startup.
+- Window size/position and the last active section are restored on the next
+  launch. Keyboard shortcuts: Ctrl/Cmd+1/2/3 switch sections, Ctrl/Cmd+,
+  opens Settings.

@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { saveJson, loadJson, reportDataIssue } from "@/utils/storage";
 import { normalizeSettingsData } from "@/utils/dataValidation";
+import {
+  DEFAULT_PROFILE_SECTION_ORDER,
+  type ProfileSectionId,
+} from "@/utils/profileSections";
 import type { TabId } from "@/stores/useAppStore";
 
 // ──────────────────────────────────────────────
@@ -16,6 +20,8 @@ export interface Settings {
   lastTab: TabId;
   /** The first-run walkthrough is only shown once. */
   onboardingDone: boolean;
+  /** User-chosen order of the Profile tab sections. */
+  profileSectionOrder: ProfileSectionId[];
 }
 
 export const DEFAULT_ACCENT = "#34d399";
@@ -24,6 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accent: DEFAULT_ACCENT,
   lastTab: "application",
   onboardingDone: false,
+  profileSectionOrder: DEFAULT_PROFILE_SECTION_ORDER,
 };
 
 // ──────────────────────────────────────────────
@@ -56,6 +63,7 @@ interface SettingsState extends Settings {
   setAccent: (accent: string) => void;
   setLastTab: (tab: TabId) => void;
   setOnboardingDone: (done: boolean) => void;
+  setProfileSectionOrder: (order: ProfileSectionId[]) => void;
 }
 
 function persist(state: SettingsState) {
@@ -64,6 +72,7 @@ function persist(state: SettingsState) {
     accent: state.accent,
     lastTab: state.lastTab,
     onboardingDone: state.onboardingDone,
+    profileSectionOrder: state.profileSectionOrder,
   };
   void saveJson("settings.json", settings);
 }
@@ -88,6 +97,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         lastTab: normalized?.lastTab ?? DEFAULT_SETTINGS.lastTab,
         onboardingDone:
           normalized?.onboardingDone ?? DEFAULT_SETTINGS.onboardingDone,
+        profileSectionOrder:
+          normalized?.profileSectionOrder ??
+          DEFAULT_SETTINGS.profileSectionOrder,
         isLoaded: true,
       });
     } else {
@@ -112,6 +124,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setOnboardingDone: (onboardingDone) => {
     set({ onboardingDone });
+    persist(get());
+  },
+
+  setProfileSectionOrder: (profileSectionOrder) => {
+    set({ profileSectionOrder });
     persist(get());
   },
 }));

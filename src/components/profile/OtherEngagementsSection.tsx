@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import type { OtherEngagement } from "@/types";
-import { YEARS } from "@/utils/yearOptions";
+import { YEARS, rangeWarning } from "@/utils/yearOptions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -323,6 +323,17 @@ export default function OtherEngagementsSection() {
                           </select>
                         </div>
                       </div>
+                    )}
+                    {rangeWarning(
+                      oe.startYear,
+                      oe.startMonth,
+                      oe.endYear,
+                      oe.endMonth,
+                      oe.isCurrent,
+                    ) !== null && (
+                      <p className="text-xs text-destructive">
+                        End date is before the start date.
+                      </p>
                     )}
 
                     {/* Description */}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Search,
@@ -19,6 +19,7 @@ import {
 import type {
   ApplicationPriority,
   ApplicationStatus,
+  JobApplication,
   WorkMode,
 } from "@/types";
 import { cn } from "@/lib/utils";
@@ -204,6 +205,10 @@ export default function ApplicationTab() {
   const selectedId = useApplicationStore((s) => s.selectedApplicationId);
   const addApplication = useApplicationStore((s) => s.addApplication);
   const removeApplication = useApplicationStore((s) => s.removeApplication);
+  const restoreApplication = useApplicationStore((s) => s.restoreApplication);
+  const deleteApplicationThread = useApplicationStore(
+    (s) => s.deleteApplicationThread,
+  );
   const updateApplication = useApplicationStore((s) => s.updateApplication);
   const selectApplication = useApplicationStore((s) => s.selectApplication);
 
@@ -220,6 +225,58 @@ export default function ApplicationTab() {
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [deletedApp, setDeletedApp] = useState<JobApplication | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deletedAppRef = useRef<JobApplication | null>(null);
+  deletedAppRef.current = deletedApp;
+
+  const finalizeDeletion = (app: JobApplication) => {
+    useChatStore.getState().discardDraft(app.id);
+    void deleteApplicationThread(app.id);
+  };
+
+  const handleDelete = () => {
+    if (!pendingDeleteId) return;
+    // A new deletion ends the previous undo window immediately.
+    if (deletedAppRef.current) finalizeDeletion(deletedAppRef.current);
+    if (undoTimer.current) {
+      clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+    const removed = removeApplication(pendingDeleteId);
+    setPendingDeleteId(null);
+    if (!removed) return;
+    setDeletedApp(removed);
+    undoTimer.current = setTimeout(() => {
+      undoTimer.current = null;
+      finalizeDeletion(removed);
+      setDeletedApp(null);
+    }, 8000);
+  };
+
+  const handleUndoDelete = () => {
+    const app = deletedAppRef.current;
+    if (!app) return;
+    if (undoTimer.current) {
+      clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+    restoreApplication(app);
+    setDeletedApp(null);
+  };
+
+  // Leaving the tab ends the undo window; never leave an orphaned chat file.
+  useEffect(
+    () => () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      const app = deletedAppRef.current;
+      if (app) {
+        useChatStore.getState().discardDraft(app.id);
+        void useApplicationStore.getState().deleteApplicationThread(app.id);
+      }
+    },
+    [],
+  );
 
   const handleExportCsv = async () => {
     setExportStatus(null);
@@ -1185,11 +1242,11 @@ export default function ApplicationTab() {
           <DialogHeader>
             <DialogTitle>Delete application?</DialogTitle>
             <DialogDescription>
-              This will permanently delete{" "}
+              This will delete{" "}
               <span className="text-text-primary font-medium">
                 {pendingDelete?.companyName.trim() || "this application"}
               </span>{" "}
-              and its entire chat history. It cannot be undone.
+              and its entire chat history. You can undo for 8 seconds.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1198,19 +1255,27 @@ export default function ApplicationTab() {
             </Button>
             <Button
               variant="destructive"
-              onClick={() => {
-                if (pendingDeleteId) {
-                  useChatStore.getState().discardDraft(pendingDeleteId);
-                  void removeApplication(pendingDeleteId);
-                }
-                setPendingDeleteId(null);
-              }}
+              onClick={handleDelete}
             >
               Delete
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {deletedApp && (
+        <div
+          role="status"
+          className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
+        >
+          <span className="text-sm text-text-primary">
+            Deleted {deletedApp.companyName.trim() || "application"}
+          </span>
+          <Button size="sm" variant="outline" onClick={handleUndoDelete}>
+            Undo
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
