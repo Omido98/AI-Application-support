@@ -19,15 +19,25 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   the web via built-in `web_search` / `fetch_page` tools.
   - Chat replies can be copied or saved straight into your profile as cover
     letters.
+  - Web research shows live tool activity and saves the consulted links as
+    citation chips on the reply; token usage and estimated Zen cost are shown
+    per message.
+  - Improve/deslop results arrive as versioned suggestion cards with a word
+    diff and Accept / Discard; draft reviews have their own card and verdict.
+  - Long conversations respect a configurable context budget. Older messages
+    are omitted from requests, and can be summarized into a compact hidden
+    context note when needed.
   - Choose between the built-in standard prompt or your own custom prompt.
 - **Profile** — education, work experience, certifications, skills, languages,
   previous cover letters, and a public profile (e.g. LinkedIn) URL that the
   AI can reference.
-- **Settings** — light/dark theme and a custom accent colour.
+- **Settings** — theme, accent colour, AI provider/model/context window, backup
+  and restore, and update checks.
 - **Backup & restore** — export all your data (applications, chat threads,
-  profile, settings, API config) to a single JSON file and import it back.
-- **Auto-updates** — the app checks for new releases on GitHub and offers to
-  download and install them.
+  drafts, profile, settings, API config) to a single JSON file and import it
+  back. API keys are never included in a backup.
+- **Update checks** — Settings can check GitHub for a newer release and offer
+  to download and install it.
 
 ## AI providers
 
