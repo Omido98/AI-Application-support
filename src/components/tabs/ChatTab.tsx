@@ -3,10 +3,12 @@ import { useChatStore, messageKey, type ChatMessage } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useAppStore } from "@/stores/useAppStore";
-import { sendMessage } from "@/utils/api";
+import { sendMessage, type ToolActivity } from "@/utils/api";
 import { buildSystemPrompt } from "@/utils/systemPrompt";
 import { estimateTokens } from "@/utils/tokens";
 import { fitHistoryToBudget, getContextBudget } from "@/utils/contextBudget";
+import { estimateUsageCost, isFreeModel } from "@/utils/zenPricing";
+import type { WebSource } from "@/types";
 import ChatSettings from "@/components/chat/ChatSettings";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
@@ -106,6 +108,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const [showConfig, setShowConfig] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [replyNotice, setReplyNotice] = useState<string | null>(null);
+  const [toolActivity, setToolActivity] = useState<ToolActivity | null>(null);
+  const sourcesRef = useRef<WebSource[]>([]);
 
   // Aborts the in-flight generation (used by the Stop button / Escape).
   const controllerRef = useRef<AbortController | null>(null);
@@ -173,6 +177,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     controllerRef.current = null;
     cancelStreamBuffer();
     setReplyNotice(null);
+    setToolActivity(null);
+    sourcesRef.current = [];
     void switchThread(selectedId);
   }, [selectedId, switchThread, cancelStreamBuffer]);
 
@@ -198,6 +204,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     setError(null);
     setDraft("");
     setReplyNotice(null);
+    setToolActivity(null);
+    sourcesRef.current = [];
     // A fresh thread means web search should behave like a first message
     // again: enabled for the next message, off afterwards by default.
     void setConfig({ webSearchEnabled: false });
@@ -304,6 +312,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       setIsSending(true);
       setError(null);
       setReplyNotice(null);
+      setToolActivity(null);
+      sourcesRef.current = [];
 
       // Application context of the current thread
       const appCtx = {
@@ -384,8 +394,21 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
           onDelta: (chunk) => {
             // Only buffer text while still in the thread it was sent from.
             if (useChatStore.getState().activeThreadId === threadAtSend) {
+              setToolActivity((current) => (current ? null : current));
               queueStreamDelta(chunk);
             }
+          },
+          onToolActivity: (activity) => {
+            if (useChatStore.getState().activeThreadId === threadAtSend) {
+              setToolActivity(activity);
+            }
+          },
+          onSource: (source) => {
+            if (useChatStore.getState().activeThreadId !== threadAtSend) return;
+            if (sourcesRef.current.some((entry) => entry.url === source.url)) {
+              return;
+            }
+            sourcesRef.current.push(source);
           },
         },
       );
@@ -401,6 +424,15 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       // Make sure the final buffered chunk reaches the store before the
       // stopped-partial path reads it.
       flushStreamBuffer();
+      setToolActivity(null);
+      const sources = sourcesRef.current.length > 0 ? sourcesRef.current : undefined;
+      const usage = result.usage;
+      const costUsd =
+        usage && config.provider === "zen"
+          ? isFreeModel(config.model)
+            ? 0
+            : estimateUsageCost(config.model, usage) ?? undefined
+          : undefined;
 
       if (result.error) {
         // The user's message did not land: flag it so it can be re-sent in
@@ -419,12 +451,21 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         const partial = useChatStore.getState().streamingText;
         if (partial.trim()) {
           if (isRegenerate) {
-            updateMessage(opts.regenerateKey!, (m) => ({ ...m, content: partial }));
+            updateMessage(opts.regenerateKey!, (m) => ({
+              ...m,
+              content: partial,
+              sources,
+              usage,
+              costUsd,
+            }));
           } else {
             addMessage({
               role: "assistant",
               content: partial,
               timestamp: new Date().toISOString(),
+              ...(sources ? { sources } : {}),
+              ...(usage ? { usage } : {}),
+              ...(costUsd !== undefined ? { costUsd } : {}),
             });
           }
         }
@@ -432,12 +473,21 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         setIsSending(false);
       } else {
         if (isRegenerate) {
-          updateMessage(opts.regenerateKey!, (m) => ({ ...m, content: result.content }));
+          updateMessage(opts.regenerateKey!, (m) => ({
+            ...m,
+            content: result.content,
+            sources,
+            usage,
+            costUsd,
+          }));
         } else {
           addMessage({
             role: "assistant",
             content: result.content,
             timestamp: new Date().toISOString(),
+            ...(sources ? { sources } : {}),
+            ...(usage ? { usage } : {}),
+            ...(costUsd !== undefined ? { costUsd } : {}),
           });
         }
         if (result.finishReason === "length" || result.finishReason === "max_tokens") {
@@ -656,6 +706,18 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         onResend={(key) => void sendText({ resendKey: key })}
         onRegenerate={(key) => void sendText({ regenerateKey: key })}
       />
+
+      {toolActivity && (
+        <p
+          role="status"
+          className="truncate px-4 pt-2 text-[10px] leading-snug text-primary"
+          title={toolActivity.detail}
+        >
+          {toolActivity.tool === "web_search"
+            ? `Searching the web: ${toolActivity.detail}`
+            : `Reading: ${toolActivity.detail}`}
+        </p>
+      )}
 
       {replyNotice && (
         <p className="px-4 pt-2 text-[10px] leading-snug text-amber-500">

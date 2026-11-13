@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { saveJson, loadJson, deleteFile, reportDataIssue } from "@/utils/storage";
-import { normalizeApiConfigData, normalizeDraftsData } from "@/utils/dataValidation";
+import { normalizeApiConfigData, normalizeDraftsData, isRecord } from "@/utils/dataValidation";
 import {
   API_KEY_ACCOUNT,
   deleteApiKeyFromKeychain,
@@ -10,6 +10,7 @@ import {
 import type { ProviderId } from "@/utils/providers";
 import { getProvider } from "@/utils/providers";
 import { DEFAULT_CONTEXT_WINDOW } from "@/utils/tokens";
+import type { TokenUsage, WebSource } from "@/types";
 
 // ──────────────────────────────────────────────
 // Chat message type (lighter than the full Message type)
@@ -28,6 +29,12 @@ export interface ChatMessage {
    * fit-evaluation prompt (and its forced web research).
    */
   purpose?: "fit-evaluation";
+  /** Web sources consulted for this reply, shown as citation chips. */
+  sources?: WebSource[];
+  /** Provider-reported token usage for this reply, when available. */
+  usage?: TokenUsage;
+  /** Estimated USD cost from the static Zen price table, when known. */
+  costUsd?: number;
 }
 
 /**
@@ -59,6 +66,14 @@ export function normalizeChatMessages(value: unknown): ChatMessage[] {
     ) {
       continue;
     }
+    const sources = normalizeSources(candidate.sources);
+    const usage = normalizeUsage(candidate.usage);
+    const costUsd =
+      typeof candidate.costUsd === "number" &&
+      Number.isFinite(candidate.costUsd) &&
+      candidate.costUsd >= 0
+        ? candidate.costUsd
+        : undefined;
     messages.push({
       role,
       content,
@@ -67,9 +82,46 @@ export function normalizeChatMessages(value: unknown): ChatMessage[] {
       ...(candidate.purpose === "fit-evaluation"
         ? { purpose: "fit-evaluation" as const }
         : {}),
+      ...(sources ? { sources } : {}),
+      ...(usage ? { usage } : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
     });
   }
   return messages;
+}
+
+function normalizeSources(value: unknown): WebSource[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const sources: WebSource[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const title = entry.title;
+    const url = entry.url;
+    if (typeof title !== "string" || typeof url !== "string") continue;
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    seen.add(url);
+    sources.push({
+      title: title.trim() || url,
+      url,
+    });
+  }
+  return sources.length > 0 ? sources : undefined;
+}
+
+function normalizeUsage(value: unknown): TokenUsage | undefined {
+  if (!isRecord(value)) return undefined;
+  const read = (field: unknown): number | undefined =>
+    typeof field === "number" && Number.isFinite(field) && field >= 0
+      ? Math.floor(field)
+      : undefined;
+  const inputTokens = read(value.inputTokens);
+  const outputTokens = read(value.outputTokens);
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+  };
 }
 
 // ──────────────────────────────────────────────

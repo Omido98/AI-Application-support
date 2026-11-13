@@ -158,7 +158,7 @@ describe("sendMessage (OpenAI-compatible)", () => {
     expect(result).toEqual({ content: "early" });
   });
 
-  it("passes the provider finish reason through", async () => {
+  it("passes the provider finish reason and usage through", async () => {
     mockChatSequence([
       {
         kind: "stream",
@@ -166,13 +166,45 @@ describe("sendMessage (OpenAI-compatible)", () => {
           choices: [
             { finish_reason: "length", message: { content: "cut off" } },
           ],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
         },
       },
     ]);
 
     const result = await sendMessage([], baseConfig, "system");
 
-    expect(result).toEqual({ content: "cut off", finishReason: "length" });
+    expect(result).toEqual({
+      content: "cut off",
+      finishReason: "length",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+  });
+
+  it("reports tool activity and the sources that were consulted", async () => {
+    mockChatSequence([
+      {
+        kind: "stream",
+        data: openaiMessage({
+          content: null,
+          tool_calls: [openaiToolCall("web_search", "Acme Corp")],
+        }),
+      },
+      { kind: "stream", data: openaiMessage({ content: "Acme is a company." }) },
+    ]);
+
+    const activities: unknown[] = [];
+    const sources: unknown[] = [];
+    await sendMessage([], baseConfig, "system", {
+      onToolActivity: (activity) => activities.push(activity),
+      onSource: (source) => sources.push(source),
+    });
+
+    expect(activities).toEqual([
+      { tool: "web_search", detail: "Acme Corp" },
+    ]);
+    expect(sources).toEqual([
+      { title: "Acme Corp", url: "https://acme.example" },
+    ]);
   });
 
   it("runs tool calls and returns the final answer", async () => {

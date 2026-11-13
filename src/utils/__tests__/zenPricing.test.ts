@@ -3,6 +3,8 @@ import {
   isFreeModel,
   formatModelPrice,
   computeRemovedModelIds,
+  estimateUsageCost,
+  formatUsageCost,
   ZEN_MODEL_PRICES,
 } from "@/utils/zenPricing";
 
@@ -46,6 +48,31 @@ describe("formatModelPrice", () => {
 
   it("contains entries for the default Zen model", () => {
     expect(ZEN_MODEL_PRICES["deepseek-v4-flash"]).toBeDefined();
+  });
+});
+
+describe("estimateUsageCost", () => {
+  it("charges input and output tokens at the static rate", () => {
+    expect(
+      estimateUsageCost("deepseek-v4-pro", {
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      }),
+    ).toBeCloseTo(5.22);
+  });
+
+  it("returns zero for free models and null for unknown prices", () => {
+    expect(estimateUsageCost("deepseek-v4-flash-free", {})).toBe(0);
+    expect(estimateUsageCost("totally-unknown", {})).toBeNull();
+  });
+});
+
+describe("formatUsageCost", () => {
+  it("formats free, tiny and normal costs", () => {
+    expect(formatUsageCost(0)).toBe("free");
+    expect(formatUsageCost(0.00005)).toBe("<$0.0001");
+    expect(formatUsageCost(0.0042)).toBe("$0.0042");
+    expect(formatUsageCost(5.22)).toBe("$5.22");
   });
 });
 

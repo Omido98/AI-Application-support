@@ -121,6 +121,18 @@ export interface ProfileData {
   languages: Language[];
 }
 
+/** A source the agent consulted through web_search / fetch_page. */
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
+/** Provider-reported token usage for one assistant reply, when available. */
+export interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 export type ApplicationStatus =
   | "wishlist"
   | "applied"

@@ -88,6 +88,13 @@ describe("normalizeChatMessages", () => {
         timestamp: "t4",
         failed: true,
         purpose: "fit-evaluation",
+        sources: [
+          { title: "Example", url: "https://example.com/page" },
+          { title: "Duplicate", url: "https://example.com/page" },
+          { title: "Bad", url: "javascript:alert(1)" },
+        ],
+        usage: { inputTokens: 10, outputTokens: 5 },
+        costUsd: 0.001,
       },
     ]);
 
@@ -99,6 +106,9 @@ describe("normalizeChatMessages", () => {
         timestamp: "t4",
         failed: true,
         purpose: "fit-evaluation",
+        sources: [{ title: "Example", url: "https://example.com/page" }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+        costUsd: 0.001,
       },
     ]);
   });

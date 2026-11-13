@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils";
 import Markdown from "@/components/chat/Markdown";
 import StreamingBubble from "@/components/chat/StreamingBubble";
 import { Button } from "@/components/ui/button";
+import { formatTokenCount } from "@/utils/tokens";
+import { openExternalUrl } from "@/utils/links";
+import { formatUsageCost } from "@/utils/zenPricing";
 import {
   Copy,
   Check,
@@ -20,8 +23,17 @@ import {
   Zap,
   RotateCcw,
   RefreshCw,
+  Link2,
 } from "lucide-react";
 import type { ProfileData } from "@/types";
+
+function sourceLabel(title: string, url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "") || title;
+  } catch {
+    return title;
+  }
+}
 
 export default function MessageList({
   onStart,
@@ -421,6 +433,43 @@ export default function MessageList({
                 <p>{msg.content}</p>
               ) : (
                 <Markdown>{msg.content}</Markdown>
+              )}
+
+              {!isUser && msg.sources && msg.sources.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/60 pt-2">
+                  {msg.sources.map((source) => (
+                    <button
+                      key={source.url}
+                      type="button"
+                      onClick={() => openExternalUrl(source.url)}
+                      title={`${source.title} — ${source.url}`}
+                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-field px-2 py-0.5 text-[10px] text-text-secondary transition-colors hover:border-primary/40 hover:text-primary"
+                    >
+                      <Link2 className="size-3 shrink-0" aria-hidden="true" />
+                      <span className="truncate">
+                        {sourceLabel(source.title, source.url)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {!isUser && msg.usage && (
+                <p className="mt-1.5 font-mono text-[10px] leading-none text-text-muted">
+                  {[
+                    msg.usage.inputTokens !== undefined
+                      ? `${formatTokenCount(msg.usage.inputTokens)} in`
+                      : null,
+                    msg.usage.outputTokens !== undefined
+                      ? `${formatTokenCount(msg.usage.outputTokens)} out`
+                      : null,
+                    msg.costUsd !== undefined
+                      ? formatUsageCost(msg.costUsd)
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
               )}
             </div>
 

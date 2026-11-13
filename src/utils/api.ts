@@ -9,7 +9,7 @@ import {
   buildDraftVerifyPrompt,
 } from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
-import type { ProfileData } from "@/types";
+import type { ProfileData, TokenUsage, WebSource } from "@/types";
 
 export interface ApiResponse {
   content: string;
@@ -18,6 +18,15 @@ export interface ApiResponse {
   stopped?: boolean;
   /** Provider stop reason, e.g. "length"/"max_tokens" when the reply truncated. */
   finishReason?: string | null;
+  /** Token usage reported by the provider, when available. */
+  usage?: TokenUsage;
+}
+
+/** A tool the agent is currently running, shown as live status in the UI. */
+export interface ToolActivity {
+  tool: "web_search" | "fetch_page";
+  /** Query for a search, URL for a page fetch. */
+  detail: string;
 }
 
 /** The reviewer's verdict on a draft, parsed from its feedback report. */
@@ -33,6 +42,10 @@ export type ImproveDraftDepth = "quick" | "deep";
 export interface SendMessageOptions {
   /** Called with each chunk of text as it streams in (live rendering). */
   onDelta?: (text: string) => void;
+  /** Called when a web tool starts (and cleared by the caller on new text). */
+  onToolActivity?: (activity: ToolActivity) => void;
+  /** Called for every source the agent actually consulted. */
+  onSource?: (source: WebSource) => void;
   /** Aborting the signal stops generation; whatever was streamed is returned. */
   signal?: AbortSignal;
 }
@@ -122,6 +135,29 @@ interface ChatResponse {
       tool_calls?: ToolCall[];
     };
   }>;
+}
+
+function numericToken(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+/** Read token usage from either an OpenAI-shaped or Anthropic-shaped body. */
+function extractUsage(data: unknown): TokenUsage | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const usage = (data as Record<string, unknown>).usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  const record = usage as Record<string, unknown>;
+  const inputTokens =
+    numericToken(record.input_tokens) ?? numericToken(record.prompt_tokens);
+  const outputTokens =
+    numericToken(record.output_tokens) ?? numericToken(record.completion_tokens);
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+  };
 }
 
 const MAX_TOOL_ROUNDS = 15;
@@ -866,7 +902,7 @@ async function sendOpenAICompatMessage(
       });
 
       for (const call of toolCalls) {
-        const result = await executeTool(call);
+        const result = await executeTool(call, options);
         history.push({
           role: "tool",
           tool_call_id: call.id,
@@ -883,9 +919,11 @@ async function sendOpenAICompatMessage(
       };
     }
     const finishReason = data?.choices?.[0]?.finish_reason ?? null;
+    const usage = extractUsage(data);
     return {
       content: drafted,
       ...(finishReason ? { finishReason } : {}),
+      ...(usage ? { usage } : {}),
     };
   }
 
@@ -1144,7 +1182,7 @@ async function sendAnthropicMessage(
       toolContext.push({ role: "assistant", content: blocks });
       const results: AnthropicContentBlock[] = [];
       for (const call of toolUses) {
-        const result = await executeAnthropicTool(call);
+        const result = await executeAnthropicTool(call, options);
         results.push({
           type: "tool_result",
           tool_use_id: call.id,
@@ -1162,9 +1200,11 @@ async function sendAnthropicMessage(
         error: "API response did not contain a message.",
       };
     }
+    const usage = extractUsage(data);
     return {
       content: text,
       ...(data?.stop_reason ? { finishReason: data.stop_reason } : {}),
+      ...(usage ? { usage } : {}),
     };
   }
 
@@ -1187,12 +1227,56 @@ function textFromAnthropicBlocks(
   return text || null;
 }
 
+function sourceTitle(url: string): string {
+  try {
+    return new URL(url).hostname || url;
+  } catch {
+    return url;
+  }
+}
+
+async function searchWeb(
+  query: string,
+  options: SendMessageOptions,
+): Promise<string> {
+  options.onToolActivity?.({ tool: "web_search", detail: query });
+  const results = await invoke<WebResult[]>("zen_web_search", { query });
+  if (!results || results.length === 0) {
+    return "The web search returned no results.";
+  }
+  for (const result of results) {
+    if (result.url) {
+      options.onSource?.({
+        title: result.title.trim() || result.url,
+        url: result.url,
+      });
+    }
+  }
+  return results
+    .map(
+      (r, i) =>
+        `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`,
+    )
+    .join("\n\n");
+}
+
+async function fetchPage(
+  url: string,
+  options: SendMessageOptions,
+): Promise<string> {
+  options.onToolActivity?.({ tool: "fetch_page", detail: url });
+  const text = await invoke<string>("zen_fetch_page", { url });
+  options.onSource?.({ title: sourceTitle(url), url });
+  return text;
+}
+
 /**
  * Execute a single Anthropic tool_use block via the Rust backend and return
  * its text result (either the formatted search results or the fetched page).
  */
 async function executeAnthropicTool(
   call: AnthropicContentBlock,
+  options: SendMessageOptions = {},
 ): Promise<string> {
   const name = call.name ?? "";
   const args = call.input ?? {};
@@ -1202,18 +1286,7 @@ async function executeAnthropicTool(
       if (!query) {
         return "Error: web_search requires a 'query' string argument.";
       }
-      const results = await invoke<WebResult[]>("zen_web_search", {
-        query,
-      });
-      if (!results || results.length === 0) {
-        return "The web search returned no results.";
-      }
-      return results
-        .map(
-          (r, i) =>
-            `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`,
-        )
-        .join("\n\n");
+      return await searchWeb(query, options);
     }
 
     if (name === "fetch_page") {
@@ -1221,7 +1294,7 @@ async function executeAnthropicTool(
       if (!url) {
         return "Error: fetch_page requires a 'url' string argument.";
       }
-      return await invoke<string>("zen_fetch_page", { url });
+      return await fetchPage(url, options);
     }
 
     return `Error: unknown tool "${name}".`;
@@ -1236,7 +1309,10 @@ async function executeAnthropicTool(
  * Execute a single tool call via the Rust backend and return its text result
  * (either the formatted search results or the fetched page text).
  */
-async function executeTool(call: ToolCall): Promise<string> {
+async function executeTool(
+  call: ToolCall,
+  options: SendMessageOptions = {},
+): Promise<string> {
   try {
     let args: Record<string, unknown>;
     try {
@@ -1253,18 +1329,7 @@ async function executeTool(call: ToolCall): Promise<string> {
       if (!query) {
         return "Error: web_search requires a 'query' string argument.";
       }
-      const results = await invoke<WebResult[]>("zen_web_search", {
-        query,
-      });
-      if (!results || results.length === 0) {
-        return "The web search returned no results.";
-      }
-      return results
-        .map(
-          (r, i) =>
-            `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`,
-        )
-        .join("\n\n");
+      return await searchWeb(query, options);
     }
 
     if (call.function.name === "fetch_page") {
@@ -1272,7 +1337,7 @@ async function executeTool(call: ToolCall): Promise<string> {
       if (!url) {
         return "Error: fetch_page requires a 'url' string argument.";
       }
-      return await invoke<string>("zen_fetch_page", { url });
+      return await fetchPage(url, options);
     }
 
     return `Error: unknown tool "${call.function.name}".`;

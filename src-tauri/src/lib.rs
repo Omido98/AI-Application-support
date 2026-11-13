@@ -394,6 +394,8 @@ struct StreamAccumulator {
     anthropic_blocks: Vec<AnthropicBlockAcc>,
     anthropic_stop_reason: Option<String>,
     anthropic_finished: bool,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
 }
 
 impl StreamAccumulator {
@@ -407,6 +409,21 @@ impl StreamAccumulator {
             anthropic_blocks: Vec::new(),
             anthropic_stop_reason: None,
             anthropic_finished: false,
+            input_tokens: None,
+            output_tokens: None,
+        }
+    }
+
+    /// Record a provider usage object. OpenAI uses prompt/completion tokens;
+    /// Anthropic uses input/output tokens. Streaming providers may send usage
+    /// in a trailing chunk, so this is merged across events.
+    fn record_usage(&mut self, usage: &serde_json::Value) {
+        let read = |key: &str| usage.get(key).and_then(|value| value.as_u64());
+        if let Some(input) = read("input_tokens").or_else(|| read("prompt_tokens")) {
+            self.input_tokens = Some(input);
+        }
+        if let Some(output) = read("output_tokens").or_else(|| read("completion_tokens")) {
+            self.output_tokens = Some(output);
         }
     }
 
@@ -447,6 +464,11 @@ impl StreamAccumulator {
     }
 
     fn feed_openai(&mut self, parsed: &serde_json::Value) -> Result<Option<String>, String> {
+        if let Some(usage) = parsed.get("usage") {
+            if !usage.is_null() {
+                self.record_usage(usage);
+            }
+        }
         let Some(choice) = parsed.pointer("/choices/0") else {
             return Ok(None);
         };
@@ -507,6 +529,11 @@ impl StreamAccumulator {
             .and_then(|t| t.as_str())
             .unwrap_or("");
         match event_type {
+            "message_start" => {
+                if let Some(usage) = parsed.pointer("/message/usage") {
+                    self.record_usage(usage);
+                }
+            }
             "content_block_start" => {
                 let block = parsed.get("content_block").cloned().unwrap_or_default();
                 let block_type = block
@@ -573,6 +600,9 @@ impl StreamAccumulator {
                 }
             }
             "message_delta" => {
+                if let Some(usage) = parsed.get("usage") {
+                    self.record_usage(usage);
+                }
                 if let Some(stop) = parsed
                     .pointer("/delta/stop_reason")
                     .and_then(|r| r.as_str())
@@ -614,6 +644,10 @@ impl StreamAccumulator {
             serde_json::json!({
                 "content": content,
                 "stop_reason": self.anthropic_stop_reason,
+                "usage": {
+                    "input_tokens": self.input_tokens,
+                    "output_tokens": self.output_tokens,
+                },
             })
         } else {
             let content = if self.openai_content.is_empty() {
@@ -644,7 +678,11 @@ impl StreamAccumulator {
                             serde_json::Value::Array(tool_calls)
                         },
                     }
-                }]
+                }],
+                "usage": {
+                    "input_tokens": self.input_tokens,
+                    "output_tokens": self.output_tokens,
+                },
             })
         }
     }
@@ -1891,10 +1929,14 @@ mod tests {
         assert!(acc.is_finished());
 
         acc.feed("[DONE]").unwrap();
+        acc.feed(r#"{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}"#)
+            .unwrap();
 
         let data = acc.finish();
         assert_eq!(data["choices"][0]["message"]["content"], "Hello");
         assert_eq!(data["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(data["usage"]["input_tokens"], 11);
+        assert_eq!(data["usage"]["output_tokens"], 7);
         let calls = data["choices"][0]["message"]["tool_calls"].as_array().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0]["id"], "call_1");
@@ -1944,6 +1986,10 @@ mod tests {
     fn anthropic_stream_assembles_blocks_and_tool_input() {
         let mut acc = StreamAccumulator::new("anthropic");
 
+        acc.feed(
+            r#"{"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}"#,
+        )
+        .unwrap();
         acc.feed(r#"{"type":"content_block_start","index":0,"content_block":{"type":"text"}}"#)
             .unwrap();
         let delta = acc
@@ -1964,13 +2010,15 @@ mod tests {
             None
         );
 
-        acc.feed(r#"{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null}}"#)
+        acc.feed(r#"{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":9}}"#)
             .unwrap();
         acc.feed(r#"{"type":"message_stop"}"#).unwrap();
         assert!(acc.is_finished());
 
         let data = acc.finish();
         assert_eq!(data["stop_reason"], "tool_use");
+        assert_eq!(data["usage"]["input_tokens"], 12);
+        assert_eq!(data["usage"]["output_tokens"], 9);
         let blocks = data["content"].as_array().unwrap();
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0], serde_json::json!({"type": "text", "text": "Hi"}));
