@@ -1776,9 +1776,13 @@ fn ensure_json_extension(path: &Path) -> Result<(), String> {
 /// the atomic data-file writer: a backup is a one-off export, not the app's
 /// live state, so it must not create a `.bak` next to the user's chosen file.
 fn write_text_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
+    write_bytes_file_atomic(path, contents.as_bytes())
+}
+
+fn write_bytes_file_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
-        .ok_or_else(|| format!("Invalid backup path: {}", path.display()))?;
+        .ok_or_else(|| format!("Invalid export path: {}", path.display()))?;
     if !parent.is_dir() {
         return Err(format!("The folder {} does not exist.", parent.display()));
     }
@@ -1793,7 +1797,7 @@ fn write_text_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
                 .create_new(true)
                 .open(&temp)
                 .map_err(|err| format!("Could not create {}: {err}", temp.display()))?;
-            file.write_all(contents.as_bytes())
+            file.write_all(contents)
                 .map_err(|err| format!("Could not write {}: {err}", temp.display()))?;
             file.sync_all()
                 .map_err(|err| format!("Could not flush {}: {err}", temp.display()))?;
@@ -1929,6 +1933,156 @@ async fn export_csv_file(
     .await
     .map_err(|err| format!("CSV write task failed: {err}"))?
     .map(Some)
+}
+
+/// Upper bound for generated PDF/DOCX exports and imported CV documents.
+const MAX_EXPORT_FILE_BYTES: usize = 20 * 1024 * 1024;
+const MAX_IMPORT_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
+
+fn sanitize_document_name(name: &str, extension: &str) -> String {
+    let file = Path::new(name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .trim();
+    let stem = match file.rsplit_once('.') {
+        Some((stem, _)) if !stem.trim().is_empty() => stem.trim(),
+        _ => file,
+    };
+    let stem = if stem.is_empty() {
+        "cover-letter"
+    } else {
+        stem
+    };
+    let stem: String = stem.chars().take(80).collect();
+    format!("{stem}.{extension}")
+}
+
+fn ensure_export_extension(path: &Path, expected: &str) -> Result<(), String> {
+    let actual = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if actual != expected {
+        return Err(format!("The export file must use the .{expected} extension."));
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct ImportedDocument {
+    name: String,
+    bytes: Vec<u8>,
+}
+
+/// Save a generated PDF or DOCX through the native dialog. The frontend
+/// renders the document; Rust only validates the extension/size and writes the
+/// bytes atomically to the path the user picked.
+#[tauri::command]
+async fn save_export_file(
+    app: tauri::AppHandle,
+    default_name: String,
+    contents: Vec<u8>,
+) -> Result<Option<String>, String> {
+    if contents.len() > MAX_EXPORT_FILE_BYTES {
+        return Err("The export is larger than the 20 MB limit.".to_string());
+    }
+    let lower = default_name.to_lowercase();
+    let extension = if lower.ends_with(".docx") {
+        "docx"
+    } else if lower.ends_with(".pdf") {
+        "pdf"
+    } else {
+        return Err("Exports must be PDF or DOCX files.".to_string());
+    };
+    let file_name = sanitize_document_name(&default_name, extension);
+    let (label, filter_extension): (&str, &str) = if extension == "docx" {
+        ("Word document", "docx")
+    } else {
+        ("PDF", "pdf")
+    };
+    let parent = app.get_webview_window("main");
+    let app_for_dialog = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app_for_dialog
+            .dialog()
+            .file()
+            .add_filter(label, &[filter_extension])
+            .set_file_name(file_name);
+        let dialog = match parent {
+            Some(window) => dialog.set_parent(&window),
+            None => dialog,
+        };
+        dialog.blocking_save_file()
+    })
+    .await
+    .map_err(|err| format!("Export dialog failed: {err}"))?;
+
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|err| format!("Invalid export path: {err}"))?;
+    ensure_export_extension(&path, extension)?;
+    let display_path = path.display().to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        write_bytes_file_atomic(&path, &contents)?;
+        Ok::<String, String>(display_path)
+    })
+    .await
+    .map_err(|err| format!("Export write task failed: {err}"))?
+    .map(Some)
+}
+
+/// Pick a CV/document and return its bytes. Text extraction happens in the
+/// webview (DOCX/PDF/TXT parsers) so Rust stays out of document-format code.
+#[tauri::command]
+async fn read_import_file(app: tauri::AppHandle) -> Result<Option<ImportedDocument>, String> {
+    let parent = app.get_webview_window("main");
+    let app_for_dialog = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app_for_dialog
+            .dialog()
+            .file()
+            .add_filter("Documents", &["pdf", "docx", "txt"]);
+        let dialog = match parent {
+            Some(window) => dialog.set_parent(&window),
+            None => dialog,
+        };
+        dialog.blocking_pick_file()
+    })
+    .await
+    .map_err(|err| format!("Import dialog failed: {err}"))?;
+
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|err| format!("Invalid import path: {err}"))?;
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !matches!(extension.as_str(), "pdf" | "docx" | "txt") {
+        return Err("Choose a PDF, DOCX or TXT file.".to_string());
+    }
+    let metadata = fs::metadata(&path)
+        .map_err(|err| format!("Could not inspect {}: {err}", path.display()))?;
+    if metadata.len() > MAX_IMPORT_DOCUMENT_BYTES {
+        return Err("The selected document is larger than the 8 MB limit.".to_string());
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("cv")
+        .to_string();
+    let bytes = fs::read(&path)
+        .map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+    Ok(Some(ImportedDocument { name, bytes }))
 }
 
 /// Open a user-selected backup and return its text. The dialog and the read
@@ -2161,6 +2315,8 @@ pub fn run() {
             delete_data_file,
             export_backup_file,
             export_csv_file,
+            save_export_file,
+            read_import_file,
             import_backup_file,
             keyring_get,
             keyring_set,
@@ -2377,11 +2533,16 @@ mod tests {
     }
 
     fn test_data_dir(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "aas-{label}-{}-{}",
-            std::process::id(),
-            timestamp_nanos()
-        ));
+        // Keep test scratch files inside target/: system temp is not writable
+        // in every sandbox/CI environment.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("test-tmp")
+            .join(format!(
+                "aas-{label}-{}-{}",
+                std::process::id(),
+                timestamp_nanos()
+            ));
         fs::create_dir_all(&dir).expect("create test dir");
         dir
     }
@@ -2544,6 +2705,23 @@ mod tests {
         assert!(ensure_csv_extension(Path::new("applications.CSV")).is_ok());
         assert!(ensure_csv_extension(Path::new("applications.json")).is_err());
         assert!(ensure_csv_extension(Path::new("applications")).is_err());
+    }
+
+    #[test]
+    fn document_export_names_and_extensions_are_safe() {
+        assert_eq!(
+            sanitize_document_name("Cover Letter.pdf", "pdf"),
+            "Cover Letter.pdf"
+        );
+        assert_eq!(
+            sanitize_document_name("../../evil.docx", "docx"),
+            "evil.docx"
+        );
+        assert_eq!(sanitize_document_name("   ", "pdf"), "cover-letter.pdf");
+        assert!(ensure_export_extension(Path::new("a.pdf"), "pdf").is_ok());
+        assert!(ensure_export_extension(Path::new("a.PDF"), "pdf").is_ok());
+        assert!(ensure_export_extension(Path::new("a.docx"), "pdf").is_err());
+        assert!(ensure_export_extension(Path::new("a"), "docx").is_err());
     }
 
     #[test]

@@ -31,10 +31,15 @@ import {
   RotateCcw,
   RefreshCw,
   Link2,
+  FileDown,
   X,
   type LucideIcon,
 } from "lucide-react";
 import type { ProfileData, WebSource } from "@/types";
+import {
+  exportCoverLetter,
+  type ExportFormat,
+} from "@/utils/documentExport";
 
 function sourceLabel(title: string, url: string): string {
   try {
@@ -131,6 +136,10 @@ export default function MessageList({
   const [improvePendingId, setImprovePendingId] = useState<string | null>(null);
   const [deepImprovePendingId, setDeepImprovePendingId] = useState<string | null>(null);
   const [openRefineKey, setOpenRefineKey] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<{
+    key: string;
+    format: ExportFormat;
+  } | null>(null);
   const [improveStep, setImproveStep] = useState<ImproveStep | null>(null);
   const [improvePreview, setImprovePreview] = useState("");
   const [actionActivity, setActionActivity] = useState<ToolActivity | null>(null);
@@ -304,6 +313,24 @@ export default function MessageList({
       addedAt: new Date().toISOString(),
     });
     flashFeedback(msgId, setSavedId);
+  };
+
+  const handleExport = async (
+    key: string,
+    content: string,
+    format: ExportFormat,
+  ) => {
+    setOpenRefineKey(null);
+    setExporting({ key, format });
+    try {
+      await exportCoverLetter(content, company, format);
+    } catch (err) {
+      setError(
+        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setExporting(null);
+    }
   };
 
   const handleDeslop = async (msgId: string, content: string) => {
@@ -747,15 +774,16 @@ export default function MessageList({
                       ? "rounded bg-field p-1 text-text-primary transition-colors disabled:opacity-50"
                       : "rounded p-1 text-text-muted transition-colors hover:text-text-primary disabled:opacity-50"
                   }
-                  title="Refine draft"
-                  aria-label="Refine draft"
+                  title="Draft actions"
+                  aria-label="Draft actions"
                   aria-haspopup="menu"
                   aria-expanded={openRefineKey === key}
                 >
                   {reviewPendingId === key ||
                   improvePendingId === key ||
                   deepImprovePendingId === key ||
-                  deslopPendingId === key ? (
+                  deslopPendingId === key ||
+                  exporting?.key === key ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
                     <Sparkles className="size-4" />
@@ -765,7 +793,7 @@ export default function MessageList({
                 {openRefineKey === key && (
                   <div
                     role="menu"
-                    aria-label="Refine draft"
+                    aria-label="Draft actions"
                     className="absolute right-full top-0 z-20 mr-1 w-48 rounded-md border border-border bg-popover p-1 shadow-lg"
                   >
                     <RefineItem
@@ -807,6 +835,32 @@ export default function MessageList({
                         setOpenRefineKey(null);
                         void handleDeslop(key, msg.content);
                       }}
+                    />
+                    <div
+                      role="separator"
+                      className="my-1 border-t border-border"
+                    />
+                    <RefineItem
+                      icon={FileDown}
+                      label="Export as PDF"
+                      pending={
+                        exporting?.key === key && exporting.format === "pdf"
+                      }
+                      disabled={actionsBlocked || exporting !== null}
+                      onClick={() =>
+                        void handleExport(key, msg.content, "pdf")
+                      }
+                    />
+                    <RefineItem
+                      icon={FileDown}
+                      label="Export as DOCX"
+                      pending={
+                        exporting?.key === key && exporting.format === "docx"
+                      }
+                      disabled={actionsBlocked || exporting !== null}
+                      onClick={() =>
+                        void handleExport(key, msg.content, "docx")
+                      }
                     />
                   </div>
                 )}

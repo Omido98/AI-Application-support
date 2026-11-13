@@ -330,6 +330,19 @@ pub fn get_diagnostics(app: tauri::AppHandle) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    /// Test scratch space under target/ (system temp is not writable in every
+    /// sandbox/CI environment).
+    fn test_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("test-tmp")
+            .join(format!("aas-{label}-{unique}"))
+    }
+
     #[test]
     fn utc_timestamp_formats_known_epochs() {
         assert_eq!(utc_timestamp_at(0), "1970-01-01T00:00:00Z");
@@ -353,11 +366,7 @@ mod tests {
 
     #[test]
     fn data_file_entries_lists_only_json_files() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("aas-logging-test-{unique}"));
+        let dir = test_dir("logging-files");
         fs::create_dir_all(dir.join("folder.json")).unwrap();
         fs::write(dir.join("applications.json"), b"{}").unwrap();
         fs::write(dir.join("notes.txt"), b"not json").unwrap();
@@ -372,11 +381,7 @@ mod tests {
 
     #[test]
     fn log_file_appends_and_rotates_once_full() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("aas-log-sink-test-{unique}"));
+        let dir = test_dir("logging-sink");
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app.log");
 

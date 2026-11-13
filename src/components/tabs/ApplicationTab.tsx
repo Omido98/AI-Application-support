@@ -51,6 +51,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import FitMatrixCard from "@/components/tracker/FitMatrixCard";
 
 function StatusBadge({ status }: { status: ApplicationStatus }) {
   return (
@@ -1038,6 +1039,11 @@ export default function ApplicationTab() {
                 </div>
               </CardContent>
             </Card>
+
+            <FitMatrixCard
+              application={selected}
+              onOpenChat={() => setActiveTab("chat")}
+            />
 
             {/* Company Name */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">

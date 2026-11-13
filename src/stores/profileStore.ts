@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { saveJson, loadJson, reportDataIssue } from "@/utils/storage";
 import { normalizeProfileData } from "@/utils/dataValidation";
+import {
+  applyImportedProfile as mergeProfile,
+  type ImportMode,
+} from "@/utils/profileMerge";
 import type {
   Education,
   CoverLetter,
@@ -78,6 +82,9 @@ interface ProfileState extends ProfileData {
   /** Set the AI-extracted cover letter summary text */
   setCoverLetterSummary: (value: string) => void;
 
+  /** Apply a CV import, either merging into or replacing the CV sections. */
+  applyImportedProfile: (profile: ProfileData, mode: ImportMode) => void;
+
   // Education actions
   setEducation: (items: Education[]) => void;
   addEducation: (item: Education) => void;
@@ -131,7 +138,7 @@ interface ProfileState extends ProfileData {
 // Store implementation
 // ──────────────────────────────────────────────
 
-export const useProfileStore = create<ProfileState>((set) => ({
+export const useProfileStore = create<ProfileState>((set, get) => ({
   // ── Data ──
   fullName: "",
   email: "",
@@ -177,6 +184,12 @@ export const useProfileStore = create<ProfileState>((set) => ({
   // ── Cover letter summary ──
   setCoverLetterSummary: (value) => {
     set({ coverLetterSummary: value });
+    debouncedSave();
+  },
+
+  applyImportedProfile: (profile, mode) => {
+    const merged = mergeProfile(get(), profile, mode);
+    set({ ...merged });
     debouncedSave();
   },
 

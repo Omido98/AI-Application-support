@@ -13,6 +13,7 @@ import CertificationsSection from "@/components/profile/CertificationsSection";
 import SkillsSection from "@/components/profile/SkillsSection";
 import InterestsSection from "@/components/profile/InterestsSection";
 import LanguagesSection from "@/components/profile/LanguagesSection";
+import ImportCvDialog from "@/components/profile/ImportCvDialog";
 import {
   DEFAULT_PROFILE_SECTION_ORDER,
   PROFILE_SECTION_LABELS,
@@ -26,6 +27,7 @@ export default function ProfileTab() {
   const setSectionOrder = useSettingsStore((s) => s.setProfileSectionOrder);
 
   const [reordering, setReordering] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -66,14 +68,23 @@ export default function ProfileTab() {
       <div className="max-w-4xl mx-auto space-y-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-text-primary">Profile</h1>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setReordering((value) => !value)}
-            aria-expanded={reordering}
-          >
-            {reordering ? "Done reordering" : "Reorder sections"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setImportOpen(true)}
+            >
+              Import CV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReordering((value) => !value)}
+              aria-expanded={reordering}
+            >
+              {reordering ? "Done reordering" : "Reorder sections"}
+            </Button>
+          </div>
         </div>
 
         {reordering && (
@@ -135,6 +146,8 @@ export default function ProfileTab() {
           </Fragment>
         ))}
       </div>
+
+      <ImportCvDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>
   );
 }
