@@ -108,12 +108,24 @@ function App() {
     };
   }, []);
 
-  // Apply theme
+  // Apply theme. The "system" preference follows the OS setting live.
+  const [systemPrefersDark, setSystemPrefersDark] = useState(
+    () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true,
+  );
   useEffect(() => {
-    const root = document.documentElement;
-    if (theme === "dark") root.classList.add("dark");
-    else root.classList.remove("dark");
-  }, [theme]);
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (event: MediaQueryListEvent) =>
+      setSystemPrefersDark(event.matches);
+    setSystemPrefersDark(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  const isDarkTheme =
+    theme === "system" ? systemPrefersDark : theme === "dark";
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDarkTheme);
+  }, [isDarkTheme]);
 
   // Apply accent colour (+ readable foreground)
   useEffect(() => {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Check,
   ClipboardCopy,
+  Monitor,
   Moon,
   Plus,
   Sun,
@@ -262,7 +263,7 @@ export default function SettingsDialog({
           {/* Theme */}
           <div className="space-y-2">
             <h3 className="text-xs font-medium text-text-secondary">Theme</h3>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <Button
                 variant={theme === "light" ? "default" : "outline"}
                 onClick={() => setTheme("light")}
@@ -278,6 +279,15 @@ export default function SettingsDialog({
               >
                 <Moon className="size-4 mr-1.5" />
                 Dark
+              </Button>
+              <Button
+                variant={theme === "system" ? "default" : "outline"}
+                onClick={() => setTheme("system")}
+                title="Follow the operating system theme"
+                className="justify-center"
+              >
+                <Monitor className="size-4 mr-1.5" />
+                System
               </Button>
             </div>
           </div>

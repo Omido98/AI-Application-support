@@ -31,9 +31,10 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
 - **Profile** — education, work experience, certifications, skills, languages,
   previous cover letters, and a public profile (e.g. LinkedIn) URL that the
   AI can reference.
-- **Settings** — theme, accent colour, AI provider/model/context window, backup
-  and restore, update checks, and a **Copy diagnostics** report with versions,
-  data-file sizes and the recent log.
+- **Settings** — light, dark or follow-system theme, accent colour, AI
+  provider/model/context window, backup and restore, update checks, and a
+  **Copy diagnostics** report with versions, data-file sizes and the recent
+  log.
 - **Backup & restore** — export all your data (applications, chat threads,
   drafts, profile, settings, API config) to a single JSON file and import it
   back. API keys are never included in a backup.

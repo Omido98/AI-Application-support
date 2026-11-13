@@ -6,8 +6,10 @@ import { normalizeSettingsData } from "@/utils/dataValidation";
 // Settings types
 // ──────────────────────────────────────────────
 
+export type ThemePreference = "dark" | "light" | "system";
+
 export interface Settings {
-  theme: "dark" | "light";
+  theme: ThemePreference;
   accent: string;
 }
 
@@ -43,11 +45,11 @@ export function getAccentForeground(hex: string): string {
 interface SettingsState extends Settings {
   isLoaded: boolean;
   loadSettings: () => Promise<void>;
-  setTheme: (theme: "dark" | "light") => void;
+  setTheme: (theme: ThemePreference) => void;
   setAccent: (accent: string) => void;
 }
 
-function persist(theme: "dark" | "light", accent: string) {
+function persist(theme: ThemePreference, accent: string) {
   void saveJson("settings.json", { theme, accent } as Settings);
 }
 

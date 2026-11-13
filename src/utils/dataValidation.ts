@@ -312,9 +312,10 @@ export function normalizeProfileData(value: unknown): ProfileData | null {
 
 export function normalizeSettingsData(
   value: unknown,
-): { theme: "dark" | "light"; accent: string } | null {
+): { theme: "dark" | "light" | "system"; accent: string } | null {
   if (!isRecord(value)) return null;
-  const theme = value.theme === "light" ? "light" : "dark";
+  const theme =
+    value.theme === "light" || value.theme === "system" ? value.theme : "dark";
   const accent =
     typeof value.accent === "string" && /^#[0-9a-f]{6}$/i.test(value.accent)
       ? value.accent

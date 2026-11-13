@@ -104,6 +104,12 @@ describe("normalizeSettingsData", () => {
       theme: "light",
       accent: "#34d399",
     });
+    expect(
+      normalizeSettingsData({ theme: "system", accent: "#34d399" }),
+    ).toEqual({
+      theme: "system",
+      accent: "#34d399",
+    });
     expect(normalizeSettingsData({ theme: "neon", accent: "red" })).toEqual({
       theme: "dark",
       accent: "",
