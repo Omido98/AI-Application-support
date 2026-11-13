@@ -152,7 +152,8 @@ function extractUsage(data: unknown): TokenUsage | undefined {
   const inputTokens =
     numericToken(record.input_tokens) ?? numericToken(record.prompt_tokens);
   const outputTokens =
-    numericToken(record.output_tokens) ?? numericToken(record.completion_tokens);
+    numericToken(record.output_tokens) ??
+    numericToken(record.completion_tokens);
   if (inputTokens === undefined && outputTokens === undefined) return undefined;
   return {
     ...(inputTokens !== undefined ? { inputTokens } : {}),
@@ -234,6 +235,7 @@ export async function listModels(
   } catch (err) {
     throw new Error(
       typeof err === "string" ? err : "Failed to load the model list.",
+      { cause: err },
     );
   }
 }
@@ -250,6 +252,7 @@ export async function fetchZenPricing(): Promise<ZenPricingEntry[]> {
   } catch (err) {
     throw new Error(
       typeof err === "string" ? err : "Failed to import model prices.",
+      { cause: err },
     );
   }
 }
@@ -323,7 +326,13 @@ export async function reviewDraft(
   options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   return sendMessage(
-    [{ role: "user", content: "Review the draft above.", timestamp: new Date().toISOString() }],
+    [
+      {
+        role: "user",
+        content: "Review the draft above.",
+        timestamp: new Date().toISOString(),
+      },
+    ],
     config,
     buildDraftReviewPrompt(draft, application, profile),
     options,
@@ -364,7 +373,14 @@ export async function verifyDraft(
   options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   return sendMessage(
-    [{ role: "user", content: "Verify whether the revised draft above addresses the feedback below.", timestamp: new Date().toISOString() }],
+    [
+      {
+        role: "user",
+        content:
+          "Verify whether the revised draft above addresses the feedback below.",
+        timestamp: new Date().toISOString(),
+      },
+    ],
     { ...config, webSearchEnabled: false },
     buildDraftVerifyPrompt(draft, feedback),
     options,
@@ -395,7 +411,13 @@ export async function reviseDraft(
   options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   return sendMessage(
-    [{ role: "user", content: "Revise the draft above.", timestamp: new Date().toISOString() }],
+    [
+      {
+        role: "user",
+        content: "Revise the draft above.",
+        timestamp: new Date().toISOString(),
+      },
+    ],
     { ...config, webSearchEnabled: false },
     buildDraftRevisionPrompt(draft, review, profile),
     options,
@@ -428,7 +450,14 @@ export async function improveDraft(
   config: ApiConfig,
   options: ImproveDraftOptions = {},
 ): Promise<ImproveDraftResponse> {
-  return runImprovePipeline("quick", draft, application, profile, config, options);
+  return runImprovePipeline(
+    "quick",
+    draft,
+    application,
+    profile,
+    config,
+    options,
+  );
 }
 
 /**
@@ -451,7 +480,14 @@ export async function deepImproveDraft(
   config: ApiConfig,
   options: ImproveDraftOptions = {},
 ): Promise<ImproveDraftResponse> {
-  return runImprovePipeline("deep", draft, application, profile, config, options);
+  return runImprovePipeline(
+    "deep",
+    draft,
+    application,
+    profile,
+    config,
+    options,
+  );
 }
 
 async function runImprovePipeline(
@@ -466,20 +502,28 @@ async function runImprovePipeline(
 
   // The reviewer's feedback every revision round must apply. Rounds always
   // revise against the original review report; the verifier only checks it.
-  let reviewFeedback = "";
-
   await pace();
   options.onStep?.("review");
   const firstReview = await reviewDraft(draft, application, profile, config, {
     signal: options.signal,
   });
   if (firstReview.error) {
-    return { content: "", error: firstReview.error, rounds: 0, verdict: "unknown" };
+    return {
+      content: "",
+      error: firstReview.error,
+      rounds: 0,
+      verdict: "unknown",
+    };
   }
   if (firstReview.stopped) {
-    return { content: firstReview.content ?? "", stopped: true, rounds: 0, verdict: "unknown" };
+    return {
+      content: firstReview.content ?? "",
+      stopped: true,
+      rounds: 0,
+      verdict: "unknown",
+    };
   }
-  reviewFeedback = firstReview.content;
+  const reviewFeedback = firstReview.content;
 
   let current = draft;
   let verdict = parseReviewVerdict(reviewFeedback);
@@ -497,15 +541,26 @@ async function runImprovePipeline(
 
     await pace();
     options.onStep?.("revise");
-    const revised = await reviseDraft(current, reviewFeedback, profile, config, {
-      signal: options.signal,
-      onDelta: options.onDelta,
-    });
+    const revised = await reviseDraft(
+      current,
+      reviewFeedback,
+      profile,
+      config,
+      {
+        signal: options.signal,
+        onDelta: options.onDelta,
+      },
+    );
     if (revised.error) {
       return { content: "", error: revised.error, rounds, verdict: "unknown" };
     }
     if (revised.stopped) {
-      return { content: revised.content ?? "", stopped: true, rounds, verdict: "unknown" };
+      return {
+        content: revised.content ?? "",
+        stopped: true,
+        rounds,
+        verdict: "unknown",
+      };
     }
     current = revised.content;
     rounds++;
@@ -546,14 +601,25 @@ function finishWithDeslop(
   return (async () => {
     await pace();
     options.onStep?.("deslop");
-    const cleaned = await deslopText(current, config, { signal: options.signal });
+    const cleaned = await deslopText(current, config, {
+      signal: options.signal,
+    });
     if (cleaned.error) {
       return { content: "", error: cleaned.error, rounds: 0, verdict };
     }
     if (cleaned.stopped) {
-      return { content: cleaned.content ?? "", stopped: true, rounds: 0, verdict };
+      return {
+        content: cleaned.content ?? "",
+        stopped: true,
+        rounds: 0,
+        verdict,
+      };
     }
-    return { content: applyDeslop(current, cleaned.content), rounds: 0, verdict };
+    return {
+      content: applyDeslop(current, cleaned.content),
+      rounds: 0,
+      verdict,
+    };
   })();
 }
 
@@ -722,17 +788,28 @@ async function sendOpenAICompatMessage(
   // that failed or came back truncated.
   const callCounts = new Map<string, number>();
 
-  const buildPayload = (withTools: boolean, stream: boolean): Record<string, unknown> => {
+  const buildPayload = (
+    withTools: boolean,
+    stream: boolean,
+  ): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
       model: model || "deepseek-v4-flash-free",
       messages: [
         { role: "system", content: systemPrompt },
         ...history.map((m) => {
           if (m.role === "tool") {
-            return { role: "tool", tool_call_id: m.tool_call_id, content: m.content };
+            return {
+              role: "tool",
+              tool_call_id: m.tool_call_id,
+              content: m.content,
+            };
           }
           if (m.tool_calls) {
-            return { role: m.role, content: m.content, tool_calls: m.tool_calls };
+            return {
+              role: m.role,
+              content: m.content,
+              tool_calls: m.tool_calls,
+            };
           }
           return { role: m.role, content: m.content };
         }),
@@ -778,7 +855,9 @@ async function sendOpenAICompatMessage(
    * one final round so it writes its answer with what it already has. Errors
    * only if even that round writes nothing.
    */
-  const finishWithoutTools = async (fallbackError: string): Promise<ApiResponse> => {
+  const finishWithoutTools = async (
+    fallbackError: string,
+  ): Promise<ApiResponse> => {
     useTools = false;
     // Drop tool artifacts from the history so the tools-free request parses.
     for (let i = history.length - 1; i >= 0; i--) {
@@ -810,10 +889,17 @@ async function sendOpenAICompatMessage(
     }
 
     let result = useStream
-      ? await streamChat(baseUrl, apiKey, config.provider, buildPayload(useTools, true), options, (text) => {
-          streamedContent += text;
-          options.onDelta?.(text);
-        })
+      ? await streamChat(
+          baseUrl,
+          apiKey,
+          config.provider,
+          buildPayload(useTools, true),
+          options,
+          (text) => {
+            streamedContent += text;
+            options.onDelta?.(text);
+          },
+        )
       : await runNonStreamingRound(useTools);
 
     if (result.stopped) {
@@ -831,7 +917,6 @@ async function sendOpenAICompatMessage(
       if (result.error) {
         // Some models reject the `tools` field; retry once without it.
         if (useTools && /tool/i.test(result.error)) {
-          useTools = false;
           // Drop tool artifacts from the history so plain models can parse it.
           for (let i = history.length - 1; i >= 0; i--) {
             if (history[i].role === "tool") {
@@ -1034,7 +1119,10 @@ async function sendAnthropicMessage(
   // that failed or came back truncated.
   const callCounts = new Map<string, number>();
 
-  const buildPayload = (withTools: boolean, stream: boolean): Record<string, unknown> => {
+  const buildPayload = (
+    withTools: boolean,
+    stream: boolean,
+  ): Record<string, unknown> => {
     const payload: Record<string, unknown> = {
       model: model || ANTHROPIC_DEFAULT_MODEL,
       max_tokens: ANTHROPIC_MAX_TOKENS,
@@ -1054,7 +1142,11 @@ async function sendAnthropicMessage(
 
   const runNonStreamingRound = async (
     withTools: boolean,
-  ): Promise<{ data?: AnthropicResponse; error?: string; stopped?: boolean }> => {
+  ): Promise<{
+    data?: AnthropicResponse;
+    error?: string;
+    stopped?: boolean;
+  }> => {
     try {
       const data = await invoke<AnthropicResponse>("zen_chat", {
         baseUrl,
@@ -1076,7 +1168,9 @@ async function sendAnthropicMessage(
    * one final round so it writes its answer with what it already has. Errors
    * only if even that round writes nothing.
    */
-  const finishWithoutTools = async (fallbackError: string): Promise<ApiResponse> => {
+  const finishWithoutTools = async (
+    fallbackError: string,
+  ): Promise<ApiResponse> => {
     useTools = false;
     toolContext = [];
 
@@ -1101,10 +1195,17 @@ async function sendAnthropicMessage(
     }
 
     let result = useStream
-      ? await streamChat(baseUrl, apiKey, "anthropic", buildPayload(useTools, true), options, (text) => {
-          streamedContent += text;
-          options.onDelta?.(text);
-        })
+      ? await streamChat(
+          baseUrl,
+          apiKey,
+          "anthropic",
+          buildPayload(useTools, true),
+          options,
+          (text) => {
+            streamedContent += text;
+            options.onDelta?.(text);
+          },
+        )
       : await runNonStreamingRound(useTools);
 
     if (result.stopped) {
@@ -1122,7 +1223,6 @@ async function sendAnthropicMessage(
       if (result.error) {
         // Some models reject the `tools` field; retry once without it.
         if (useTools && /tool/i.test(result.error)) {
-          useTools = false;
           toolContext = [];
 
           const retry = await runNonStreamingRound(false);
@@ -1253,10 +1353,7 @@ async function searchWeb(
     }
   }
   return results
-    .map(
-      (r, i) =>
-        `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`,
-    )
+    .map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`)
     .join("\n\n");
 }
 
@@ -1299,8 +1396,7 @@ async function executeAnthropicTool(
 
     return `Error: unknown tool "${name}".`;
   } catch (err) {
-    const message =
-      typeof err === "string" ? err : "unknown error";
+    const message = typeof err === "string" ? err : "unknown error";
     return `Error while running ${name}: ${message}`;
   }
 }
@@ -1342,8 +1438,7 @@ async function executeTool(
 
     return `Error: unknown tool "${call.function.name}".`;
   } catch (err) {
-    const message =
-      typeof err === "string" ? err : "unknown error";
+    const message = typeof err === "string" ? err : "unknown error";
     return `Error while running ${call.function.name}: ${message}`;
   }
 }

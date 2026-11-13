@@ -47,8 +47,9 @@ export const PHASE_TWO_APPLICATION: JobApplication = {
 };
 
 /** Prompt-facing context derived from the full Phase 2 application. */
-export const APPLICATION_CONTEXT: ApplicationContext =
-  applicationContextFrom(PHASE_TWO_APPLICATION);
+export const APPLICATION_CONTEXT: ApplicationContext = applicationContextFrom(
+  PHASE_TWO_APPLICATION,
+);
 
 /**
  * Core application fields only. Used to prove that empty Phase 2 details
@@ -212,19 +213,17 @@ I would love to discuss how I can bring this same energy to Northstar Labs.
 Best regards,
 Astrid Nyholm`;
 
-export const CONVERSATION: { role: "user" | "assistant"; content: string }[] =
-  [
-    {
-      role: "user",
-      content: "Make the opening shorter and mention the design system work.",
-    },
-    {
-      role: "assistant",
-      content:
-        "Here is a shorter opening that names the design system project.",
-    },
-    {
-      role: "user",
-      content: "Keep it under 250 words and avoid the word passionate.",
-    },
-  ];
+export const CONVERSATION: { role: "user" | "assistant"; content: string }[] = [
+  {
+    role: "user",
+    content: "Make the opening shorter and mention the design system work.",
+  },
+  {
+    role: "assistant",
+    content: "Here is a shorter opening that names the design system project.",
+  },
+  {
+    role: "user",
+    content: "Keep it under 250 words and avoid the word passionate.",
+  },
+];

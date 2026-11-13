@@ -186,10 +186,7 @@ export default function OverviewTab() {
         <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
           <CardContent className="space-y-4">
             <div className="flex items-center gap-2">
-              <TrendingUp
-                className="size-4 text-primary"
-                aria-hidden="true"
-              />
+              <TrendingUp className="size-4 text-primary" aria-hidden="true" />
               <h2 className="text-sm font-semibold text-text-primary">
                 Conversion rates
               </h2>
@@ -315,7 +312,9 @@ export default function OverviewTab() {
                             {item.companyName.trim() || "Untitled application"}
                           </span>
                           <span className="block text-[10px] text-text-muted">
-                            {item.kind === "deadline" ? "Deadline" : "Follow-up"}{" "}
+                            {item.kind === "deadline"
+                              ? "Deadline"
+                              : "Follow-up"}{" "}
                             · {formatShortDate(item.date)}
                           </span>
                         </span>

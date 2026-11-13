@@ -34,8 +34,7 @@ export default function MessageInput({
   // turns into a stop button.
   const isGenerating = !!onStop && disabled;
 
-  const usageRatio =
-    contextLimit > 0 ? tokenEstimate / contextLimit : 0;
+  const usageRatio = contextLimit > 0 ? tokenEstimate / contextLimit : 0;
   const usageTone =
     usageRatio >= 1
       ? "text-destructive"

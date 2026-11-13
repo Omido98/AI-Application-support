@@ -135,7 +135,9 @@ describe("updateMessage", () => {
       failed: true,
     }));
 
-    expect(useChatStore.getState().messages).toEqual([{ ...msg, failed: true }]);
+    expect(useChatStore.getState().messages).toEqual([
+      { ...msg, failed: true },
+    ]);
   });
 
   it("clears a failed flag when a message is re-sent", () => {
@@ -280,7 +282,9 @@ describe("thread persistence", () => {
     await useChatStore.getState().switchThread("app-1", true);
 
     expect(loadJsonMock).toHaveBeenCalledWith("chat_app-1.json");
-    expect(useChatStore.getState().messages).toEqual([userMessage("after import")]);
+    expect(useChatStore.getState().messages).toEqual([
+      userMessage("after import"),
+    ]);
   });
 
   it("returns null-safe empty messages when a thread file is missing", async () => {
@@ -382,12 +386,8 @@ describe("suggestions and reviews", () => {
   it("keeps artifacts out of the model conversation", () => {
     expect(isConversationMessage(source)).toBe(true);
     expect(isConversationMessage(suggestion)).toBe(false);
-    expect(
-      isConversationMessage({ ...source, kind: "review" }),
-    ).toBe(false);
-    expect(
-      isConversationMessage({ ...source, kind: "summary" }),
-    ).toBe(false);
+    expect(isConversationMessage({ ...source, kind: "review" })).toBe(false);
+    expect(isConversationMessage({ ...source, kind: "summary" })).toBe(false);
   });
 
   it("accepts a suggestion by replacing the source and removing the card", async () => {
@@ -399,11 +399,7 @@ describe("suggestions and reviews", () => {
 
     await useChatStore
       .getState()
-      .acceptSuggestion(
-        "app-1",
-        messageKey(suggestion),
-        messageKey(source),
-      );
+      .acceptSuggestion("app-1", messageKey(suggestion), messageKey(source));
 
     expect(useChatStore.getState().messages).toEqual([
       {

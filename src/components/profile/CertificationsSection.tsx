@@ -11,8 +11,18 @@ import ConfirmDeleteDialog, {
 } from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 function createEmptyCertification(): Certification {
@@ -54,7 +64,9 @@ export default function CertificationsSection() {
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <CardTitle className="text-text-primary text-lg">Certifications</CardTitle>
+        <CardTitle className="text-text-primary text-lg">
+          Certifications
+        </CardTitle>
         <Button
           variant="outline"
           size="sm"
@@ -110,7 +122,9 @@ export default function CertificationsSection() {
                 }
               >
                 {MONTHS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
                 ))}
               </select>
             </div>

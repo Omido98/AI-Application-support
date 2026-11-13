@@ -132,7 +132,10 @@ describe("normalizeProfileData", () => {
         {
           company: "Acme",
           role: "Engineer",
-          projects: ["Legacy project", { name: "New project", startYear: 2024 }],
+          projects: [
+            "Legacy project",
+            { name: "New project", startYear: 2024 },
+          ],
         },
       ],
       education: "not an array",
@@ -153,11 +156,15 @@ describe("normalizeProfileData", () => {
 
 describe("normalizeSettingsData", () => {
   it("falls back to a valid theme and rejects an invalid accent", () => {
-    expect(normalizeSettingsData({ theme: "light", accent: "#34d399" })).toMatchObject({
+    expect(
+      normalizeSettingsData({ theme: "light", accent: "#34d399" }),
+    ).toMatchObject({
       theme: "light",
       accent: "#34d399",
       lastTab: "application",
       onboardingDone: false,
+      autoUpdateCheck: true,
+      skippedUpdateVersion: "",
     });
     expect(
       normalizeSettingsData({ theme: "system", accent: "#34d399" }),
@@ -179,7 +186,9 @@ describe("normalizeSettingsData", () => {
       lastTab: "chat",
       onboardingDone: false,
     });
-    expect(normalizeSettingsData({ theme: "neon", accent: "red" })).toMatchObject({
+    expect(
+      normalizeSettingsData({ theme: "neon", accent: "red" }),
+    ).toMatchObject({
       theme: "dark",
       accent: "",
       lastTab: "application",
@@ -195,6 +204,34 @@ describe("normalizeSettingsData", () => {
     expect(normalizeSettingsData({ lastTab: "bogus" })?.lastTab).toBe(
       "application",
     );
+  });
+
+  it("keeps a skipped update version through normalization", () => {
+    expect(
+      normalizeSettingsData({
+        autoUpdateCheck: false,
+        skippedUpdateVersion: "1.4.0",
+      }),
+    ).toMatchObject({
+      autoUpdateCheck: false,
+      skippedUpdateVersion: "1.4.0",
+    });
+  });
+
+  it("defaults auto-update checks on and coerces invalid update fields", () => {
+    expect(normalizeSettingsData({})).toMatchObject({
+      autoUpdateCheck: true,
+      skippedUpdateVersion: "",
+    });
+    expect(
+      normalizeSettingsData({
+        autoUpdateCheck: "yes",
+        skippedUpdateVersion: 42,
+      }),
+    ).toMatchObject({
+      autoUpdateCheck: true,
+      skippedUpdateVersion: "",
+    });
   });
 
   it("keeps a custom profile order and appends missing sections", () => {
@@ -264,9 +301,9 @@ describe("normalizeApiConfigData", () => {
     expect(
       normalizeApiConfigData({ contextWindow: 32_000 })?.contextWindow,
     ).toBe(32_000);
-    expect(
-      normalizeApiConfigData({ contextWindow: 100 })?.contextWindow,
-    ).toBe(128_000);
+    expect(normalizeApiConfigData({ contextWindow: 100 })?.contextWindow).toBe(
+      128_000,
+    );
     expect(
       normalizeApiConfigData({ contextWindow: "many" })?.contextWindow,
     ).toBe(128_000);

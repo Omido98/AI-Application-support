@@ -123,7 +123,8 @@ export default function ImportCvDialog({
           {fileName && (
             <p className="text-xs text-text-muted">
               {fileName}
-              {textChars > 0 && ` · ${textChars.toLocaleString()} characters extracted`}
+              {textChars > 0 &&
+                ` · ${textChars.toLocaleString()} characters extracted`}
             </p>
           )}
 
@@ -162,10 +163,7 @@ export default function ImportCvDialog({
                 <Button variant="outline" onClick={() => apply("merge")}>
                   Merge into profile
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => apply("replace")}
-                >
+                <Button variant="destructive" onClick={() => apply("replace")}>
                   Replace profile
                 </Button>
               </>

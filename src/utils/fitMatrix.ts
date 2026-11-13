@@ -27,15 +27,89 @@ export type FitProfile = Pick<
 >;
 
 const STOP_WORDS = new Set([
-  "the", "and", "for", "with", "that", "this", "from", "your", "you", "are",
-  "will", "have", "has", "our", "their", "its", "can", "all", "any", "use",
-  "using", "work", "working", "role", "job", "team", "teams", "including",
-  "include", "plus", "etc", "years", "year", "experience", "experienced",
-  "strong", "good", "excellent", "knowledge", "ability", "skills", "skill",
-  "must", "should", "would", "about", "into", "over", "under", "more", "than",
-  "other", "such", "who", "what", "when", "where", "how", "not", "but", "also",
-  "very", "well", "a", "an", "of", "to", "in", "on", "at", "by", "as", "or",
-  "is", "be", "we", "they", "it", "he", "she", "them", "would", "could",
+  "the",
+  "and",
+  "for",
+  "with",
+  "that",
+  "this",
+  "from",
+  "your",
+  "you",
+  "are",
+  "will",
+  "have",
+  "has",
+  "our",
+  "their",
+  "its",
+  "can",
+  "all",
+  "any",
+  "use",
+  "using",
+  "work",
+  "working",
+  "role",
+  "job",
+  "team",
+  "teams",
+  "including",
+  "include",
+  "plus",
+  "etc",
+  "years",
+  "year",
+  "experience",
+  "experienced",
+  "strong",
+  "good",
+  "excellent",
+  "knowledge",
+  "ability",
+  "skills",
+  "skill",
+  "must",
+  "should",
+  "would",
+  "about",
+  "into",
+  "over",
+  "under",
+  "more",
+  "than",
+  "other",
+  "such",
+  "who",
+  "what",
+  "when",
+  "where",
+  "how",
+  "not",
+  "but",
+  "also",
+  "very",
+  "well",
+  "a",
+  "an",
+  "of",
+  "to",
+  "in",
+  "on",
+  "at",
+  "by",
+  "as",
+  "or",
+  "is",
+  "be",
+  "we",
+  "they",
+  "it",
+  "he",
+  "she",
+  "them",
+  "would",
+  "could",
 ]);
 
 /** Lowercase content words used for matching, without stop words. */
@@ -71,7 +145,12 @@ function profileEvidence(profile: FitProfile | null): Evidence[] {
   }
   for (const education of profile.education) {
     add(
-      `Education: ${[education.degree, education.programName, education.major, education.school]
+      `Education: ${[
+        education.degree,
+        education.programName,
+        education.major,
+        education.school,
+      ]
         .filter(Boolean)
         .join(", ")}`,
     );
@@ -89,10 +168,9 @@ function profileEvidence(profile: FitProfile | null): Evidence[] {
 }
 
 function splitRequirements(application: JobApplication): string[] {
-  const sources = [
-    application.requirements,
-    application.jobDescription,
-  ].filter((text) => text.trim().length > 0);
+  const sources = [application.requirements, application.jobDescription].filter(
+    (text) => text.trim().length > 0,
+  );
   if (sources.length === 0) return [];
 
   const candidates: string[] = [];

@@ -146,7 +146,11 @@ export async function loadJson<T>(path: string): Promise<T | null> {
     try {
       return JSON.parse(raw) as T;
     } catch (err) {
-      reportIssue("load", path, `Stored browser data is not valid JSON: ${errorMessage(err)}`);
+      reportIssue(
+        "load",
+        path,
+        `Stored browser data is not valid JSON: ${errorMessage(err)}`,
+      );
       return null;
     }
   }

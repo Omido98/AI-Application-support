@@ -53,7 +53,10 @@ const markdownComponents: Components = {
 export default function Markdown({ children }: { children: string }) {
   return (
     <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={markdownComponents}
+      >
         {children}
       </ReactMarkdown>
     </div>

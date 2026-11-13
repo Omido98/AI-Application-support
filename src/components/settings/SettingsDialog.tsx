@@ -16,10 +16,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import {
-  useSettingsStore,
-  getAccentForeground,
-} from "@/stores/settingsStore";
+import { useSettingsStore, getAccentForeground } from "@/stores/settingsStore";
 import {
   buildBackupBundle,
   parseBackupBundle,
@@ -28,10 +25,7 @@ import {
 import { saveJson, deleteFile } from "@/utils/storage";
 import { exportBackupFile, importBackupFile } from "@/utils/backupFiles";
 import { flushAllSaves } from "@/utils/flushSaves";
-import {
-  copyDiagnostics,
-  logToFileInBackground,
-} from "@/utils/diagnostics";
+import { copyDiagnostics, logToFileInBackground } from "@/utils/diagnostics";
 import { isTauriRuntime } from "@/utils/runtime";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
@@ -39,6 +33,8 @@ import { useChatStore } from "@/stores/chatStore";
 import ApiConfigForm from "./ApiConfigForm";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -62,12 +58,7 @@ const PRESET_ACCENTS = [
 ];
 
 type UpdateStatus =
-  | "idle"
-  | "checking"
-  | "none"
-  | "available"
-  | "downloading"
-  | "failed";
+  "idle" | "checking" | "none" | "available" | "downloading" | "failed";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -82,6 +73,12 @@ export default function SettingsDialog({
   const accent = useSettingsStore((s) => s.accent);
   const setTheme = useSettingsStore((s) => s.setTheme);
   const setAccent = useSettingsStore((s) => s.setAccent);
+  const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
+  const setAutoUpdateCheck = useSettingsStore((s) => s.setAutoUpdateCheck);
+  const skippedUpdateVersion = useSettingsStore((s) => s.skippedUpdateVersion);
+  const setSkippedUpdateVersion = useSettingsStore(
+    (s) => s.setSkippedUpdateVersion,
+  );
 
   const [showPalette, setShowPalette] = useState(false);
 
@@ -106,7 +103,9 @@ export default function SettingsDialog({
   const handleExport = async () => {
     setBackupStatus(null);
     if (isSending) {
-      setBackupStatus("Wait for the current AI reply to finish before exporting.");
+      setBackupStatus(
+        "Wait for the current AI reply to finish before exporting.",
+      );
       return;
     }
     try {
@@ -140,7 +139,9 @@ export default function SettingsDialog({
   const handleImport = async () => {
     setBackupStatus(null);
     if (isSending) {
-      setBackupStatus("Wait for the current AI reply to finish before importing.");
+      setBackupStatus(
+        "Wait for the current AI reply to finish before importing.",
+      );
       return;
     }
     try {
@@ -154,7 +155,9 @@ export default function SettingsDialog({
       if (raw == null) return;
       const bundle = parseBackupBundle(raw);
       if (!bundle) {
-        setBackupStatus("That file is not a valid AI Application Support backup.");
+        setBackupStatus(
+          "That file is not a valid AI Application Support backup.",
+        );
         return;
       }
       const count = Object.keys(bundle.files).length;
@@ -185,7 +188,10 @@ export default function SettingsDialog({
       await useChatStore.getState().loadDrafts(true);
       await useChatStore
         .getState()
-        .switchThread(useApplicationStore.getState().selectedApplicationId, true);
+        .switchThread(
+          useApplicationStore.getState().selectedApplicationId,
+          true,
+        );
       await useSettingsStore.getState().loadSettings();
       setConfigFormKey((key) => key + 1);
       setBackupStatus(
@@ -256,9 +262,7 @@ export default function SettingsDialog({
     try {
       await invoke("open_data_folder");
     } catch (err) {
-      setFolderStatus(
-        err instanceof Error ? err.message : String(err),
-      );
+      setFolderStatus(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -388,7 +392,9 @@ export default function SettingsDialog({
                   aria-label="Custom colour"
                   className={cn(
                     "flex items-center justify-center size-8 rounded-md border border-dashed cursor-pointer transition-transform hover:scale-105 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
-                    PRESET_ACCENTS.every((c) => accent.toLowerCase() !== c.value)
+                    PRESET_ACCENTS.every(
+                      (c) => accent.toLowerCase() !== c.value,
+                    )
                       ? "border-foreground ring-2 ring-primary/50 bg-field"
                       : "border-border",
                   )}
@@ -448,10 +454,52 @@ export default function SettingsDialog({
             <h3 className="text-xs font-medium text-text-secondary">
               Software updates
             </h3>
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="auto-update-check"
+                checked={autoUpdateCheck}
+                onCheckedChange={(checked) =>
+                  setAutoUpdateCheck(checked === true)
+                }
+                className="mt-0.5"
+              />
+              <div className="space-y-1">
+                <Label
+                  htmlFor="auto-update-check"
+                  className="text-text-secondary text-xs cursor-pointer"
+                >
+                  Check for updates on startup
+                </Label>
+                <p className="text-xs text-text-muted">
+                  A quiet check runs a few seconds after launch and only shows a
+                  notice when a newer version exists.
+                </p>
+              </div>
+            </div>
+            {skippedUpdateVersion && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-field/50 px-3 py-1.5">
+                <p className="text-xs text-text-muted">
+                  Skipped version:{" "}
+                  <span className="font-mono text-text-secondary">
+                    {skippedUpdateVersion}
+                  </span>
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSkippedUpdateVersion("")}
+                  title="Show update notices for this version again"
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
             <Button
               variant="outline"
               onClick={() => void handleCheckForUpdates()}
-              disabled={updateStatus === "checking" || updateStatus === "downloading"}
+              disabled={
+                updateStatus === "checking" || updateStatus === "downloading"
+              }
               className="justify-center w-full"
             >
               {updateStatus === "checking"
@@ -471,8 +519,8 @@ export default function SettingsDialog({
             )}
             {updateStatus === "downloading" && (
               <p className="text-xs text-text-muted">
-                Downloading and installing the update… The app will restart
-                when done.
+                Downloading and installing the update… The app will restart when
+                done.
               </p>
             )}
             {updateStatus === "none" && (
@@ -488,7 +536,9 @@ export default function SettingsDialog({
 
           {/* Diagnostics */}
           <div className="space-y-2">
-            <h3 className="text-xs font-medium text-text-secondary">Diagnostics</h3>
+            <h3 className="text-xs font-medium text-text-secondary">
+              Diagnostics
+            </h3>
             {appVersion && (
               <p className="font-mono text-[11px] text-text-muted">
                 AI Application Support {appVersion}

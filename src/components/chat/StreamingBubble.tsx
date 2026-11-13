@@ -59,9 +59,6 @@ export default function StreamingBubble() {
   const streamingText = useChatStore((s) => s.streamingText);
 
   return (
-    <StreamingBubbleView
-      isSending={isSending}
-      streamingText={streamingText}
-    />
+    <StreamingBubbleView isSending={isSending} streamingText={streamingText} />
   );
 }

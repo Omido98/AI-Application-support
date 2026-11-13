@@ -79,21 +79,27 @@ const profile: ProfileData = {
 describe("buildFitMatrix", () => {
   it("marks requirements with multiple evidence items as strong", () => {
     const matrix = buildFitMatrix(application, profile);
-    const ts = matrix.rows.find((row) => row.requirement.includes("TypeScript"));
+    const ts = matrix.rows.find((row) =>
+      row.requirement.includes("TypeScript"),
+    );
     expect(ts?.level).toBe("strong");
     expect(ts?.evidence.some((item) => item.includes("TypeScript"))).toBe(true);
   });
 
   it("marks unmatched requirements as gaps", () => {
     const matrix = buildFitMatrix(application, profile);
-    const k8s = matrix.rows.find((row) => row.requirement.includes("Kubernetes"));
+    const k8s = matrix.rows.find((row) =>
+      row.requirement.includes("Kubernetes"),
+    );
     expect(k8s?.level).toBe("gap");
     expect(k8s?.evidence).toEqual([]);
   });
 
   it("finds partial evidence from a job description", () => {
     const matrix = buildFitMatrix(application, profile);
-    const docker = matrix.rows.find((row) => row.requirement.includes("Docker"));
+    const docker = matrix.rows.find((row) =>
+      row.requirement.includes("Docker"),
+    );
     expect(docker?.level).toBe("gap");
     expect(matrix.rows).toHaveLength(3);
     expect(matrix.gap).toBe(2);

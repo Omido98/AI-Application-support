@@ -8,7 +8,9 @@ const SAFE_EXTERNAL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
  * blocks `file:`, `javascript:` and custom-scheme payloads from being passed to
  * the opener plugin.
  */
-export function isSafeExternalUrl(raw: string | null | undefined): raw is string {
+export function isSafeExternalUrl(
+  raw: string | null | undefined,
+): raw is string {
   if (!raw) return false;
   try {
     return SAFE_EXTERNAL_PROTOCOLS.has(new URL(raw).protocol);

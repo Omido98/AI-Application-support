@@ -42,7 +42,11 @@ export default function ChatSettings({
     setWebSearchEnabled(config.webSearchEnabled ?? false);
     setPromptMode(config.systemPromptMode ?? "standard");
     setCustomPrompt(config.customSystemPrompt ?? "");
-  }, [config.webSearchEnabled, config.systemPromptMode, config.customSystemPrompt]);
+  }, [
+    config.webSearchEnabled,
+    config.systemPromptMode,
+    config.customSystemPrompt,
+  ]);
 
   const handleSave = async () => {
     await setConfig({
@@ -75,9 +79,7 @@ export default function ChatSettings({
           <Checkbox
             id="web-search-enabled"
             checked={webSearchEnabled}
-            onCheckedChange={(checked) =>
-              setWebSearchEnabled(checked === true)
-            }
+            onCheckedChange={(checked) => setWebSearchEnabled(checked === true)}
             className="mt-0.5"
           />
           <div className="space-y-1">
@@ -88,11 +90,10 @@ export default function ChatSettings({
               Web search (after the first message)
             </Label>
             <p className="text-xs text-text-muted">
-              The first message of a chat always researches the company for
-              the fit evaluation. Turn this on to let the agent search the
-              web and fetch pages on later messages too (up to 5 pages per
-              turn). Turn it off if your model keeps requesting web tools
-              without answering.
+              The first message of a chat always researches the company for the
+              fit evaluation. Turn this on to let the agent search the web and
+              fetch pages on later messages too (up to 5 pages per turn). Turn
+              it off if your model keeps requesting web tools without answering.
             </p>
           </div>
         </div>

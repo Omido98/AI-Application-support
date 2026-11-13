@@ -1,10 +1,5 @@
 import { useState } from "react";
-import {
-  ArrowRight,
-  Briefcase,
-  MessageSquare,
-  UserRound,
-} from "lucide-react";
+import { ArrowRight, Briefcase, MessageSquare, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

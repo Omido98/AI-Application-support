@@ -41,7 +41,7 @@ export async function exportBackupFile(
       contents,
     });
   } catch (err) {
-    throw new Error(errorMessage(err));
+    throw new Error(errorMessage(err), { cause: err });
   }
 }
 
@@ -67,6 +67,6 @@ export async function importBackupFile(): Promise<string | null> {
   try {
     return await invoke<string | null>("import_backup_file");
   } catch (err) {
-    throw new Error(errorMessage(err));
+    throw new Error(errorMessage(err), { cause: err });
   }
 }

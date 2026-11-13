@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import { saveJson, loadJson, deleteFile, reportDataIssue } from "@/utils/storage";
+import {
+  saveJson,
+  loadJson,
+  deleteFile,
+  reportDataIssue,
+} from "@/utils/storage";
 import { normalizeApplicationsPayload } from "@/utils/dataValidation";
 import type { JobApplication } from "@/types";
 
@@ -131,13 +136,15 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
         followUpAt: "",
         contactName: "",
         contactEmail: "",
-        statusHistory: [
-          { status: "wishlist", at: new Date().toISOString() },
-        ],
+        statusHistory: [{ status: "wishlist", at: new Date().toISOString() }],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      set({ applications: [app], selectedApplicationId: app.id, isLoaded: true });
+      set({
+        applications: [app],
+        selectedApplicationId: app.id,
+        isLoaded: true,
+      });
       await saveJson("applications.json", {
         applications: [app],
         selectedApplicationId: app.id,

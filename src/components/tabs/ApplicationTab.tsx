@@ -12,10 +12,7 @@ import { openExternalUrl } from "@/utils/links";
 import { exportApplicationsCsv } from "@/utils/csv";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useChatStore } from "@/stores/chatStore";
-import {
-  useAppStore,
-  type ApplicationSortMode,
-} from "@/stores/useAppStore";
+import { useAppStore, type ApplicationSortMode } from "@/stores/useAppStore";
 import type {
   ApplicationPriority,
   ApplicationStatus,
@@ -401,7 +398,8 @@ export default function ApplicationTab() {
   const selectedFollowUp = selected
     ? dueChip(selected.followUpAt, "Follow-up")
     : null;
-  const pendingDelete = applications.find((a) => a.id === pendingDeleteId) ?? null;
+  const pendingDelete =
+    applications.find((a) => a.id === pendingDeleteId) ?? null;
 
   if (!isLoaded) {
     return (
@@ -420,8 +418,8 @@ export default function ApplicationTab() {
         </p>
         <p className="text-text-muted text-sm mt-2 max-w-md">
           Add the job you're applying for — the company, the job description,
-          and what the application requires. The AI assistant will then help
-          you craft your application.
+          and what the application requires. The AI assistant will then help you
+          craft your application.
         </p>
         <Button
           className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
@@ -856,9 +854,7 @@ export default function ApplicationTab() {
                       onValueChange={(v) =>
                         updateApplication(selected.id, {
                           workMode:
-                            v === "none" || v === null
-                              ? ""
-                              : (v as WorkMode),
+                            v === "none" || v === null ? "" : (v as WorkMode),
                         })
                       }
                     >
@@ -1118,7 +1114,9 @@ export default function ApplicationTab() {
                     title="Open in browser"
                     aria-label="Open application URL in browser"
                     disabled={!selected.applicationUrl.trim()}
-                    onClick={() => void openInBrowser(selected.applicationUrl.trim())}
+                    onClick={() =>
+                      void openInBrowser(selected.applicationUrl.trim())
+                    }
                   >
                     <ExternalLink className="size-3.5" />
                   </Button>
@@ -1243,7 +1241,10 @@ export default function ApplicationTab() {
       </div>
 
       {/* ── Delete confirmation ── */}
-      <Dialog open={pendingDeleteId !== null} onOpenChange={(open) => !open && setPendingDeleteId(null)}>
+      <Dialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(open) => !open && setPendingDeleteId(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete application?</DialogTitle>
@@ -1259,10 +1260,7 @@ export default function ApplicationTab() {
             <Button variant="outline" onClick={() => setPendingDeleteId(null)}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-            >
+            <Button variant="destructive" onClick={handleDelete}>
               Delete
             </Button>
           </DialogFooter>

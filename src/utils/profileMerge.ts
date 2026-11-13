@@ -3,9 +3,7 @@ import type { ProfileData } from "@/types";
 export type ImportMode = "merge" | "replace";
 
 function normalizedKey(...parts: Array<string | undefined>): string {
-  return parts
-    .map((part) => (part ?? "").trim().toLowerCase())
-    .join("|");
+  return parts.map((part) => (part ?? "").trim().toLowerCase()).join("|");
 }
 
 function dedupe<T>(

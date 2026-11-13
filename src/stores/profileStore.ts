@@ -75,7 +75,10 @@ interface ProfileState extends ProfileData {
   /** Set the personal details (name, contact, location, linkedin URL) */
   setPersonalDetails: (
     patch: Partial<
-      Pick<ProfileData, "fullName" | "email" | "city" | "country" | "linkedinUrl">
+      Pick<
+        ProfileData,
+        "fullName" | "email" | "city" | "country" | "linkedinUrl"
+      >
     >,
   ) => void;
 
@@ -204,9 +207,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
   updateEducation: (id, patch) => {
     set((s) => ({
-      education: s.education.map((e) =>
-        e.id === id ? { ...e, ...patch } : e,
-      ),
+      education: s.education.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     }));
     debouncedSave();
   },
@@ -324,9 +325,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
   updateSkill: (id, patch) => {
     set((s) => ({
-      skills: s.skills.map((sk) =>
-        sk.id === id ? { ...sk, ...patch } : sk,
-      ),
+      skills: s.skills.map((sk) => (sk.id === id ? { ...sk, ...patch } : sk)),
     }));
     debouncedSave();
   },
@@ -372,9 +371,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
   updateLanguage: (id, patch) => {
     set((s) => ({
-      languages: s.languages.map((l) =>
-        l.id === id ? { ...l, ...patch } : l,
-      ),
+      languages: s.languages.map((l) => (l.id === id ? { ...l, ...patch } : l)),
     }));
     debouncedSave();
   },

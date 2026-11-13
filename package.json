@@ -9,6 +9,12 @@
     "preview": "vite preview",
     "test": "vitest run",
     "eval": "vitest run src/eval",
+    "lint": "eslint src",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" \"scripts/**/*.mjs\" \"*.{json,js,ts}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" \"scripts/**/*.mjs\" \"*.{json,js,ts}\"",
+    "test:e2e": "playwright test",
+    "version:check": "node scripts/check-version.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
     "tauri": "tauri",
     "build:arm64": "tauri build --target aarch64-pc-windows-msvc",
     "build:x64": "tauri build --target x86_64-pc-windows-msvc",
@@ -43,12 +49,20 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/typography": "^0.5.20",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.72.2",
     "vite": "^7.0.4",
     "vitest": "^4.1.10"
   }

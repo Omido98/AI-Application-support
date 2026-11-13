@@ -44,7 +44,9 @@ describe("fitHistoryToBudget", () => {
     expect(fitted.messages).toHaveLength(3);
     expect(fitted.messages[2].content).toContain("m9");
     expect(fitted.droppedCount).toBe(7);
-    expect(fitted.historyTokens).toBe(3 * (estimateTokens(messages[0].content) + MESSAGE_OVERHEAD_TOKENS));
+    expect(fitted.historyTokens).toBe(
+      3 * (estimateTokens(messages[0].content) + MESSAGE_OVERHEAD_TOKENS),
+    );
     expect(fitted.overBudget).toBe(false);
   });
 

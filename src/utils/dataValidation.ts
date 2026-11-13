@@ -1,12 +1,6 @@
 import type { ApiConfig } from "@/stores/chatStore";
-import {
-  inferProviderFromBaseUrl,
-  isKnownProviderId,
-} from "@/utils/providers";
-import {
-  DEFAULT_CONTEXT_WINDOW,
-  MIN_CONTEXT_WINDOW,
-} from "@/utils/tokens";
+import { inferProviderFromBaseUrl, isKnownProviderId } from "@/utils/providers";
+import { DEFAULT_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW } from "@/utils/tokens";
 import type {
   ApplicationPriority,
   ApplicationStatus,
@@ -76,9 +70,7 @@ function newId(): string {
 }
 
 function normalizeId(value: unknown): string {
-  return typeof value === "string" && value.trim().length > 0
-    ? value
-    : newId();
+  return typeof value === "string" && value.trim().length > 0 ? value : newId();
 }
 
 function notNull<T>(value: T | null): value is T {
@@ -147,7 +139,9 @@ function normalizeDate(value: unknown): string {
   if (!match) return "";
   const date = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return "";
-  if (date.toISOString().slice(0, 10) !== `${match[1]}-${match[2]}-${match[3]}`) {
+  if (
+    date.toISOString().slice(0, 10) !== `${match[1]}-${match[2]}-${match[3]}`
+  ) {
     return "";
   }
   return `${match[1]}-${match[2]}-${match[3]}`;
@@ -419,6 +413,8 @@ export function normalizeSettingsData(value: unknown): {
   lastTab: "overview" | "application" | "chat" | "profile";
   onboardingDone: boolean;
   profileSectionOrder: ProfileSectionId[];
+  autoUpdateCheck: boolean;
+  skippedUpdateVersion: string;
 } | null {
   if (!isRecord(value)) return null;
   const theme =
@@ -441,6 +437,12 @@ export function normalizeSettingsData(value: unknown): {
     profileSectionOrder: normalizeProfileSectionOrder(
       value.profileSectionOrder,
     ),
+    // Missing in files written before the feature existed: default to on.
+    autoUpdateCheck:
+      typeof value.autoUpdateCheck === "boolean" ? value.autoUpdateCheck : true,
+    skippedUpdateVersion: asString(value.skippedUpdateVersion)
+      .trim()
+      .slice(0, 64),
   };
 }
 
@@ -490,12 +492,11 @@ export function normalizeApiConfigData(value: unknown): ApiConfig | null {
         ? Math.floor(value.contextWindow)
         : DEFAULT_CONTEXT_WINDOW,
     webSearchEnabled: asBoolean(value.webSearchEnabled),
-    systemPromptMode: value.systemPromptMode === "custom" ? "custom" : "standard",
+    systemPromptMode:
+      value.systemPromptMode === "custom" ? "custom" : "standard",
     customSystemPrompt: asString(value.customSystemPrompt),
     keychainAccount:
-      typeof value.keychainAccount === "string"
-        ? value.keychainAccount
-        : null,
+      typeof value.keychainAccount === "string" ? value.keychainAccount : null,
     sessionKeyOnly: asBoolean(value.sessionKeyOnly),
   };
 }

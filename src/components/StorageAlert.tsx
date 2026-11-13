@@ -64,7 +64,9 @@ export default function StorageAlert() {
           </p>
           <p className="mt-1 font-mono text-[10px] text-text-muted">
             {latest.file}
-            {issues.length > 1 ? ` · ${issues.length - 1} earlier issue(s)` : ""}
+            {issues.length > 1
+              ? ` · ${issues.length - 1} earlier issue(s)`
+              : ""}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">

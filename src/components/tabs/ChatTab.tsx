@@ -67,8 +67,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const applications = useApplicationStore((s) => s.applications);
   const applicationsLoaded = useApplicationStore((s) => s.isLoaded);
   const selectedId = useApplicationStore((s) => s.selectedApplicationId);
-  const application =
-    applications.find((a) => a.id === selectedId) ?? null;
+  const application = applications.find((a) => a.id === selectedId) ?? null;
 
   const profile = useProfileStore();
   const loadProfile = useProfileStore((s) => s.loadProfile);
@@ -116,8 +115,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
           conversationSummary: summary,
         })
       : basePrompt;
-    const reserved =
-      estimateTokens(prompt) + estimateTokens(inputValue);
+    const reserved = estimateTokens(prompt) + estimateTokens(inputValue);
     const fitted =
       summary || reserved !== baseReserved
         ? fitHistoryToBudget(conversationMessages, {
@@ -248,8 +246,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     const budget = getContextBudget(config.contextWindow);
     const fitted = fitHistoryToBudget(conversation, {
       inputBudget: budget.inputBudget,
-      reservedTokens:
-        estimateTokens(basePrompt) + estimateTokens(inputValue),
+      reservedTokens: estimateTokens(basePrompt) + estimateTokens(inputValue),
     });
     if (fitted.droppedCount === 0) {
       setSummaryError(
@@ -363,7 +360,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
       let targetIndex = -1;
       let target: ChatMessage | null = null;
-      let trimmed = "";
+      let trimmed: string;
       if (isResend || isRegenerate) {
         const lookupKey = opts.resendKey ?? opts.regenerateKey;
         targetIndex = messagesBefore.findIndex(
@@ -562,20 +559,22 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       // stopped-partial path reads it.
       flushStreamBuffer();
       setToolActivity(null);
-      const sources = sourcesRef.current.length > 0 ? sourcesRef.current : undefined;
+      const sources =
+        sourcesRef.current.length > 0 ? sourcesRef.current : undefined;
       const usage = result.usage;
       const costUsd =
         usage && config.provider === "zen"
           ? isFreeModel(config.model)
             ? 0
-            : estimateUsageCost(config.model, usage) ?? undefined
+            : (estimateUsageCost(config.model, usage) ?? undefined)
           : undefined;
 
       if (result.error) {
         // The user's message did not land: flag it so it can be re-sent in
         // place. A regeneration keeps the old reply untouched.
         if (!isRegenerate) {
-          const failedKey = opts.resendKey ?? (userMsg ? messageKey(userMsg) : null);
+          const failedKey =
+            opts.resendKey ?? (userMsg ? messageKey(userMsg) : null);
           if (failedKey) {
             updateMessage(failedKey, (m) => ({ ...m, failed: true }));
           }
@@ -627,7 +626,10 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
             ...(costUsd !== undefined ? { costUsd } : {}),
           });
         }
-        if (result.finishReason === "length" || result.finishReason === "max_tokens") {
+        if (
+          result.finishReason === "length" ||
+          result.finishReason === "max_tokens"
+        ) {
           setReplyNotice(
             "The reply hit the model's output limit and may be incomplete. Ask it to continue if needed.",
           );
@@ -669,7 +671,10 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
   // ── Starter button on empty chat ──
   const handleStart = useCallback(() => {
-    void sendText({ text: "Help me answer my application", triggerFitEvaluation: true });
+    void sendText({
+      text: "Help me answer my application",
+      triggerFitEvaluation: true,
+    });
   }, [sendText]);
 
   // ── Show loading state while restoring config ──
@@ -689,10 +694,10 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
           Connect your AI provider
         </p>
         <p className="text-text-muted text-sm mt-2 max-w-md">
-          The chat assistant needs an API key to work. You can use OpenCode
-          Zen, Anthropic, OpenAI, or any OpenAI-compatible endpoint. Your key
-          is stored securely in your system&apos;s keychain and never leaves
-          your computer.
+          The chat assistant needs an API key to work. You can use OpenCode Zen,
+          Anthropic, OpenAI, or any OpenAI-compatible endpoint. Your key is
+          stored securely in your system&apos;s keychain and never leaves your
+          computer.
         </p>
         <Button
           className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
@@ -723,8 +728,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         </p>
         <p className="text-text-muted text-sm mt-2 max-w-md">
           The chat assistant works on one application at a time. Create an
-          application first, then come back here to craft your cover letter
-          and answers.
+          application first, then come back here to craft your cover letter and
+          answers.
         </p>
         <Button
           className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
@@ -856,8 +861,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2 text-[10px] leading-snug text-text-muted">
           <span>
             {contextUsage.dropped} older message
-            {contextUsage.dropped === 1 ? "" : "s"} will be omitted from the next
-            request to stay within the context budget.
+            {contextUsage.dropped === 1 ? "" : "s"} will be omitted from the
+            next request to stay within the context budget.
           </span>
           <button
             type="button"

@@ -40,8 +40,10 @@ export function rangeWarning(
   isCurrent?: boolean,
 ): string | null {
   if (isCurrent || !startYear || !endYear) return null;
-  const start = Number(startYear) * 12 + Math.max(0, MONTHS.indexOf(startMonth));
-  const end = Number(endYear) * 12 + Math.max(0, MONTHS.indexOf(endMonth ?? ""));
+  const start =
+    Number(startYear) * 12 + Math.max(0, MONTHS.indexOf(startMonth));
+  const end =
+    Number(endYear) * 12 + Math.max(0, MONTHS.indexOf(endMonth ?? ""));
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   return end < start ? "End date is before the start date." : null;
 }

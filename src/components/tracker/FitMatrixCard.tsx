@@ -57,7 +57,9 @@ export default function FitMatrixCard({
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
       <CardHeader className="flex flex-row items-start justify-between gap-3 pb-3">
         <div>
-          <CardTitle className="text-text-primary text-lg">Fit matrix</CardTitle>
+          <CardTitle className="text-text-primary text-lg">
+            Fit matrix
+          </CardTitle>
           <p className="mt-1 text-xs text-text-muted">
             Requirement lines matched against your profile. Use chat for the
             nuanced evaluation.
@@ -75,13 +77,25 @@ export default function FitMatrixCard({
         ) : (
           <>
             <div className="flex flex-wrap gap-2 text-[11px]">
-              <span className={cn("rounded border px-2 py-0.5", LEVEL_STYLES.strong)}>
+              <span
+                className={cn(
+                  "rounded border px-2 py-0.5",
+                  LEVEL_STYLES.strong,
+                )}
+              >
                 {matrix.strong} strong
               </span>
-              <span className={cn("rounded border px-2 py-0.5", LEVEL_STYLES.partial)}>
+              <span
+                className={cn(
+                  "rounded border px-2 py-0.5",
+                  LEVEL_STYLES.partial,
+                )}
+              >
                 {matrix.partial} partial
               </span>
-              <span className={cn("rounded border px-2 py-0.5", LEVEL_STYLES.gap)}>
+              <span
+                className={cn("rounded border px-2 py-0.5", LEVEL_STYLES.gap)}
+              >
                 {matrix.gap} gap
               </span>
             </div>
@@ -89,7 +103,9 @@ export default function FitMatrixCard({
               {matrix.rows.map((row) => (
                 <li key={row.requirement} className="space-y-1 px-3 py-2">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm text-text-primary">{row.requirement}</p>
+                    <p className="text-sm text-text-primary">
+                      {row.requirement}
+                    </p>
                     <span
                       className={cn(
                         "shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium",

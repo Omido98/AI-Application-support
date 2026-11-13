@@ -47,7 +47,10 @@ export function getContextBudget(contextWindow?: number | null): ContextBudget {
   return {
     contextWindow: window,
     outputReserve,
-    inputBudget: Math.max(1_024, window - outputReserve - CONTEXT_SAFETY_MARGIN),
+    inputBudget: Math.max(
+      1_024,
+      window - outputReserve - CONTEXT_SAFETY_MARGIN,
+    ),
   };
 }
 
@@ -99,10 +102,7 @@ export function fitHistoryToBudget(
         break;
       }
     }
-    kept =
-      lastUserIndex >= 0
-        ? [messages[lastUserIndex]]
-        : messages.slice(-1);
+    kept = lastUserIndex >= 0 ? [messages[lastUserIndex]] : messages.slice(-1);
   }
 
   const historyTokens = kept.reduce(

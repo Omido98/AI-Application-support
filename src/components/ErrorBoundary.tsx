@@ -58,10 +58,7 @@ export default class ErrorBoundary extends Component<
               <pre className="mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-field p-2 font-mono text-[11px] text-text-muted">
                 {this.state.error.message}
               </pre>
-              <Button
-                className="mt-4"
-                onClick={() => window.location.reload()}
-              >
+              <Button className="mt-4" onClick={() => window.location.reload()}>
                 Reload the app
               </Button>
             </div>

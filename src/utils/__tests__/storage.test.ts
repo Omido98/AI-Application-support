@@ -55,9 +55,9 @@ describe("saveJson (Tauri)", () => {
     enterTauri();
     invokeMock.mockResolvedValue(undefined);
 
-    await expect(saveJson("applications.json", { applications: [] })).resolves.toBe(
-      true,
-    );
+    await expect(
+      saveJson("applications.json", { applications: [] }),
+    ).resolves.toBe(true);
 
     expect(invokeMock).toHaveBeenCalledWith("save_data_file", {
       name: "applications.json",
@@ -69,9 +69,9 @@ describe("saveJson (Tauri)", () => {
     enterTauri();
     invokeMock.mockRejectedValue("disk full");
 
-    await expect(saveJson("applications.json", { applications: [] })).resolves.toBe(
-      false,
-    );
+    await expect(
+      saveJson("applications.json", { applications: [] }),
+    ).resolves.toBe(false);
 
     expect(getStorageIssues()).toEqual([
       expect.objectContaining({
@@ -177,7 +177,9 @@ describe("browser fallback", () => {
       true,
     );
     expect(invokeMock).not.toHaveBeenCalled();
-    expect(localStorage.getItem("aas:settings.json")).toContain('"theme": "dark"');
+    expect(localStorage.getItem("aas:settings.json")).toContain(
+      '"theme": "dark"',
+    );
 
     await expect(loadJson("settings.json")).resolves.toEqual({ theme: "dark" });
   });

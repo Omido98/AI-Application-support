@@ -131,14 +131,20 @@ describe("parseBackupBundle", () => {
 
   it("rejects unsupported future versions", () => {
     expect(
-      parseBackupBundle(JSON.stringify({ ...valid, version: BACKUP_VERSION + 1 })),
+      parseBackupBundle(
+        JSON.stringify({ ...valid, version: BACKUP_VERSION + 1 }),
+      ),
     ).toBeNull();
-    expect(parseBackupBundle(JSON.stringify({ ...valid, version: 0 }))).toBeNull();
+    expect(
+      parseBackupBundle(JSON.stringify({ ...valid, version: 0 })),
+    ).toBeNull();
   });
 
   it("rejects malformed JSON and missing files", () => {
     expect(parseBackupBundle("{not json")).toBeNull();
-    expect(parseBackupBundle(JSON.stringify({ ...valid, files: null }))).toBeNull();
+    expect(
+      parseBackupBundle(JSON.stringify({ ...valid, files: null })),
+    ).toBeNull();
   });
 });
 

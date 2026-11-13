@@ -3,24 +3,28 @@ import { Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/plugin-process";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useAppStore } from "@/stores/useAppStore";
-import {
-  useSettingsStore,
-  getAccentForeground,
-} from "@/stores/settingsStore";
+import { useSettingsStore, getAccentForeground } from "@/stores/settingsStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
 import { flushAllSaves } from "@/utils/flushSaves";
+import { logToFileInBackground } from "@/utils/diagnostics";
+import { isTauriRuntime } from "@/utils/runtime";
 import OverviewTab from "@/components/tabs/OverviewTab";
 import ApplicationTab from "@/components/tabs/ApplicationTab";
 import ChatTab from "@/components/tabs/ChatTab";
 import ProfileTab from "@/components/tabs/ProfileTab";
 import SettingsDialog from "@/components/settings/SettingsDialog";
 import OnboardingDialog from "@/components/OnboardingDialog";
+import UpdateNotice from "@/components/UpdateNotice";
 import StorageAlert from "@/components/StorageAlert";
 import { Button } from "@/components/ui/button";
 
 type TabId = "overview" | "application" | "chat" | "profile";
+
+/** Wait before the silent startup check so it never competes with first paint. */
+const STARTUP_UPDATE_CHECK_DELAY_MS = 5000;
 
 const tabs: { id: TabId; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -45,13 +49,50 @@ function App() {
   const setLastTab = useSettingsStore((s) => s.setLastTab);
   const onboardingDone = useSettingsStore((s) => s.onboardingDone);
   const setOnboardingDone = useSettingsStore((s) => s.setOnboardingDone);
+  const autoUpdateCheck = useSettingsStore((s) => s.autoUpdateCheck);
 
   const [showSettings, setShowSettings] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
 
   // Load persisted settings on mount
   useEffect(() => {
     if (!settingsLoaded) loadSettings();
   }, [settingsLoaded, loadSettings]);
+
+  // Silent update check: runs a few seconds after the UI is interactive, only
+  // when the user left it enabled, and never blocks startup. It waits for the
+  // onboarding walkthrough so the two dialogs cannot fight over focus, and it
+  // skips a version the user explicitly said "do not remind me" about.
+  useEffect(() => {
+    if (!settingsLoaded || !onboardingDone || !autoUpdateCheck) return;
+    if (!isTauriRuntime()) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const found = await check();
+          if (cancelled || !found) return;
+          const skipped = useSettingsStore.getState().skippedUpdateVersion;
+          if (found.version !== skipped) setPendingUpdate(found);
+        } catch (err) {
+          // A background check failing is expected (offline, proxy, GitHub
+          // outage); log it for diagnostics and leave the user alone.
+          logToFileInBackground(
+            `[update] Automatic check failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            "warn",
+          );
+        }
+      })();
+    }, STARTUP_UPDATE_CHECK_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [settingsLoaded, onboardingDone, autoUpdateCheck]);
 
   // Load the persisted profile on mount, so the chat agent always sees it
   // even if the user never visits the Profile tab.
@@ -90,7 +131,7 @@ function App() {
                 { title: "Save failed", kind: "warning" },
               );
             } catch {
-              closeAnyway = false;
+              // Keep the default: a failed prompt means "do not close".
             }
             if (!closeAnyway) {
               closing = false;
@@ -128,8 +169,7 @@ function App() {
     return () => media.removeEventListener("change", onChange);
   }, []);
 
-  const isDarkTheme =
-    theme === "system" ? systemPrefersDark : theme === "dark";
+  const isDarkTheme = theme === "system" ? systemPrefersDark : theme === "dark";
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDarkTheme);
   }, [isDarkTheme]);
@@ -300,6 +340,11 @@ function App() {
       <OnboardingDialog
         open={!onboardingDone}
         onDone={() => setOnboardingDone(true)}
+      />
+      <UpdateNotice
+        update={pendingUpdate}
+        open={pendingUpdate !== null}
+        onClose={() => setPendingUpdate(null)}
       />
     </div>
   );

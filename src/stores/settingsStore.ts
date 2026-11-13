@@ -22,6 +22,10 @@ export interface Settings {
   onboardingDone: boolean;
   /** User-chosen order of the Profile tab sections. */
   profileSectionOrder: ProfileSectionId[];
+  /** Check for a newer release a few seconds after launch. */
+  autoUpdateCheck: boolean;
+  /** Release the user asked not to be reminded about; "" = none. */
+  skippedUpdateVersion: string;
 }
 
 export const DEFAULT_ACCENT = "#34d399";
@@ -31,6 +35,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lastTab: "application",
   onboardingDone: false,
   profileSectionOrder: DEFAULT_PROFILE_SECTION_ORDER,
+  autoUpdateCheck: true,
+  skippedUpdateVersion: "",
 };
 
 // ──────────────────────────────────────────────
@@ -64,6 +70,8 @@ interface SettingsState extends Settings {
   setLastTab: (tab: TabId) => void;
   setOnboardingDone: (done: boolean) => void;
   setProfileSectionOrder: (order: ProfileSectionId[]) => void;
+  setAutoUpdateCheck: (enabled: boolean) => void;
+  setSkippedUpdateVersion: (version: string) => void;
 }
 
 function persist(state: SettingsState) {
@@ -73,6 +81,8 @@ function persist(state: SettingsState) {
     lastTab: state.lastTab,
     onboardingDone: state.onboardingDone,
     profileSectionOrder: state.profileSectionOrder,
+    autoUpdateCheck: state.autoUpdateCheck,
+    skippedUpdateVersion: state.skippedUpdateVersion,
   };
   void saveJson("settings.json", settings);
 }
@@ -100,6 +110,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         profileSectionOrder:
           normalized?.profileSectionOrder ??
           DEFAULT_SETTINGS.profileSectionOrder,
+        autoUpdateCheck:
+          normalized?.autoUpdateCheck ?? DEFAULT_SETTINGS.autoUpdateCheck,
+        skippedUpdateVersion:
+          normalized?.skippedUpdateVersion ??
+          DEFAULT_SETTINGS.skippedUpdateVersion,
         isLoaded: true,
       });
     } else {
@@ -129,6 +144,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setProfileSectionOrder: (profileSectionOrder) => {
     set({ profileSectionOrder });
+    persist(get());
+  },
+
+  setAutoUpdateCheck: (autoUpdateCheck) => {
+    set({ autoUpdateCheck });
+    persist(get());
+  },
+
+  setSkippedUpdateVersion: (skippedUpdateVersion) => {
+    set({ skippedUpdateVersion });
     persist(get());
   },
 }));

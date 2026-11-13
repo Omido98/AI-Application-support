@@ -58,37 +58,39 @@ beforeEach(async () => {
   keychainReadBroken = false;
   keychainCorruptsWrite = false;
 
-  invokeMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
-    switch (cmd) {
-      case "keyring_get":
-        if (keychainReadBroken) throw new Error("Keychain error: locked");
-        return keychain.get(String(args.key)) ?? null;
-      case "keyring_set":
-        if (keychainSetBroken) throw new Error("Keychain error: locked");
-        keychain.set(
-          String(args.key),
-          keychainCorruptsWrite ? "SOMETHING-ELSE" : String(args.value),
-        );
-        return null;
-      case "keyring_delete":
-        keychain.delete(String(args.key));
-        return null;
-      case "save_data_file":
-        files.set(String(args.name), JSON.stringify(args.data));
-        return null;
-      case "load_data_file": {
-        const raw = files.get(String(args.name));
-        return raw == null
-          ? { data: null, recovered: false, error: null }
-          : { data: JSON.parse(raw), recovered: false, error: null };
+  invokeMock.mockImplementation(
+    async (cmd: string, args: Record<string, unknown>) => {
+      switch (cmd) {
+        case "keyring_get":
+          if (keychainReadBroken) throw new Error("Keychain error: locked");
+          return keychain.get(String(args.key)) ?? null;
+        case "keyring_set":
+          if (keychainSetBroken) throw new Error("Keychain error: locked");
+          keychain.set(
+            String(args.key),
+            keychainCorruptsWrite ? "SOMETHING-ELSE" : String(args.value),
+          );
+          return null;
+        case "keyring_delete":
+          keychain.delete(String(args.key));
+          return null;
+        case "save_data_file":
+          files.set(String(args.name), JSON.stringify(args.data));
+          return null;
+        case "load_data_file": {
+          const raw = files.get(String(args.name));
+          return raw == null
+            ? { data: null, recovered: false, error: null }
+            : { data: JSON.parse(raw), recovered: false, error: null };
+        }
+        case "delete_data_file":
+          files.delete(String(args.name));
+          return null;
+        default:
+          return null;
       }
-      case "delete_data_file":
-        files.delete(String(args.name));
-        return null;
-      default:
-        return null;
-    }
-  });
+    },
+  );
 
   useChatStore.setState({
     configLoaded: false,
@@ -123,7 +125,9 @@ describe("credential storage", () => {
     useChatStore.setState({ configLoaded: false });
     await useChatStore.getState().loadConfig();
     expect(useChatStore.getState().config.apiKey).toBe("K1");
-    expect(useChatStore.getState().config.keychainAccount).toBe(API_KEY_ACCOUNT);
+    expect(useChatStore.getState().config.keychainAccount).toBe(
+      API_KEY_ACCOUNT,
+    );
   });
 
   it("migrates a pre-upgrade plaintext key into the keychain and strips the file", async () => {

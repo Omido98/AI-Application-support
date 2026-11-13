@@ -15,8 +15,18 @@ import ConfirmDeleteDialog, {
 } from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 function createEmptyOtherEngagement(): OtherEngagement {
@@ -78,7 +88,9 @@ export default function OtherEngagementsSection() {
     }
     const title = [oe.role, oe.organization].filter(Boolean).join(" @ ");
     setDeleteTarget({
-      label: title ? `the engagement entry "${title}"` : "this engagement entry",
+      label: title
+        ? `the engagement entry "${title}"`
+        : "this engagement entry",
       onConfirm: () => removeOtherEngagement(oe.id),
     });
   };
@@ -105,7 +117,9 @@ export default function OtherEngagementsSection() {
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <CardTitle className="text-text-primary text-lg">Other Engagements</CardTitle>
+        <CardTitle className="text-text-primary text-lg">
+          Other Engagements
+        </CardTitle>
         <Button
           variant="outline"
           size="sm"
@@ -119,7 +133,8 @@ export default function OtherEngagementsSection() {
       <CardContent className="space-y-3">
         {otherEngagements.length === 0 && (
           <p className="text-text-muted text-sm text-center py-4">
-            No other engagements yet. Click "Add Other Engagement" to get started.
+            No other engagements yet. Click "Add Other Engagement" to get
+            started.
           </p>
         )}
 
@@ -127,7 +142,9 @@ export default function OtherEngagementsSection() {
           const isExpanded = expanded[oe.id] ?? false;
           const title = [oe.role, oe.organization].filter(Boolean).join(" @ ");
           const dateRange = `${oe.startMonth} ${oe.startYear} – ${
-            oe.isCurrent ? "Present" : `${oe.endMonth ?? ""} ${oe.endYear ?? ""}`
+            oe.isCurrent
+              ? "Present"
+              : `${oe.endMonth ?? ""} ${oe.endYear ?? ""}`
           }`;
 
           return (
@@ -204,7 +221,9 @@ export default function OtherEngagementsSection() {
                           className={inputClass}
                           value={oe.organization}
                           onChange={(e) =>
-                            updateOtherEngagement(oe.id, { organization: e.target.value })
+                            updateOtherEngagement(oe.id, {
+                              organization: e.target.value,
+                            })
                           }
                           placeholder="e.g. Red Cross"
                         />
@@ -221,7 +240,9 @@ export default function OtherEngagementsSection() {
                           className={inputClass}
                           value={oe.role}
                           onChange={(e) =>
-                            updateOtherEngagement(oe.id, { role: e.target.value })
+                            updateOtherEngagement(oe.id, {
+                              role: e.target.value,
+                            })
                           }
                           placeholder="e.g. Volunteer Coordinator"
                         />
@@ -242,11 +263,15 @@ export default function OtherEngagementsSection() {
                           className={selectClass}
                           value={oe.startMonth}
                           onChange={(e) =>
-                            updateOtherEngagement(oe.id, { startMonth: e.target.value })
+                            updateOtherEngagement(oe.id, {
+                              startMonth: e.target.value,
+                            })
                           }
                         >
                           {MONTHS.map((m) => (
-                            <option key={m} value={m}>{m}</option>
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
                           ))}
                         </select>
                         <select
@@ -255,11 +280,15 @@ export default function OtherEngagementsSection() {
                           className={selectClass}
                           value={oe.startYear}
                           onChange={(e) =>
-                            updateOtherEngagement(oe.id, { startYear: e.target.value })
+                            updateOtherEngagement(oe.id, {
+                              startYear: e.target.value,
+                            })
                           }
                         >
                           {YEARS.map((y) => (
-                            <option key={y} value={y}>{y}</option>
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -273,7 +302,8 @@ export default function OtherEngagementsSection() {
                         onCheckedChange={(checked) =>
                           updateOtherEngagement(oe.id, {
                             isCurrent: checked === true,
-                            endMonth: checked === true ? undefined : oe.endMonth,
+                            endMonth:
+                              checked === true ? undefined : oe.endMonth,
                             endYear: checked === true ? undefined : oe.endYear,
                           })
                         }
@@ -301,11 +331,15 @@ export default function OtherEngagementsSection() {
                             className={selectClass}
                             value={oe.endMonth ?? "June"}
                             onChange={(e) =>
-                              updateOtherEngagement(oe.id, { endMonth: e.target.value })
+                              updateOtherEngagement(oe.id, {
+                                endMonth: e.target.value,
+                              })
                             }
                           >
                             {MONTHS.map((m) => (
-                              <option key={m} value={m}>{m}</option>
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
                             ))}
                           </select>
                           <select
@@ -314,11 +348,15 @@ export default function OtherEngagementsSection() {
                             className={selectClass}
                             value={oe.endYear ?? "2024"}
                             onChange={(e) =>
-                              updateOtherEngagement(oe.id, { endYear: e.target.value })
+                              updateOtherEngagement(oe.id, {
+                                endYear: e.target.value,
+                              })
                             }
                           >
                             {YEARS.map((y) => (
-                              <option key={y} value={y}>{y}</option>
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
                             ))}
                           </select>
                         </div>
@@ -385,7 +423,9 @@ export default function OtherEngagementsSection() {
                             onChange={(e) => {
                               const next = [...oe.achievements];
                               next[ai] = e.target.value;
-                              updateOtherEngagement(oe.id, { achievements: next });
+                              updateOtherEngagement(oe.id, {
+                                achievements: next,
+                              });
                             }}
                             placeholder="Describe the achievement / merit — add as much detail as you like…"
                           />

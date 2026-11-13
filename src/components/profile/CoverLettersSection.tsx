@@ -145,8 +145,8 @@ export default function CoverLettersSection() {
             <p className="text-xs text-text-muted max-w-md">
               The chat assistant only ever reads the summary in the text box
               below, never the full letters. After adding or editing a cover
-              letter, press "Summarize cover letters" again to keep the
-              summary current.
+              letter, press "Summarize cover letters" again to keep the summary
+              current.
             </p>
             <Button
               variant="outline"
@@ -166,7 +166,7 @@ export default function CoverLettersSection() {
             placeholder={
               coverLetters.length === 0
                 ? "Add cover letters first, then summarize."
-                : "No summary yet. Press \"Summarize cover letters\" to extract the main points."
+                : 'No summary yet. Press "Summarize cover letters" to extract the main points.'
             }
           />
           {summaryError && (
@@ -182,9 +182,10 @@ export default function CoverLettersSection() {
 
         {coverLetters.map((cl) => {
           const isExpanded = expanded[cl.id] ?? false;
-          const preview = cl.content.length > 100
-            ? cl.content.slice(0, 100) + "…"
-            : cl.content;
+          const preview =
+            cl.content.length > 100
+              ? cl.content.slice(0, 100) + "…"
+              : cl.content;
           const addedDate = new Date(cl.addedAt).toLocaleDateString(undefined, {
             year: "numeric",
             month: "short",
@@ -195,7 +196,10 @@ export default function CoverLettersSection() {
             : null;
 
           return (
-            <Card key={cl.id} className="bg-field border-border relative overflow-visible transition-[border-color] hover:border-primary/20">
+            <Card
+              key={cl.id}
+              className="bg-field border-border relative overflow-visible transition-[border-color] hover:border-primary/20"
+            >
               {isExpanded && (
                 <button
                   type="button"
@@ -226,7 +230,9 @@ export default function CoverLettersSection() {
                       <span className="flex min-w-0 items-center gap-2">
                         <span
                           className={`block text-sm font-medium truncate ${
-                            cl.company ? "text-text-primary" : "text-text-muted italic"
+                            cl.company
+                              ? "text-text-primary"
+                              : "text-text-muted italic"
                           }`}
                         >
                           {cl.company || "Empty cover letter"}

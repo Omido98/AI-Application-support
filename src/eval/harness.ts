@@ -90,10 +90,7 @@ export class EvalRun {
 }
 
 /** Register one deterministic eval case. */
-export function evalCase(
-  name: string,
-  body: (run: EvalRun) => void,
-): void {
+export function evalCase(name: string, body: (run: EvalRun) => void): void {
   it(name, () => {
     const startedAt = performance.now();
     const run = new EvalRun();

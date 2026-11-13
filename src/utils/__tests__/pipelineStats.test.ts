@@ -41,9 +41,7 @@ function makeApp(overrides: Partial<JobApplication> = {}): JobApplication {
     followUpAt: "",
     contactName: "",
     contactEmail: "",
-    statusHistory: [
-      { status: "wishlist", at: "2026-03-01T10:00:00.000Z" },
-    ],
+    statusHistory: [{ status: "wishlist", at: "2026-03-01T10:00:00.000Z" }],
     createdAt: "2026-03-01T10:00:00.000Z",
     updatedAt: "2026-03-01T10:00:00.000Z",
     ...overrides,

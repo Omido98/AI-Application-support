@@ -15,8 +15,18 @@ import ConfirmDeleteDialog, {
 } from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 function createEmptyWorkExperience(): WorkExperience {
@@ -90,7 +100,9 @@ export default function WorkExperienceSection() {
     }
     const title = [we.role, we.company].filter(Boolean).join(" @ ");
     setDeleteTarget({
-      label: title ? `the work experience entry "${title}"` : "this work experience entry",
+      label: title
+        ? `the work experience entry "${title}"`
+        : "this work experience entry",
       onConfirm: () => removeWorkExperience(we.id),
     });
   };
@@ -114,7 +126,9 @@ export default function WorkExperienceSection() {
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <CardTitle className="text-text-primary text-lg">Work Experience</CardTitle>
+        <CardTitle className="text-text-primary text-lg">
+          Work Experience
+        </CardTitle>
         <Button
           variant="outline"
           size="sm"
@@ -128,7 +142,8 @@ export default function WorkExperienceSection() {
       <CardContent className="space-y-3">
         {workExperience.length === 0 && (
           <p className="text-text-muted text-sm text-center py-4">
-            No work experience entries yet. Click "Add Work Experience" to get started.
+            No work experience entries yet. Click "Add Work Experience" to get
+            started.
           </p>
         )}
 
@@ -136,7 +151,9 @@ export default function WorkExperienceSection() {
           const isExpanded = expanded[we.id] ?? false;
           const title = [we.role, we.company].filter(Boolean).join(" @ ");
           const dateRange = `${we.startMonth} ${we.startYear} – ${
-            we.isCurrent ? "Present" : `${we.endMonth ?? ""} ${we.endYear ?? ""}`
+            we.isCurrent
+              ? "Present"
+              : `${we.endMonth ?? ""} ${we.endYear ?? ""}`
           }`;
 
           return (
@@ -213,7 +230,9 @@ export default function WorkExperienceSection() {
                           className={inputClass}
                           value={we.company}
                           onChange={(e) =>
-                            updateWorkExperience(we.id, { company: e.target.value })
+                            updateWorkExperience(we.id, {
+                              company: e.target.value,
+                            })
                           }
                           placeholder="e.g. Acme Corp"
                         />
@@ -230,7 +249,9 @@ export default function WorkExperienceSection() {
                           className={inputClass}
                           value={we.role}
                           onChange={(e) =>
-                            updateWorkExperience(we.id, { role: e.target.value })
+                            updateWorkExperience(we.id, {
+                              role: e.target.value,
+                            })
                           }
                           placeholder="e.g. Software Engineer"
                         />
@@ -251,11 +272,15 @@ export default function WorkExperienceSection() {
                           className={selectClass}
                           value={we.startMonth}
                           onChange={(e) =>
-                            updateWorkExperience(we.id, { startMonth: e.target.value })
+                            updateWorkExperience(we.id, {
+                              startMonth: e.target.value,
+                            })
                           }
                         >
                           {MONTHS.map((m) => (
-                            <option key={m} value={m}>{m}</option>
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
                           ))}
                         </select>
                         <select
@@ -264,11 +289,15 @@ export default function WorkExperienceSection() {
                           className={selectClass}
                           value={we.startYear}
                           onChange={(e) =>
-                            updateWorkExperience(we.id, { startYear: e.target.value })
+                            updateWorkExperience(we.id, {
+                              startYear: e.target.value,
+                            })
                           }
                         >
                           {YEARS.map((y) => (
-                            <option key={y} value={y}>{y}</option>
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -282,7 +311,8 @@ export default function WorkExperienceSection() {
                         onCheckedChange={(checked) =>
                           updateWorkExperience(we.id, {
                             isCurrent: checked === true,
-                            endMonth: checked === true ? undefined : we.endMonth,
+                            endMonth:
+                              checked === true ? undefined : we.endMonth,
                             endYear: checked === true ? undefined : we.endYear,
                           })
                         }
@@ -310,11 +340,15 @@ export default function WorkExperienceSection() {
                             className={selectClass}
                             value={we.endMonth ?? "June"}
                             onChange={(e) =>
-                              updateWorkExperience(we.id, { endMonth: e.target.value })
+                              updateWorkExperience(we.id, {
+                                endMonth: e.target.value,
+                              })
                             }
                           >
                             {MONTHS.map((m) => (
-                              <option key={m} value={m}>{m}</option>
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
                             ))}
                           </select>
                           <select
@@ -323,11 +357,15 @@ export default function WorkExperienceSection() {
                             className={selectClass}
                             value={we.endYear ?? "2024"}
                             onChange={(e) =>
-                              updateWorkExperience(we.id, { endYear: e.target.value })
+                              updateWorkExperience(we.id, {
+                                endYear: e.target.value,
+                              })
                             }
                           >
                             {YEARS.map((y) => (
-                              <option key={y} value={y}>{y}</option>
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
                             ))}
                           </select>
                         </div>
@@ -406,7 +444,9 @@ export default function WorkExperienceSection() {
                                 onChange={(e) => {
                                   const next = [...we.projects];
                                   next[pi] = { ...proj, name: e.target.value };
-                                  updateWorkExperience(we.id, { projects: next });
+                                  updateWorkExperience(we.id, {
+                                    projects: next,
+                                  });
                                 }}
                                 placeholder="Describe what you did in this project / initiative…"
                               />
@@ -436,12 +476,19 @@ export default function WorkExperienceSection() {
                                   value={proj.startMonth || "January"}
                                   onChange={(e) => {
                                     const next = [...we.projects];
-                                    next[pi] = { ...proj, startMonth: e.target.value };
-                                    updateWorkExperience(we.id, { projects: next });
+                                    next[pi] = {
+                                      ...proj,
+                                      startMonth: e.target.value,
+                                    };
+                                    updateWorkExperience(we.id, {
+                                      projects: next,
+                                    });
                                   }}
                                 >
                                   {MONTHS.map((m) => (
-                                    <option key={m} value={m}>{m}</option>
+                                    <option key={m} value={m}>
+                                      {m}
+                                    </option>
                                   ))}
                                 </select>
                                 <select
@@ -451,12 +498,19 @@ export default function WorkExperienceSection() {
                                   value={proj.startYear || "2024"}
                                   onChange={(e) => {
                                     const next = [...we.projects];
-                                    next[pi] = { ...proj, startYear: e.target.value };
-                                    updateWorkExperience(we.id, { projects: next });
+                                    next[pi] = {
+                                      ...proj,
+                                      startYear: e.target.value,
+                                    };
+                                    updateWorkExperience(we.id, {
+                                      projects: next,
+                                    });
                                   }}
                                 >
                                   {YEARS.map((y) => (
-                                    <option key={y} value={y}>{y}</option>
+                                    <option key={y} value={y}>
+                                      {y}
+                                    </option>
                                   ))}
                                 </select>
                               </div>
@@ -477,12 +531,19 @@ export default function WorkExperienceSection() {
                                     value={proj.endMonth ?? "June"}
                                     onChange={(e) => {
                                       const next = [...we.projects];
-                                      next[pi] = { ...proj, endMonth: e.target.value };
-                                      updateWorkExperience(we.id, { projects: next });
+                                      next[pi] = {
+                                        ...proj,
+                                        endMonth: e.target.value,
+                                      };
+                                      updateWorkExperience(we.id, {
+                                        projects: next,
+                                      });
                                     }}
                                   >
                                     {MONTHS.map((m) => (
-                                      <option key={m} value={m}>{m}</option>
+                                      <option key={m} value={m}>
+                                        {m}
+                                      </option>
                                     ))}
                                   </select>
                                   <select
@@ -492,12 +553,19 @@ export default function WorkExperienceSection() {
                                     value={proj.endYear ?? "2024"}
                                     onChange={(e) => {
                                       const next = [...we.projects];
-                                      next[pi] = { ...proj, endYear: e.target.value };
-                                      updateWorkExperience(we.id, { projects: next });
+                                      next[pi] = {
+                                        ...proj,
+                                        endYear: e.target.value,
+                                      };
+                                      updateWorkExperience(we.id, {
+                                        projects: next,
+                                      });
                                     }}
                                   >
                                     {YEARS.map((y) => (
-                                      <option key={y} value={y}>{y}</option>
+                                      <option key={y} value={y}>
+                                        {y}
+                                      </option>
                                     ))}
                                   </select>
                                 </div>
@@ -514,8 +582,12 @@ export default function WorkExperienceSection() {
                                 next[pi] = {
                                   ...proj,
                                   isCurrent: checked === true,
-                                  endMonth: checked === true ? undefined : proj.endMonth,
-                                  endYear: checked === true ? undefined : proj.endYear,
+                                  endMonth:
+                                    checked === true
+                                      ? undefined
+                                      : proj.endMonth,
+                                  endYear:
+                                    checked === true ? undefined : proj.endYear,
                                 };
                                 updateWorkExperience(we.id, { projects: next });
                               }}

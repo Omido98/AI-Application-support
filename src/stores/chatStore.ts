@@ -1,6 +1,15 @@
 import { create } from "zustand";
-import { saveJson, loadJson, deleteFile, reportDataIssue } from "@/utils/storage";
-import { normalizeApiConfigData, normalizeDraftsData, isRecord } from "@/utils/dataValidation";
+import {
+  saveJson,
+  loadJson,
+  deleteFile,
+  reportDataIssue,
+} from "@/utils/storage";
+import {
+  normalizeApiConfigData,
+  normalizeDraftsData,
+  isRecord,
+} from "@/utils/dataValidation";
 import {
   API_KEY_ACCOUNT,
   deleteApiKeyFromKeychain,
@@ -53,7 +62,10 @@ export function isConversationMessage(msg: ChatMessage): boolean {
  * Stable identity key for a message, used by action buttons and re-sends.
  * Matches the key the UI computes for each rendered message.
  */
-export function messageKey(msg: { timestamp: string; content: string }): string {
+export function messageKey(msg: {
+  timestamp: string;
+  content: string;
+}): string {
   return msg.timestamp + msg.content.slice(0, 40);
 }
 
@@ -396,7 +408,10 @@ interface ChatState {
   clearMessages: () => Promise<void>;
   /** Load (or reset) the chat thread for an application. `force` reloads even
    * when the same thread is already loaded (used after importing a backup). */
-  switchThread: (applicationId: string | null, force?: boolean) => Promise<void>;
+  switchThread: (
+    applicationId: string | null,
+    force?: boolean,
+  ) => Promise<void>;
   /** Load persisted unsent drafts. `force` replaces in-memory drafts instead
    * of merging over them (used after importing a backup). */
   loadDrafts: (force?: boolean) => Promise<void>;
@@ -414,9 +429,7 @@ interface ChatState {
   setIsSending: (sending: boolean) => void;
   setError: (error: string | null) => void;
   /** Set the live-streamed assistant text (string, or updater for appends). */
-  setStreamingText: (
-    updater: string | ((prev: string) => string),
-  ) => void;
+  setStreamingText: (updater: string | ((prev: string) => string)) => void;
   /** Save the unsent message draft for the current thread. */
   setDraft: (value: string) => void;
 }
@@ -515,11 +528,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   acceptSuggestion: async (threadId, suggestionKey, sourceKey) => {
     const current = get();
     if (current.activeThreadId === threadId) {
-      const next = applySuggestion(
-        current.messages,
-        suggestionKey,
-        sourceKey,
-      );
+      const next = applySuggestion(current.messages, suggestionKey, sourceKey);
       if (next) {
         set({ messages: next });
         scheduleThreadSave();
@@ -673,7 +682,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // the file is left untouched (recoverability beats cleanup).
       if (await saveVerifiedApiKey(data.apiKey)) {
         keychainKey = data.apiKey;
-        await saveJson("config.json", persistableConfig({ ...data, apiKey: "" }));
+        await saveJson(
+          "config.json",
+          persistableConfig({ ...data, apiKey: "" }),
+        );
       } else {
         sessionKeyOnly = true;
       }
@@ -706,7 +718,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       set({ config: withDefaults(data), configLoaded: true });
     } else {
-      set({ config: withDefaults({ ...defaultApiConfig }), configLoaded: true });
+      set({
+        config: withDefaults({ ...defaultApiConfig }),
+        configLoaded: true,
+      });
     }
   },
   resetConfig: () => {

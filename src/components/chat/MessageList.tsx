@@ -6,7 +6,12 @@ import {
 } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
-import { deepImproveDraft, deslopText, improveDraft, reviewDraft } from "@/utils/api";
+import {
+  deepImproveDraft,
+  deslopText,
+  improveDraft,
+  reviewDraft,
+} from "@/utils/api";
 import type { ImproveStep, ToolActivity } from "@/utils/api";
 import { cn } from "@/lib/utils";
 import Markdown from "@/components/chat/Markdown";
@@ -36,10 +41,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { ProfileData, WebSource } from "@/types";
-import {
-  exportCoverLetter,
-  type ExportFormat,
-} from "@/utils/documentExport";
+import { exportCoverLetter, type ExportFormat } from "@/utils/documentExport";
 
 function sourceLabel(title: string, url: string): string {
   try {
@@ -113,9 +115,10 @@ export default function MessageList({
   const error = useChatStore((s) => s.error);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const lastMessageRef = useRef<{ role: "user" | "assistant"; timestamp: string } | null>(
-    null,
-  );
+  const lastMessageRef = useRef<{
+    role: "user" | "assistant";
+    timestamp: string;
+  } | null>(null);
   const [stickyToBottom, setStickyToBottom] = useState(true);
   const stickyRef = useRef(true);
   const scrollRafRef = useRef<number | null>(null);
@@ -134,7 +137,9 @@ export default function MessageList({
   const [deslopPendingId, setDeslopPendingId] = useState<string | null>(null);
   const [reviewPendingId, setReviewPendingId] = useState<string | null>(null);
   const [improvePendingId, setImprovePendingId] = useState<string | null>(null);
-  const [deepImprovePendingId, setDeepImprovePendingId] = useState<string | null>(null);
+  const [deepImprovePendingId, setDeepImprovePendingId] = useState<
+    string | null
+  >(null);
   const [openRefineKey, setOpenRefineKey] = useState<string | null>(null);
   const [exporting, setExporting] = useState<{
     key: string;
@@ -142,12 +147,17 @@ export default function MessageList({
   } | null>(null);
   const [improveStep, setImproveStep] = useState<ImproveStep | null>(null);
   const [improvePreview, setImprovePreview] = useState("");
-  const [actionActivity, setActionActivity] = useState<ToolActivity | null>(null);
+  const [actionActivity, setActionActivity] = useState<ToolActivity | null>(
+    null,
+  );
   const actionControllerRef = useRef<AbortController | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const anyActionPending = !!(
-    deslopPendingId || reviewPendingId || improvePendingId || deepImprovePendingId
+    deslopPendingId ||
+    reviewPendingId ||
+    improvePendingId ||
+    deepImprovePendingId
   );
 
   /** Refine actions must not overlap a chat generation or another action. */
@@ -155,7 +165,9 @@ export default function MessageList({
 
   /** Refuse to write a result into an application that was deleted meanwhile. */
   const threadStillExists = (threadId: string) =>
-    useApplicationStore.getState().applications.some((app) => app.id === threadId);
+    useApplicationStore
+      .getState()
+      .applications.some((app) => app.id === threadId);
 
   /**
    * Errors belong to the thread the action started in. If the user has moved
@@ -165,7 +177,9 @@ export default function MessageList({
     if (useChatStore.getState().activeThreadId === threadId) {
       setError(message);
     } else {
-      console.warn(`[chat] Action failed in inactive thread ${threadId}: ${message}`);
+      console.warn(
+        `[chat] Action failed in inactive thread ${threadId}: ${message}`,
+      );
     }
   };
 
@@ -218,8 +232,7 @@ export default function MessageList({
     await removeMessageInThread(threadId, messageKey(msg));
   };
 
-  const application =
-    applications.find((a) => a.id === selectedId) ?? null;
+  const application = applications.find((a) => a.id === selectedId) ?? null;
 
   const company = application?.companyName ?? "";
 
@@ -229,7 +242,8 @@ export default function MessageList({
   useEffect(() => {
     const last = messages[messages.length - 1] ?? null;
     const isNewUserMessage =
-      last?.role === "user" && lastMessageRef.current?.timestamp !== last.timestamp;
+      last?.role === "user" &&
+      lastMessageRef.current?.timestamp !== last.timestamp;
     lastMessageRef.current = last;
 
     if (isNewUserMessage || stickyToBottom) {
@@ -585,17 +599,13 @@ export default function MessageList({
         const key = messageKey(msg);
         const time = formatMessageTime(msg.timestamp);
         const feedback =
-          copiedId === key
-            ? "copied"
-            : savedId === key
-              ? "saved"
-              : null;
+          copiedId === key ? "copied" : savedId === key ? "saved" : null;
 
         if (!isUser && (msg.kind === "improve" || msg.kind === "deslop")) {
           const source = msg.sourceKey
-            ? messages.find(
+            ? (messages.find(
                 (candidate) => messageKey(candidate) === msg.sourceKey,
-              ) ?? null
+              ) ?? null)
             : null;
           return (
             <div key={key} className="flex justify-start">
@@ -611,9 +621,9 @@ export default function MessageList({
 
         if (!isUser && msg.kind === "review") {
           const source = msg.sourceKey
-            ? messages.find(
+            ? (messages.find(
                 (candidate) => messageKey(candidate) === msg.sourceKey,
-              ) ?? null
+              ) ?? null)
             : null;
           return (
             <div key={key} className="flex justify-start">
@@ -629,10 +639,7 @@ export default function MessageList({
         return (
           <div
             key={key}
-            className={cn(
-              "flex",
-              isUser ? "justify-end" : "justify-start",
-            )}
+            className={cn("flex", isUser ? "justify-end" : "justify-start")}
           >
             {isUser && msg.failed && (
               <div className="flex flex-col gap-1 pr-2 justify-start">
@@ -847,9 +854,7 @@ export default function MessageList({
                         exporting?.key === key && exporting.format === "pdf"
                       }
                       disabled={actionsBlocked || exporting !== null}
-                      onClick={() =>
-                        void handleExport(key, msg.content, "pdf")
-                      }
+                      onClick={() => void handleExport(key, msg.content, "pdf")}
                     />
                     <RefineItem
                       icon={FileDown}

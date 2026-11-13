@@ -13,8 +13,18 @@ import ConfirmDeleteDialog, {
 } from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 function createEmptyEducation(): Education {
@@ -198,7 +208,9 @@ export default function EducationSection() {
                         id={`education-${index}-school`}
                         className={inputClass}
                         value={edu.school}
-                        onChange={(e) => updateEducation(edu.id, { school: e.target.value })}
+                        onChange={(e) =>
+                          updateEducation(edu.id, { school: e.target.value })
+                        }
                         placeholder="e.g. University of Cambridge"
                       />
                     </div>
@@ -216,7 +228,9 @@ export default function EducationSection() {
                           id={`education-${index}-degree`}
                           className={inputClass}
                           value={edu.degree}
-                          onChange={(e) => updateEducation(edu.id, { degree: e.target.value })}
+                          onChange={(e) =>
+                            updateEducation(edu.id, { degree: e.target.value })
+                          }
                           placeholder="e.g. BSc, MSc, MPhil"
                         />
                       </div>
@@ -231,7 +245,11 @@ export default function EducationSection() {
                           id={`education-${index}-program-name`}
                           className={inputClass}
                           value={edu.programName}
-                          onChange={(e) => updateEducation(edu.id, { programName: e.target.value })}
+                          onChange={(e) =>
+                            updateEducation(edu.id, {
+                              programName: e.target.value,
+                            })
+                          }
                           placeholder="e.g. Computer Science"
                         />
                       </div>
@@ -249,7 +267,9 @@ export default function EducationSection() {
                         id={`education-${index}-major`}
                         className={inputClass}
                         value={edu.major}
-                        onChange={(e) => updateEducation(edu.id, { major: e.target.value })}
+                        onChange={(e) =>
+                          updateEducation(edu.id, { major: e.target.value })
+                        }
                         placeholder="e.g. Artificial Intelligence"
                       />
                     </div>
@@ -268,10 +288,16 @@ export default function EducationSection() {
                             id={`education-${index}-start-month`}
                             className={selectClass}
                             value={edu.startMonth}
-                            onChange={(e) => updateEducation(edu.id, { startMonth: e.target.value })}
+                            onChange={(e) =>
+                              updateEducation(edu.id, {
+                                startMonth: e.target.value,
+                              })
+                            }
                           >
                             {MONTHS.map((m) => (
-                              <option key={m} value={m}>{m}</option>
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
                             ))}
                           </select>
                           <select
@@ -279,10 +305,16 @@ export default function EducationSection() {
                             aria-label="Start year"
                             className={selectClass}
                             value={edu.startYear}
-                            onChange={(e) => updateEducation(edu.id, { startYear: e.target.value })}
+                            onChange={(e) =>
+                              updateEducation(edu.id, {
+                                startYear: e.target.value,
+                              })
+                            }
                           >
                             {YEARS.map((y) => (
-                              <option key={y} value={y}>{y}</option>
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
                             ))}
                           </select>
                         </div>
@@ -299,10 +331,16 @@ export default function EducationSection() {
                             id={`education-${index}-end-month`}
                             className={selectClass}
                             value={edu.endMonth}
-                            onChange={(e) => updateEducation(edu.id, { endMonth: e.target.value })}
+                            onChange={(e) =>
+                              updateEducation(edu.id, {
+                                endMonth: e.target.value,
+                              })
+                            }
                           >
                             {MONTHS.map((m) => (
-                              <option key={m} value={m}>{m}</option>
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
                             ))}
                           </select>
                           <select
@@ -310,10 +348,16 @@ export default function EducationSection() {
                             aria-label="End year"
                             className={selectClass}
                             value={edu.endYear}
-                            onChange={(e) => updateEducation(edu.id, { endYear: e.target.value })}
+                            onChange={(e) =>
+                              updateEducation(edu.id, {
+                                endYear: e.target.value,
+                              })
+                            }
                           >
                             {YEARS.map((y) => (
-                              <option key={y} value={y}>{y}</option>
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
                             ))}
                           </select>
                         </div>
@@ -342,24 +386,33 @@ export default function EducationSection() {
                         id={`education-${index}-final-grade`}
                         className={inputClass}
                         value={edu.finalGrade}
-                        onChange={(e) => updateEducation(edu.id, { finalGrade: e.target.value })}
+                        onChange={(e) =>
+                          updateEducation(edu.id, {
+                            finalGrade: e.target.value,
+                          })
+                        }
                         placeholder="e.g. GPA 3.8/4.0, Distinction, Merit, 8.5/10"
                       />
                       <p className="text-text-muted text-[11px] leading-tight">
-                        Enter your grade in any format, e.g. "GPA 3.8/4.0", "Distinction", "Merit", "8.5/10"
+                        Enter your grade in any format, e.g. "GPA 3.8/4.0",
+                        "Distinction", "Merit", "8.5/10"
                       </p>
                     </div>
 
                     {/* Courses */}
                     <div className="grid gap-2">
                       <div className="flex items-center justify-between">
-                        <Label className="text-text-secondary text-xs">Courses / Modules</Label>
+                        <Label className="text-text-secondary text-xs">
+                          Courses / Modules
+                        </Label>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="text-primary hover:text-primary/80 h-6 px-2 text-xs"
                           onClick={() =>
-                            updateEducation(edu.id, { courses: [...edu.courses, ""] })
+                            updateEducation(edu.id, {
+                              courses: [...edu.courses, ""],
+                            })
                           }
                         >
                           <Plus className="h-3 w-3 mr-1" />
@@ -402,7 +455,11 @@ export default function EducationSection() {
                         id={`education-${index}-thesis-title`}
                         className={inputClass}
                         value={edu.thesisTitle}
-                        onChange={(e) => updateEducation(edu.id, { thesisTitle: e.target.value })}
+                        onChange={(e) =>
+                          updateEducation(edu.id, {
+                            thesisTitle: e.target.value,
+                          })
+                        }
                         placeholder="Title of your thesis / dissertation"
                       />
                     </div>

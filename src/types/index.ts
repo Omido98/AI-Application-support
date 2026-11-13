@@ -136,11 +136,7 @@ export interface TokenUsage {
 }
 
 export type ApplicationStatus =
-  | "wishlist"
-  | "applied"
-  | "interview"
-  | "offer"
-  | "rejected";
+  "wishlist" | "applied" | "interview" | "offer" | "rejected";
 
 export type ApplicationPriority = "low" | "medium" | "high";
 

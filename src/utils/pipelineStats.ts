@@ -120,9 +120,7 @@ function daysBetween(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / 86_400_000);
 }
 
-export function getStatusCounts(
-  applications: JobApplication[],
-): StatusCounts {
+export function getStatusCounts(applications: JobApplication[]): StatusCounts {
   const counts: StatusCounts = {
     wishlist: 0,
     applied: 0,
@@ -143,8 +141,7 @@ export function getPipelineTotals(
   return {
     total: applications.length,
     active: applications.filter((app) => !isArchivedStatus(app.status)).length,
-    applied:
-      counts.applied + counts.interview + counts.offer + counts.rejected,
+    applied: counts.applied + counts.interview + counts.offer + counts.rejected,
     interviews: counts.interview + counts.offer,
     offers: counts.offer,
     rejected: counts.rejected,

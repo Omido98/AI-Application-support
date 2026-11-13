@@ -158,9 +158,9 @@ fn backoff_secs(attempt: u32) -> u64 {
 
 fn friendly_rate_limit_message(status: reqwest::StatusCode, retry_after: Option<u64>) -> String {
     match retry_after {
-        Some(secs) => format!(
-            "Rate limit reached ({status}). Please try again in about {secs} seconds."
-        ),
+        Some(secs) => {
+            format!("Rate limit reached ({status}). Please try again in about {secs} seconds.")
+        }
         None => format!("Rate limit reached ({status}). Please wait a moment and try again."),
     }
 }
@@ -283,7 +283,10 @@ async fn zen_list_models(
         .map_err(|e| format!("Network error: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("Models endpoint returned HTTP {}", response.status()));
+        return Err(format!(
+            "Models endpoint returned HTTP {}",
+            response.status()
+        ));
     }
 
     let parsed: ModelsResponse = response
@@ -349,10 +352,10 @@ impl StreamState {
     /// never leave the map in an invalid state, so a panic while a guard
     /// is held must not wedge cancellation and cleanup for every later
     /// request.
-    fn lock(
-        &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<String, CancellationToken>> {
-        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, CancellationToken>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -493,32 +496,22 @@ impl StreamAccumulator {
 
         if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
             for call in tool_calls {
-                let index = call
-                    .get("index")
-                    .and_then(|i| i.as_u64())
-                    .unwrap_or(0) as usize;
+                let index = call.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
                 // Guard against malformed streams advertising huge indices.
                 if index >= MAX_STREAM_TOOL_CALLS {
                     continue;
                 }
                 while self.openai_tool_calls.len() <= index {
-                    self.openai_tool_calls
-                        .push(OpenAIToolCallAcc::default());
+                    self.openai_tool_calls.push(OpenAIToolCallAcc::default());
                 }
                 let acc = &mut self.openai_tool_calls[index];
                 if let Some(id) = call.get("id").and_then(|i| i.as_str()) {
                     acc.id = Some(id.to_string());
                 }
-                if let Some(name) = call
-                    .pointer("/function/name")
-                    .and_then(|n| n.as_str())
-                {
+                if let Some(name) = call.pointer("/function/name").and_then(|n| n.as_str()) {
                     acc.name = Some(name.to_string());
                 }
-                if let Some(args) = call
-                    .pointer("/function/arguments")
-                    .and_then(|a| a.as_str())
-                {
+                if let Some(args) = call.pointer("/function/arguments").and_then(|a| a.as_str()) {
                     acc.arguments.push_str(args);
                 }
             }
@@ -527,10 +520,7 @@ impl StreamAccumulator {
     }
 
     fn feed_anthropic(&mut self, parsed: &serde_json::Value) -> Result<Option<String>, String> {
-        let event_type = parsed
-            .get("type")
-            .and_then(|t| t.as_str())
-            .unwrap_or("");
+        let event_type = parsed.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match event_type {
             "message_start" => {
                 if let Some(usage) = parsed.pointer("/message/usage") {
@@ -565,16 +555,9 @@ impl StreamAccumulator {
             }
             "content_block_delta" => {
                 let delta = parsed.get("delta").cloned().unwrap_or_default();
-                match delta
-                    .get("type")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("")
-                {
+                match delta.get("type").and_then(|t| t.as_str()).unwrap_or("") {
                     "text_delta" => {
-                        let text = delta
-                            .get("text")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("");
+                        let text = delta.get("text").and_then(|t| t.as_str()).unwrap_or("");
                         if !text.is_empty() {
                             if let Some(last) = self.anthropic_blocks.last_mut() {
                                 last.text.push_str(text);
@@ -630,9 +613,8 @@ impl StreamAccumulator {
                 .iter()
                 .map(|block| {
                     if block.block_type == "tool_use" {
-                        let input: serde_json::Value =
-                            serde_json::from_str(&block.input_json)
-                                .unwrap_or_else(|_| serde_json::json!({}));
+                        let input: serde_json::Value = serde_json::from_str(&block.input_json)
+                            .unwrap_or_else(|_| serde_json::json!({}));
                         serde_json::json!({
                             "type": "tool_use",
                             "id": block.id,
@@ -722,13 +704,9 @@ async fn stream_sse(
             let Some(chunk) = next else {
                 break;
             };
-            let chunk = chunk
-                .map_err(|e| format!("Failed to read response stream: {e}"))?;
+            let chunk = chunk.map_err(|e| format!("Failed to read response stream: {e}"))?;
             buffer.extend_from_slice(&chunk);
-            loop {
-                let Some(pos) = buffer.iter().position(|&b| b == b'\n') else {
-                    break;
-                };
+            while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
                 let line: Vec<u8> = buffer.drain(..=pos).collect();
                 let line = String::from_utf8_lossy(&line);
                 let line = line.trim_end_matches(['\r', '\n']);
@@ -771,9 +749,7 @@ async fn stream_sse(
     }
 
     on_event
-        .send(ChatStreamEvent::Done {
-            data: acc.finish(),
-        })
+        .send(ChatStreamEvent::Done { data: acc.finish() })
         .map_err(|e| format!("Failed to send stream event: {e}"))
 }
 
@@ -819,16 +795,15 @@ async fn run_stream(
         .text()
         .await
         .map_err(|e| format!("Failed to read response: {e}"))?;
-    let data: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("Invalid response from API: {e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Invalid response from API: {e}"))?;
     on_event
         .send(ChatStreamEvent::Done { data })
         .map_err(|e| format!("Failed to send stream event: {e}"))
 }
 
 /// Unique ids for in-flight streaming requests.
-static STREAM_COUNTER: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
+static STREAM_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn stream_request_id() -> String {
     let nanos = std::time::SystemTime::now()
@@ -884,10 +859,7 @@ fn zen_chat_stream(
 /// HTTP connection is closed and any text accumulated so far is delivered as
 /// a final `done` event. No-op when the request already finished.
 #[tauri::command]
-fn zen_chat_stream_cancel(
-    id: String,
-    state: State<'_, StreamState>,
-) -> Result<(), String> {
+fn zen_chat_stream_cancel(id: String, state: State<'_, StreamState>) -> Result<(), String> {
     if let Some(token) = state.lock().remove(&id) {
         token.cancel();
     }
@@ -916,7 +888,10 @@ async fn zen_web_search(
         .map_err(|e| format!("Network error: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("Search endpoint returned HTTP {}", response.status()));
+        return Err(format!(
+            "Search endpoint returned HTTP {}",
+            response.status()
+        ));
     }
 
     let html = response
@@ -1065,9 +1040,8 @@ fn is_internal_ip(ip: IpAddr) -> bool {
             // ::a.b.c.d (compatible), 64:ff9b::/96 (NAT64) and 2002::/16
             // (6to4) all tunnel an IPv4 address that may itself be internal.
             let bytes = ip.octets();
-            let mapped = bytes[..10].iter().all(|b| *b == 0)
-                && bytes[10] == 0xff
-                && bytes[11] == 0xff;
+            let mapped =
+                bytes[..10].iter().all(|b| *b == 0) && bytes[10] == 0xff && bytes[11] == 0xff;
             let compatible = bytes[..12].iter().all(|b| *b == 0)
                 && !(bytes[12] == 0
                     && bytes[13] == 0
@@ -1168,8 +1142,7 @@ async fn send_fetch_request(url: &reqwest::Url) -> Result<reqwest::Response, Str
 /// so the chat agent can read an actual company page.
 #[tauri::command]
 async fn zen_fetch_page(url: String) -> Result<String, String> {
-    let mut current =
-        reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+    let mut current = reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
 
     // Follow redirects by hand so every hop passes the same public-address
     // checks. reqwest's automatic redirects would happily visit localhost.
@@ -1265,7 +1238,7 @@ fn parse_zen_price(text: &str) -> (Option<f64>, bool) {
     if t == "free" {
         return (None, true);
     }
-    let cleaned = t.trim_start_matches('$').replace(',', "").replace(' ', "");
+    let cleaned = t.trim_start_matches('$').replace([',', ' '], "");
     match cleaned.parse::<f64>() {
         Ok(v) => (Some(v), false),
         Err(_) => (None, false),
@@ -1277,7 +1250,9 @@ fn parse_zen_price(text: &str) -> (Option<f64>, bool) {
 /// (lowercase, spaces to dashes); parenthetical price bands such as
 /// "(≤ 200K tokens)" are dropped, keeping the first (base) row per model.
 #[tauri::command]
-async fn zen_fetch_zen_pricing(clients: State<'_, HttpClients>) -> Result<Vec<ZenPricingEntry>, String> {
+async fn zen_fetch_zen_pricing(
+    clients: State<'_, HttpClients>,
+) -> Result<Vec<ZenPricingEntry>, String> {
     let response = clients
         .scrape
         .get("https://opencode.ai/docs/zen")
@@ -1297,9 +1272,7 @@ async fn zen_fetch_zen_pricing(clients: State<'_, HttpClients>) -> Result<Vec<Ze
 
     let document = scraper::Html::parse_document(&html);
 
-    let cell_text = |el: ElementRef| -> String {
-        el.text().collect::<String>().trim().to_string()
-    };
+    let cell_text = |el: ElementRef| -> String { el.text().collect::<String>().trim().to_string() };
 
     // Table helper: returns the table whose first-row cells contain all the
     // given keywords (case-insensitive).
@@ -1326,8 +1299,7 @@ async fn zen_fetch_zen_pricing(clients: State<'_, HttpClients>) -> Result<Vec<Ze
         std::collections::HashMap::new();
     if let Some(endpoints) = find_table(&["model", "id"]) {
         for row in endpoints.select(&ZEN_ROW_SELECTOR) {
-            let cells: Vec<String> =
-                row.select(&ZEN_CELL_SELECTOR).map(cell_text).collect();
+            let cells: Vec<String> = row.select(&ZEN_CELL_SELECTOR).map(cell_text).collect();
             if cells.len() >= 2 && !cells[0].is_empty() && !cells[1].is_empty() {
                 id_to_name
                     .entry(cells[1].clone())
@@ -1343,8 +1315,7 @@ async fn zen_fetch_zen_pricing(clients: State<'_, HttpClients>) -> Result<Vec<Ze
     let mut entries: Vec<ZenPricingEntry> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for row in table.select(&ZEN_ROW_SELECTOR) {
-        let cells: Vec<String> =
-            row.select(&ZEN_CELL_SELECTOR).map(cell_text).collect();
+        let cells: Vec<String> = row.select(&ZEN_CELL_SELECTOR).map(cell_text).collect();
         if cells.len() < 3 {
             continue;
         }
@@ -1434,8 +1405,7 @@ fn app_data_file_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, Str
         .path()
         .app_data_dir()
         .map_err(|err| format!("Could not resolve the app data directory: {err}"))?;
-    fs::create_dir_all(&dir)
-        .map_err(|err| format!("Could not create {}: {err}", dir.display()))?;
+    fs::create_dir_all(&dir).map_err(|err| format!("Could not create {}: {err}", dir.display()))?;
     Ok(dir.join(name))
 }
 
@@ -1471,9 +1441,7 @@ fn temp_path(path: &Path) -> PathBuf {
 fn read_json_file(path: &Path) -> Result<DataFileRead, String> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(DataFileRead::Missing)
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(DataFileRead::Missing),
         Err(err) => {
             return Err(format!("Could not inspect {}: {err}", path.display()));
         }
@@ -1485,7 +1453,8 @@ fn read_json_file(path: &Path) -> Result<DataFileRead, String> {
             MAX_DATA_FILE_BYTES / 1024 / 1024
         ));
     }
-    let bytes = fs::read(path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+    let bytes =
+        fs::read(path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
     match serde_json::from_slice(&bytes) {
         Ok(value) => Ok(DataFileRead::Valid(value)),
         Err(err) => Ok(DataFileRead::Invalid(err.to_string())),
@@ -1499,10 +1468,7 @@ fn quarantine_file(path: &Path) -> Result<PathBuf, String> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("data.json");
-    let target = path.with_file_name(format!(
-        "{file_name}.corrupt-{}.json",
-        timestamp_nanos()
-    ));
+    let target = path.with_file_name(format!("{file_name}.corrupt-{}.json", timestamp_nanos()));
     fs::rename(path, &target)
         .map_err(|err| format!("Could not quarantine {}: {err}", path.display()))?;
     Ok(target)
@@ -1690,10 +1656,7 @@ fn save_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn load_data_file(
-    app: tauri::AppHandle,
-    name: String,
-) -> Result<LoadDataFileResult, String> {
+async fn load_data_file(app: tauri::AppHandle, name: String) -> Result<LoadDataFileResult, String> {
     let path = app_data_file_path(&app, &name)?;
     tauri::async_runtime::spawn_blocking(move || load_data_file_at(&path))
         .await
@@ -1878,7 +1841,11 @@ fn sanitize_csv_name(name: &str) -> String {
         .trim_end_matches(".csv")
         .trim_end_matches(".CSV")
         .trim();
-    let stem = if stem.is_empty() { "applications" } else { stem };
+    let stem = if stem.is_empty() {
+        "applications"
+    } else {
+        stem
+    };
     format!("{stem}.csv")
 }
 
@@ -1965,7 +1932,9 @@ fn ensure_export_extension(path: &Path, expected: &str) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
     if actual != expected {
-        return Err(format!("The export file must use the .{expected} extension."));
+        return Err(format!(
+            "The export file must use the .{expected} extension."
+        ));
     }
     Ok(())
 }
@@ -2080,8 +2049,8 @@ async fn read_import_file(app: tauri::AppHandle) -> Result<Option<ImportedDocume
         .and_then(|name| name.to_str())
         .unwrap_or("cv")
         .to_string();
-    let bytes = fs::read(&path)
-        .map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+    let bytes =
+        fs::read(&path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
     Ok(Some(ImportedDocument { name, bytes }))
 }
 
@@ -2092,10 +2061,7 @@ async fn import_backup_file(app: tauri::AppHandle) -> Result<Option<String>, Str
     let parent = app.get_webview_window("main");
     let app_for_dialog = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        let dialog = app_for_dialog
-            .dialog()
-            .file()
-            .add_filter("JSON", &["json"]);
+        let dialog = app_for_dialog.dialog().file().add_filter("JSON", &["json"]);
         let dialog = match parent {
             Some(window) => dialog.set_parent(&window),
             None => dialog,
@@ -2167,7 +2133,9 @@ fn keyring_get(key: String) -> Result<Option<String>, String> {
 fn keyring_set(key: String, value: String) -> Result<(), String> {
     let entry =
         Entry::new(KEYCHAIN_SERVICE, &key).map_err(|e| format!("Keychain unavailable: {e}"))?;
-    entry.set_password(&value).map_err(|e| format!("Keychain error: {e}"))
+    entry
+        .set_password(&value)
+        .map_err(|e| format!("Keychain error: {e}"))
 }
 
 /// Delete a secret from the OS keychain. Missing entries are not an error.
@@ -2207,8 +2175,8 @@ fn is_app_data_file(name: &str) -> bool {
 /// Delete the app's own JSON files (including backups and quarantined copies).
 fn clear_app_data_files(dir: &Path) -> Result<usize, String> {
     let mut removed = 0usize;
-    let entries = fs::read_dir(dir)
-        .map_err(|err| format!("Could not read {}: {err}", dir.display()))?;
+    let entries =
+        fs::read_dir(dir).map_err(|err| format!("Could not read {}: {err}", dir.display()))?;
     for entry in entries.filter_map(Result::ok) {
         let Ok(file_type) = entry.file_type() else {
             continue;
@@ -2220,8 +2188,7 @@ fn clear_app_data_files(dir: &Path) -> Result<usize, String> {
         if !is_app_data_file(&name) {
             continue;
         }
-        fs::remove_file(entry.path())
-            .map_err(|err| format!("Could not remove {name}: {err}"))?;
+        fs::remove_file(entry.path()).map_err(|err| format!("Could not remove {name}: {err}"))?;
         removed += 1;
     }
     Ok(removed)
@@ -2363,7 +2330,10 @@ mod tests {
         );
         // Non-redirect links pass through untouched; reqwest::Url
         // normalises special-scheme URLs to gain a trailing slash.
-        assert_eq!(decode_duckduckgo_href("https://example.com"), "https://example.com/");
+        assert_eq!(
+            decode_duckduckgo_href("https://example.com"),
+            "https://example.com/"
+        );
         assert_eq!(decode_duckduckgo_href("not a url"), "not a url");
     }
 
@@ -2380,7 +2350,10 @@ mod tests {
     fn quota_detection_matches_known_bodies() {
         let limit = reqwest::StatusCode::TOO_MANY_REQUESTS;
         let other = reqwest::StatusCode::BAD_REQUEST;
-        assert!(is_quota_error(limit, "You have exceeded your free usage limit"));
+        assert!(is_quota_error(
+            limit,
+            "You have exceeded your free usage limit"
+        ));
         assert!(is_quota_error(limit, "QUOTA_EXHAUSTED"));
         assert!(!is_quota_error(limit, "Slow down and retry shortly"));
         assert!(!is_quota_error(other, "free usage limit exceeded"));
@@ -2405,7 +2378,8 @@ mod tests {
         assert_eq!(delta.as_deref(), Some("Hel"));
 
         assert_eq!(
-            acc.feed(r#"{"choices":[{"delta":{"content":"lo"}}]}"#).unwrap(),
+            acc.feed(r#"{"choices":[{"delta":{"content":"lo"}}]}"#)
+                .unwrap(),
             Some("lo".to_string())
         );
 
@@ -2435,7 +2409,9 @@ mod tests {
         assert_eq!(data["choices"][0]["finish_reason"], "tool_calls");
         assert_eq!(data["usage"]["input_tokens"], 11);
         assert_eq!(data["usage"]["output_tokens"], 7);
-        let calls = data["choices"][0]["message"]["tool_calls"].as_array().unwrap();
+        let calls = data["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0]["id"], "call_1");
         assert_eq!(calls[0]["type"], "function");
@@ -2456,8 +2432,10 @@ mod tests {
     #[test]
     fn openai_stream_without_tools_has_null_tool_calls() {
         let mut acc = StreamAccumulator::new("openai");
-        acc.feed(r#"{"choices":[{"delta":{"content":"hi"}}]}"#).unwrap();
-        acc.feed(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#).unwrap();
+        acc.feed(r#"{"choices":[{"delta":{"content":"hi"}}]}"#)
+            .unwrap();
+        acc.feed(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#)
+            .unwrap();
         let data = acc.finish();
         assert!(data["choices"][0]["message"]["tool_calls"].is_null());
         assert_eq!(data["choices"][0]["finish_reason"], "stop");
@@ -2467,9 +2445,7 @@ mod tests {
     fn provider_error_events_are_surfaced() {
         let mut anthropic = StreamAccumulator::new("anthropic");
         let error = anthropic
-            .feed(
-                r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
-            )
+            .feed(r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#)
             .unwrap_err();
         assert!(error.contains("Overloaded"));
 
@@ -2566,8 +2542,7 @@ mod tests {
         save_bytes_atomic(&path, br#"{"version":1}"#).unwrap();
         save_bytes_atomic(&path, br#"{"version":2}"#).unwrap();
 
-        let current: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let current: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         let backup: serde_json::Value =
             serde_json::from_slice(&fs::read(backup_path(&path)).unwrap()).unwrap();
         assert_eq!(current["version"], 2);
@@ -2598,12 +2573,7 @@ mod tests {
         let corrupt_files = fs::read_dir(&dir)
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .contains(".corrupt-")
-            })
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
             .count();
         assert_eq!(corrupt_files, 1);
 
@@ -2624,8 +2594,7 @@ mod tests {
         let backup: serde_json::Value =
             serde_json::from_slice(&fs::read(backup_path(&path)).unwrap()).unwrap();
         assert_eq!(backup["version"], 1);
-        let current: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let current: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(current["version"], 3);
 
         let _ = fs::remove_dir_all(&dir);
@@ -2659,7 +2628,10 @@ mod tests {
         assert_eq!(sanitize_backup_name("backup.json"), "backup.json");
         assert_eq!(sanitize_backup_name("backup"), "backup.json");
         assert_eq!(sanitize_backup_name("../../evil.json"), "evil.json");
-        assert_eq!(sanitize_backup_name("C:\\temp\\my-backup.JSON"), "my-backup.JSON");
+        assert_eq!(
+            sanitize_backup_name("C:\\temp\\my-backup.JSON"),
+            "my-backup.JSON"
+        );
         assert_eq!(
             sanitize_backup_name("   "),
             "ai-application-support-backup.json"
@@ -2696,10 +2668,7 @@ mod tests {
         assert_eq!(sanitize_csv_name("My Export.CSV"), "My Export.csv");
         assert_eq!(sanitize_csv_name("../../evil"), "evil.csv");
         assert_eq!(sanitize_csv_name("   "), "applications.csv");
-        assert_eq!(
-            sanitize_csv_name("C:\\temp\\tracker.csv"),
-            "tracker.csv"
-        );
+        assert_eq!(sanitize_csv_name("C:\\temp\\tracker.csv"), "tracker.csv");
 
         assert!(ensure_csv_extension(Path::new("applications.csv")).is_ok());
         assert!(ensure_csv_extension(Path::new("applications.CSV")).is_ok());

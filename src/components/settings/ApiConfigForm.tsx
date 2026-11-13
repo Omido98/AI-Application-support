@@ -16,11 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  listModels,
-  fetchZenPricing,
-  type ZenPricingEntry,
-} from "@/utils/api";
+import { listModels, fetchZenPricing, type ZenPricingEntry } from "@/utils/api";
 import {
   computeRemovedModelIds,
   formatModelPrice,
@@ -28,10 +24,7 @@ import {
   ZEN_MODEL_NAMES,
   type ModelPrice,
 } from "@/utils/zenPricing";
-import {
-  DEFAULT_CONTEXT_WINDOW,
-  MIN_CONTEXT_WINDOW,
-} from "@/utils/tokens";
+import { DEFAULT_CONTEXT_WINDOW, MIN_CONTEXT_WINDOW } from "@/utils/tokens";
 import { saveJson, loadJson } from "@/utils/storage";
 import { openExternalUrl } from "@/utils/links";
 import {
@@ -92,8 +85,9 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
     config.baseUrl || getProvider(config.provider ?? "zen").defaultBaseUrl,
   );
   const [urlCustomized, setUrlCustomized] = useState(false);
-  const [detectedProvider, setDetectedProvider] =
-    useState<ProviderId | null>(null);
+  const [detectedProvider, setDetectedProvider] = useState<ProviderId | null>(
+    null,
+  );
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [model] = useState(config.model || "");
   const [customModel, setCustomModel] = useState("");
@@ -153,7 +147,9 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
   // no cache) so nothing is flagged without evidence.
   const removedIds = useMemo(
     () =>
-      provider === "zen" ? computeRemovedModelIds(models ?? [], pricing) : new Set<string>(),
+      provider === "zen"
+        ? computeRemovedModelIds(models ?? [], pricing)
+        : new Set<string>(),
     [models, pricing, provider],
   );
 
@@ -206,7 +202,9 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
       const cached = await loadJson<ZenPricingEntry[]>("zen-prices.json");
       if (cached && cached.length > 0) {
         setPricing(cached);
-        setPricingStatus(`Using ${cached.length} prices from a previous import`);
+        setPricingStatus(
+          `Using ${cached.length} prices from a previous import`,
+        );
       }
     })();
     return () => {
@@ -236,7 +234,15 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
       list.sort((a, b) => rank(a) - rank(b));
     }
     return list;
-  }, [models, model, selection, provider, config.provider, fetchedFree, removedIds]);
+  }, [
+    models,
+    model,
+    selection,
+    provider,
+    config.provider,
+    fetchedFree,
+    removedIds,
+  ]);
 
   const resolvedModel =
     selection === CUSTOM_MODEL ? customModel.trim() : selection;
@@ -339,10 +345,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
       <div className="space-y-4">
         {/* Provider */}
         <div className="space-y-1.5">
-          <Label
-            htmlFor="api-provider"
-            className="text-text-secondary text-xs"
-          >
+          <Label htmlFor="api-provider" className="text-text-secondary text-xs">
             Provider
           </Label>
           <Select
@@ -369,10 +372,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
 
         {/* API Base URL */}
         <div className="space-y-1.5">
-          <Label
-            htmlFor="api-base-url"
-            className="text-text-secondary text-xs"
-          >
+          <Label htmlFor="api-base-url" className="text-text-secondary text-xs">
             API Base URL
           </Label>
           <div className="flex gap-2">
@@ -519,9 +519,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
                     <span className="flex items-center justify-between gap-3 flex-1">
                       <span
                         className={
-                          removed
-                            ? "truncate text-text-muted"
-                            : "truncate"
+                          removed ? "truncate text-text-muted" : "truncate"
                         }
                       >
                         {displayName(id)}
@@ -580,12 +578,16 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
             </p>
           )}
           {!modelsLoading && !modelsError && models && (
-              <p className="text-xs text-text-muted">
-                {models.length} models available at this endpoint.
-                {provider === "zen" && removedIds.size > 0 && (
-                  <> {removedIds.size} of them are no longer offered by Zen and likely won't work.</>
-                )}
-                {provider === "zen" && (
+            <p className="text-xs text-text-muted">
+              {models.length} models available at this endpoint.
+              {provider === "zen" && removedIds.size > 0 && (
+                <>
+                  {" "}
+                  {removedIds.size} of them are no longer offered by Zen and
+                  likely won't work.
+                </>
+              )}
+              {provider === "zen" && (
                 <>
                   {" "}
                   Prices per 1M tokens are imported automatically from{" "}
@@ -730,8 +732,8 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
               )}
               {pendingSelection && removedIds.has(pendingSelection) && (
                 <span className="mt-1 block text-destructive">
-                  Note: this model is no longer offered by Zen and likely
-                  won't work.
+                  Note: this model is no longer offered by Zen and likely won't
+                  work.
                 </span>
               )}
             </DialogDescription>

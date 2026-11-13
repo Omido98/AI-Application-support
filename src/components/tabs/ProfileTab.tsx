@@ -132,7 +132,9 @@ export default function ProfileTab() {
               variant="ghost"
               size="sm"
               className="mt-2"
-              onClick={() => setSectionOrder([...DEFAULT_PROFILE_SECTION_ORDER])}
+              onClick={() =>
+                setSectionOrder([...DEFAULT_PROFILE_SECTION_ORDER])
+              }
             >
               Reset order
             </Button>

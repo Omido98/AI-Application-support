@@ -86,23 +86,21 @@ export async function renderCoverLetterPdf(text: string): Promise<Uint8Array> {
 /** Render a letter as a DOCX with Georgia body text and paragraph spacing. */
 export async function renderCoverLetterDocx(text: string): Promise<Uint8Array> {
   const { Document, Packer, Paragraph, TextRun } = await import("docx");
-  const paragraphs = text
-    .split(/\n{2,}/)
-    .map(
-      (block) =>
-        new Paragraph({
-          spacing: { after: 200, line: 360 },
-          children: block.split("\n").map(
-            (line, index) =>
-              new TextRun({
-                text: line,
-                font: "Georgia",
-                size: 24,
-                break: index > 0 ? 1 : undefined,
-              }),
-          ),
-        }),
-    );
+  const paragraphs = text.split(/\n{2,}/).map(
+    (block) =>
+      new Paragraph({
+        spacing: { after: 200, line: 360 },
+        children: block.split("\n").map(
+          (line, index) =>
+            new TextRun({
+              text: line,
+              font: "Georgia",
+              size: 24,
+              break: index > 0 ? 1 : undefined,
+            }),
+        ),
+      }),
+  );
   const doc = new Document({
     sections: [{ properties: {}, children: paragraphs }],
   });

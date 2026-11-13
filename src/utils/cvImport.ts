@@ -60,7 +60,7 @@ export async function extractCvText(
   bytes: Uint8Array,
 ): Promise<string> {
   const extension = name.split(".").pop()?.toLowerCase() ?? "";
-  let text = "";
+  let text: string;
 
   if (extension === "txt") {
     text = new TextDecoder().decode(bytes);
@@ -82,9 +82,7 @@ export async function extractCvText(
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
       pages.push(
-        content.items
-          .map((item) => ("str" in item ? item.str : ""))
-          .join(" "),
+        content.items.map((item) => ("str" in item ? item.str : "")).join(" "),
       );
     }
     text = pages.join("\n\n");
