@@ -1,12 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { useChatStore, messageKey } from "@/stores/chatStore";
+import {
+  isConversationMessage,
+  messageKey,
+  useChatStore,
+} from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { deepImproveDraft, deslopText, improveDraft, reviewDraft } from "@/utils/api";
-import type { ImproveStep } from "@/utils/api";
+import type { ImproveStep, ToolActivity } from "@/utils/api";
 import { cn } from "@/lib/utils";
 import Markdown from "@/components/chat/Markdown";
+import ReviewCard from "@/components/chat/ReviewCard";
 import StreamingBubble from "@/components/chat/StreamingBubble";
+import SuggestionCard from "@/components/chat/SuggestionCard";
 import { Button } from "@/components/ui/button";
 import { formatTokenCount } from "@/utils/tokens";
 import { openExternalUrl } from "@/utils/links";
@@ -25,7 +31,7 @@ import {
   RefreshCw,
   Link2,
 } from "lucide-react";
-import type { ProfileData } from "@/types";
+import type { ProfileData, WebSource } from "@/types";
 
 function sourceLabel(title: string, url: string): string {
   try {
@@ -63,6 +69,8 @@ export default function MessageList({
   const addCoverLetter = useProfileStore((s) => s.addCoverLetter);
   const config = useChatStore((s) => s.config);
   const appendMessageToThread = useChatStore((s) => s.appendMessageToThread);
+  const removeMessageInThread = useChatStore((s) => s.removeMessageInThread);
+  const acceptSuggestion = useChatStore((s) => s.acceptSuggestion);
   const setError = useChatStore((s) => s.setError);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -73,6 +81,8 @@ export default function MessageList({
   const [deepImprovePendingId, setDeepImprovePendingId] = useState<string | null>(null);
   const [improveStep, setImproveStep] = useState<ImproveStep | null>(null);
   const [improvePreview, setImprovePreview] = useState("");
+  const [actionActivity, setActionActivity] = useState<ToolActivity | null>(null);
+  const actionControllerRef = useRef<AbortController | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const anyActionPending = !!(
@@ -103,6 +113,39 @@ export default function MessageList({
     revise: "Revising draft…",
     deslop: "Polishing…",
     verify: "Verifying…",
+  };
+
+  const actionLabel = improveStep
+    ? STEP_LABELS[improveStep]
+    : reviewPendingId
+      ? "Reviewing draft…"
+      : deslopPendingId
+        ? "Polishing draft…"
+        : "Working…";
+
+  const stopAction = () => actionControllerRef.current?.abort();
+
+  useEffect(() => {
+    if (!anyActionPending) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      actionControllerRef.current?.abort();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [anyActionPending]);
+
+  const handleAcceptSuggestion = async (msg: (typeof messages)[number]) => {
+    const threadId = useChatStore.getState().activeThreadId;
+    if (!threadId || !msg.sourceKey) return;
+    await acceptSuggestion(threadId, messageKey(msg), msg.sourceKey);
+  };
+
+  const handleDiscardMessage = async (msg: (typeof messages)[number]) => {
+    const threadId = useChatStore.getState().activeThreadId;
+    if (!threadId) return;
+    await removeMessageInThread(threadId, messageKey(msg));
   };
 
   const application =
@@ -212,10 +255,26 @@ export default function MessageList({
     ) {
       return;
     }
+    const controller = new AbortController();
+    actionControllerRef.current = controller;
     setDeslopPendingId(msgId);
+    setActionActivity(null);
     setError(null);
-    const result = await deslopText(content, config);
+    const sources: WebSource[] = [];
+    const result = await deslopText(content, config, {
+      signal: controller.signal,
+      onSource: (source) => {
+        if (!sources.some((entry) => entry.url === source.url)) {
+          sources.push(source);
+        }
+      },
+    });
     setDeslopPendingId(null);
+    setActionActivity(null);
+    if (actionControllerRef.current === controller) {
+      actionControllerRef.current = null;
+    }
+    if (controller.signal.aborted || result.stopped) return;
     if (result.error) {
       reportActionError(threadId, result.error);
       return;
@@ -225,6 +284,9 @@ export default function MessageList({
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
+        kind: "deslop",
+        sourceKey: msgId,
+        ...(sources.length > 0 ? { sources } : {}),
       });
     }
   };
@@ -241,7 +303,10 @@ export default function MessageList({
     ) {
       return;
     }
+    const controller = new AbortController();
+    actionControllerRef.current = controller;
     setReviewPendingId(msgId);
+    setActionActivity(null);
     setError(null);
 
     const appCtx = {
@@ -253,9 +318,22 @@ export default function MessageList({
     };
 
     const profileData = await loadProfileData();
-
-    const result = await reviewDraft(content, appCtx, profileData, config);
+    const sources: WebSource[] = [];
+    const result = await reviewDraft(content, appCtx, profileData, config, {
+      signal: controller.signal,
+      onToolActivity: setActionActivity,
+      onSource: (source) => {
+        if (!sources.some((entry) => entry.url === source.url)) {
+          sources.push(source);
+        }
+      },
+    });
     setReviewPendingId(null);
+    setActionActivity(null);
+    if (actionControllerRef.current === controller) {
+      actionControllerRef.current = null;
+    }
+    if (controller.signal.aborted || result.stopped) return;
     if (result.error) {
       reportActionError(threadId, result.error);
       return;
@@ -265,6 +343,9 @@ export default function MessageList({
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
+        kind: "review",
+        sourceKey: msgId,
+        ...(sources.length > 0 ? { sources } : {}),
       });
     }
   };
@@ -318,8 +399,11 @@ export default function MessageList({
     }
     if (depth === "deep") setDeepImprovePendingId(msgId);
     else setImprovePendingId(msgId);
+    const controller = new AbortController();
+    actionControllerRef.current = controller;
     setImproveStep("review");
     setImprovePreview("");
+    setActionActivity(null);
     setError(null);
 
     const appCtx = {
@@ -331,14 +415,22 @@ export default function MessageList({
     };
 
     const profileData = await loadProfileData();
+    const sources: WebSource[] = [];
 
     const options = {
+      signal: controller.signal,
       onStep: (step: ImproveStep) => {
         setImproveStep(step);
         // The revise pass streams live; the other steps replace the preview.
         if (step !== "revise") setImprovePreview("");
       },
       onDelta: (text: string) => setImprovePreview((prev) => prev + text),
+      onToolActivity: setActionActivity,
+      onSource: (source: WebSource) => {
+        if (!sources.some((entry) => entry.url === source.url)) {
+          sources.push(source);
+        }
+      },
     };
 
     const result =
@@ -350,6 +442,11 @@ export default function MessageList({
     setDeepImprovePendingId(null);
     setImproveStep(null);
     setImprovePreview("");
+    setActionActivity(null);
+    if (actionControllerRef.current === controller) {
+      actionControllerRef.current = null;
+    }
+    if (controller.signal.aborted || result.stopped) return;
     if (result.error) {
       reportActionError(threadId, result.error);
       return;
@@ -359,9 +456,21 @@ export default function MessageList({
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
+        kind: "improve",
+        sourceKey: msgId,
+        ...(sources.length > 0 ? { sources } : {}),
       });
     }
   };
+
+  const lastConversationKey = (() => {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (isConversationMessage(messages[index])) {
+        return messageKey(messages[index]);
+      }
+    }
+    return null;
+  })();
 
   if (messages.length === 0 && !isSending) {
     return (
@@ -398,6 +507,42 @@ export default function MessageList({
             : savedId === key
               ? "saved"
               : null;
+
+        if (!isUser && (msg.kind === "improve" || msg.kind === "deslop")) {
+          const source = msg.sourceKey
+            ? messages.find(
+                (candidate) => messageKey(candidate) === msg.sourceKey,
+              ) ?? null
+            : null;
+          return (
+            <div key={key} className="flex justify-start">
+              <SuggestionCard
+                message={msg}
+                source={source}
+                onAccept={() => void handleAcceptSuggestion(msg)}
+                onDiscard={() => void handleDiscardMessage(msg)}
+              />
+            </div>
+          );
+        }
+
+        if (!isUser && msg.kind === "review") {
+          const source = msg.sourceKey
+            ? messages.find(
+                (candidate) => messageKey(candidate) === msg.sourceKey,
+              ) ?? null
+            : null;
+          return (
+            <div key={key} className="flex justify-start">
+              <ReviewCard
+                message={msg}
+                source={source}
+                onDiscard={() => void handleDiscardMessage(msg)}
+              />
+            </div>
+          );
+        }
+
         return (
           <div
             key={key}
@@ -475,7 +620,7 @@ export default function MessageList({
 
             {!isUser && (
               <div className="flex flex-col gap-1 pl-2 justify-start">
-                {messages[messages.length - 1] === msg && (
+                {lastConversationKey === key && (
                   <button
                     type="button"
                     onClick={() => onRegenerate?.(key)}
@@ -619,6 +764,29 @@ export default function MessageList({
           )}
         </div>
       ) : null}
+
+      {anyActionPending && (
+        <div
+          role="status"
+          className="flex items-center justify-center gap-2 text-xs text-text-muted"
+        >
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+          <span>
+            {actionActivity
+              ? actionActivity.tool === "web_search"
+                ? `Searching the web: ${actionActivity.detail}`
+                : `Reading: ${actionActivity.detail}`
+              : actionLabel}
+          </span>
+          <button
+            type="button"
+            onClick={stopAction}
+            className="text-primary hover:text-primary/80"
+          >
+            Stop
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="flex justify-center">

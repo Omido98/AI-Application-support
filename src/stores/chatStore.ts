@@ -35,6 +35,18 @@ export interface ChatMessage {
   usage?: TokenUsage;
   /** Estimated USD cost from the static Zen price table, when known. */
   costUsd?: number;
+  /**
+   * Non-conversational artifacts produced by the refine actions. They are
+   * rendered as review/suggestion cards and excluded from the model's history.
+   */
+  kind?: "review" | "improve" | "deslop";
+  /** For review/improve/deslop messages: the message they were derived from. */
+  sourceKey?: string;
+}
+
+/** Whether a message should be sent back to the model as conversation. */
+export function isConversationMessage(msg: ChatMessage): boolean {
+  return msg.kind === undefined;
 }
 
 /**
@@ -74,6 +86,16 @@ export function normalizeChatMessages(value: unknown): ChatMessage[] {
       candidate.costUsd >= 0
         ? candidate.costUsd
         : undefined;
+    const kind =
+      candidate.kind === "review" ||
+      candidate.kind === "improve" ||
+      candidate.kind === "deslop"
+        ? candidate.kind
+        : undefined;
+    const sourceKey =
+      typeof candidate.sourceKey === "string" && candidate.sourceKey.length > 0
+        ? candidate.sourceKey
+        : undefined;
     messages.push({
       role,
       content,
@@ -85,6 +107,8 @@ export function normalizeChatMessages(value: unknown): ChatMessage[] {
       ...(sources ? { sources } : {}),
       ...(usage ? { usage } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(kind ? { kind } : {}),
+      ...(sourceKey ? { sourceKey } : {}),
     });
   }
   return messages;
@@ -122,6 +146,30 @@ function normalizeUsage(value: unknown): TokenUsage | undefined {
     ...(inputTokens !== undefined ? { inputTokens } : {}),
     ...(outputTokens !== undefined ? { outputTokens } : {}),
   };
+}
+
+/** Copy an accepted suggestion into its source draft and drop the suggestion. */
+function applySuggestion(
+  messages: ChatMessage[],
+  suggestionKey: string,
+  sourceKey: string,
+): ChatMessage[] | null {
+  const suggestion = messages.find((msg) => messageKey(msg) === suggestionKey);
+  const source = messages.find((msg) => messageKey(msg) === sourceKey);
+  if (!suggestion || !source || suggestion === source) return null;
+  return messages
+    .map((msg) =>
+      msg === source
+        ? {
+            ...msg,
+            content: suggestion.content,
+            sources: suggestion.sources,
+            usage: suggestion.usage,
+            costUsd: suggestion.costUsd,
+          }
+        : msg,
+    )
+    .filter((msg) => messageKey(msg) !== suggestionKey);
 }
 
 // ──────────────────────────────────────────────
@@ -333,6 +381,17 @@ interface ChatState {
     key: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => Promise<void>;
+  /** Remove one message from a thread (discarding a suggestion or review). */
+  removeMessageInThread: (threadId: string, key: string) => Promise<void>;
+  /**
+   * Accept an improve/deslop suggestion: replace the source draft's content
+   * with the suggestion and remove the suggestion message in one write.
+   */
+  acceptSuggestion: (
+    threadId: string,
+    suggestionKey: string,
+    sourceKey: string,
+  ) => Promise<void>;
   clearMessages: () => Promise<void>;
   /** Load (or reset) the chat thread for an application. `force` reloads even
    * when the same thread is already loaded (used after importing a backup). */
@@ -429,6 +488,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     if (changed) {
       await saveJson(`chat_${threadId}.json`, messages);
+    }
+  },
+
+  removeMessageInThread: async (threadId, key) => {
+    const current = get();
+    if (current.activeThreadId === threadId) {
+      const messages = current.messages.filter(
+        (msg) => messageKey(msg) !== key,
+      );
+      if (messages.length !== current.messages.length) {
+        set({ messages });
+        scheduleThreadSave();
+      }
+      return;
+    }
+    const data = await loadJson<unknown>(`chat_${threadId}.json`);
+    const messages = normalizeChatMessages(data);
+    const next = messages.filter((msg) => messageKey(msg) !== key);
+    if (next.length !== messages.length) {
+      await saveJson(`chat_${threadId}.json`, next);
+    }
+  },
+
+  acceptSuggestion: async (threadId, suggestionKey, sourceKey) => {
+    const current = get();
+    if (current.activeThreadId === threadId) {
+      const next = applySuggestion(
+        current.messages,
+        suggestionKey,
+        sourceKey,
+      );
+      if (next) {
+        set({ messages: next });
+        scheduleThreadSave();
+      }
+      return;
+    }
+    const data = await loadJson<unknown>(`chat_${threadId}.json`);
+    const next = applySuggestion(
+      normalizeChatMessages(data),
+      suggestionKey,
+      sourceKey,
+    );
+    if (next) {
+      await saveJson(`chat_${threadId}.json`, next);
     }
   },
 

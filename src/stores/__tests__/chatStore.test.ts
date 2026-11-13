@@ -13,6 +13,7 @@ import {
   messageKey,
   flushChatSave,
   flushDraftsSave,
+  isConversationMessage,
   normalizeChatMessages,
   type ChatMessage,
 } from "@/stores/chatStore";
@@ -95,6 +96,8 @@ describe("normalizeChatMessages", () => {
         ],
         usage: { inputTokens: 10, outputTokens: 5 },
         costUsd: 0.001,
+        kind: "improve",
+        sourceKey: "t1Hello",
       },
     ]);
 
@@ -109,6 +112,8 @@ describe("normalizeChatMessages", () => {
         sources: [{ title: "Example", url: "https://example.com/page" }],
         usage: { inputTokens: 10, outputTokens: 5 },
         costUsd: 0.001,
+        kind: "improve",
+        sourceKey: "t1Hello",
       },
     ]);
   });
@@ -356,5 +361,76 @@ describe("unsent drafts", () => {
     await useChatStore.getState().clearMessages();
 
     expect(useChatStore.getState().drafts).toEqual({ "app-2": "keep" });
+  });
+});
+
+describe("suggestions and reviews", () => {
+  const source: ChatMessage = {
+    role: "assistant",
+    content: "Old draft",
+    timestamp: "t1",
+  };
+  const suggestion: ChatMessage = {
+    role: "assistant",
+    content: "New draft",
+    timestamp: "t2",
+    kind: "improve",
+    sourceKey: messageKey(source),
+    sources: [{ title: "Example", url: "https://example.com" }],
+  };
+
+  it("keeps artifacts out of the model conversation", () => {
+    expect(isConversationMessage(source)).toBe(true);
+    expect(isConversationMessage(suggestion)).toBe(false);
+    expect(
+      isConversationMessage({ ...source, kind: "review" }),
+    ).toBe(false);
+  });
+
+  it("accepts a suggestion by replacing the source and removing the card", async () => {
+    useChatStore.setState({
+      activeThreadId: "app-1",
+      threadLoaded: true,
+      messages: [source, suggestion],
+    });
+
+    await useChatStore
+      .getState()
+      .acceptSuggestion(
+        "app-1",
+        messageKey(suggestion),
+        messageKey(source),
+      );
+
+    expect(useChatStore.getState().messages).toEqual([
+      {
+        ...source,
+        content: "New draft",
+        sources: suggestion.sources,
+      },
+    ]);
+
+    await flushChatSave();
+    expect(saveJsonMock).toHaveBeenLastCalledWith("chat_app-1.json", [
+      {
+        ...source,
+        content: "New draft",
+        sources: suggestion.sources,
+      },
+    ]);
+  });
+
+  it("discards a suggestion without touching the source", async () => {
+    useChatStore.setState({
+      activeThreadId: "app-1",
+      threadLoaded: true,
+      messages: [source, suggestion],
+    });
+
+    await useChatStore
+      .getState()
+      .removeMessageInThread("app-1", messageKey(suggestion));
+
+    expect(useChatStore.getState().messages).toEqual([source]);
   });
 });

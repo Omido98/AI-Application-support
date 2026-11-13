@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useChatStore, messageKey, type ChatMessage } from "@/stores/chatStore";
+import {
+  isConversationMessage,
+  messageKey,
+  useChatStore,
+  type ChatMessage,
+} from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useAppStore } from "@/stores/useAppStore";
@@ -62,6 +67,12 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const loadProfile = useProfileStore((s) => s.loadProfile);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
 
+  // Review cards and pending suggestions are UI artifacts, not conversation.
+  const conversationMessages = useMemo(
+    () => messages.filter(isConversationMessage),
+    [messages],
+  );
+
   // Live estimate of what the next request will actually send, after history
   // trimming, plus how many older messages are omitted to stay in budget.
   const contextBudget = useMemo(
@@ -85,7 +96,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     });
     const reserved =
       estimateTokens(prompt) + estimateTokens(inputValue);
-    const fitted = fitHistoryToBudget(messages, {
+    const fitted = fitHistoryToBudget(conversationMessages, {
       inputBudget: contextBudget.inputBudget,
       reservedTokens: reserved,
     });
@@ -96,7 +107,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   }, [
     application,
     profile,
-    messages,
+    conversationMessages,
     inputValue,
     config.systemPromptMode,
     config.customSystemPrompt,
@@ -240,7 +251,9 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
       const threadAtStart = useChatStore.getState().activeThreadId;
       if (!threadAtStart) return;
-      const messagesBefore = useChatStore.getState().messages;
+      const messagesBefore = useChatStore
+        .getState()
+        .messages.filter(isConversationMessage);
 
       let targetIndex = -1;
       let target: ChatMessage | null = null;
@@ -365,12 +378,14 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       });
 
       const threadAtSend = threadAtStart;
-      const { messages } = useChatStore.getState();
+      const conversation = useChatStore
+        .getState()
+        .messages.filter(isConversationMessage);
       // A regeneration drops the old reply from the history so the model
       // answers afresh; the stored message itself stays until replaced.
       const history = isRegenerate
-        ? messages.filter((m) => messageKey(m) !== opts.regenerateKey)
-        : messages;
+        ? conversation.filter((m) => messageKey(m) !== opts.regenerateKey)
+        : conversation;
       const fitted = fitHistoryToBudget(history, {
         inputBudget: getContextBudget(config.contextWindow).inputBudget,
         reservedTokens: estimateTokens(systemPrompt),
