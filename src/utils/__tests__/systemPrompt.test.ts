@@ -6,6 +6,7 @@ import {
   buildDraftRevisionPrompt,
   buildDraftVerifyPrompt,
   buildCoverLetterSummaryPrompt,
+  buildConversationSummaryPrompt,
   getStandardPrompt,
 } from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
@@ -652,5 +653,42 @@ describe("buildCoverLetterSummaryPrompt", () => {
   it("handles a profile with no cover letters", () => {
     const prompt = buildCoverLetterSummaryPrompt(makeProfile());
     expect(prompt).toContain("has no previous cover letters yet");
+  });
+});
+
+describe("conversation summaries", () => {
+  it("adds an earlier-conversation section only when a summary is provided", () => {
+    const without = buildSystemPrompt(baseApplication, null);
+    expect(without).not.toContain("Earlier Conversation Summary");
+
+    const withSummary = buildSystemPrompt(baseApplication, null, {
+      mode: "standard",
+      customPrompt: "",
+      conversationSummary: "The user prefers a direct tone and rejected draft 1.",
+    });
+    expect(withSummary).toContain("Earlier Conversation Summary");
+    expect(withSummary).toContain("rejected draft 1");
+  });
+
+  it("keeps the summary in custom-prompt mode too", () => {
+    const prompt = buildSystemPrompt(baseApplication, null, {
+      mode: "custom",
+      customPrompt: "Use my own instructions.",
+      conversationSummary: "Earlier decision.",
+    });
+    expect(prompt).toContain("Use my own instructions.");
+    expect(prompt).toContain("Earlier Conversation Summary");
+    expect(prompt).toContain("Earlier decision.");
+  });
+
+  it("builds a summarizer prompt with the transcript and preservation rules", () => {
+    const prompt = buildConversationSummaryPrompt([
+      { role: "user", content: "I want a shorter letter." },
+      { role: "assistant", content: "Here is a shorter draft." },
+    ]);
+    expect(prompt).toContain("User: I want a shorter letter.");
+    expect(prompt).toContain("Assistant: Here is a shorter draft.");
+    expect(prompt).toContain("at most 250 words");
+    expect(prompt).toContain("Never invent facts");
   });
 });

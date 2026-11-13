@@ -18,6 +18,11 @@ export interface PromptOptions {
    * that first reply.
    */
   fitEvaluation?: boolean;
+  /**
+   * A summary of older conversation turns that were omitted to fit the
+   * context budget. Only passed when trimming actually happened.
+   */
+  conversationSummary?: string;
 }
 
 const ROLE_LINE =
@@ -288,6 +293,40 @@ export function buildDraftVerifyPrompt(
   ].join("\n");
 }
 
+/**
+ * Build the prompt for summarizing the older part of a conversation. The
+ * summary is carried into later requests when those messages no longer fit
+ * the context budget.
+ */
+export function buildConversationSummaryPrompt(
+  messages: { role: "user" | "assistant"; content: string }[],
+): string {
+  const transcript = messages
+    .map(
+      (message) =>
+        `${message.role === "user" ? "User" : "Assistant"}: ${message.content.trim()}`,
+    )
+    .join("\n\n");
+
+  return [
+    "You are summarizing the earlier part of a job-application conversation. The summary will replace those messages in the model's context, so it must preserve everything needed to continue the work consistently.",
+    "",
+    "Keep:",
+    "- Decisions and drafts the user accepted, rejected, or asked to change.",
+    "- The user's preferences, tone, constraints, and any word/character limits.",
+    "- Verified facts about the employer or role that were established.",
+    "- Open questions, unresolved gaps, and the next planned step.",
+    "",
+    "Rules:",
+    "- Write at most 250 words.",
+    "- Never invent facts or decisions that are not in the transcript.",
+    "- No greeting, preamble, or meta commentary; output only the summary.",
+    "",
+    "Transcript:",
+    transcript,
+  ].join("\n");
+}
+
 function formatDate(month: string, year?: string): string {
   return year ? `${month} ${year}` : month;
 }
@@ -370,6 +409,11 @@ export function buildSystemPrompt(
       sections.push("- Previous Cover Letters (summary):");
       sections.push(summary);
     }
+  }
+
+  const conversationSummary = (options?.conversationSummary ?? "").trim();
+  if (conversationSummary) {
+    sections.push("", "Earlier Conversation Summary", conversationSummary);
   }
 
   if (!useCustom) {

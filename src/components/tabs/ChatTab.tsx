@@ -9,10 +9,14 @@ import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useAppStore } from "@/stores/useAppStore";
 import { sendMessage, type ToolActivity } from "@/utils/api";
-import { buildSystemPrompt } from "@/utils/systemPrompt";
+import {
+  buildConversationSummaryPrompt,
+  buildSystemPrompt,
+} from "@/utils/systemPrompt";
 import { estimateTokens } from "@/utils/tokens";
 import { fitHistoryToBudget, getContextBudget } from "@/utils/contextBudget";
 import { estimateUsageCost, isFreeModel } from "@/utils/zenPricing";
+import { createStreamBatcher } from "@/utils/streamBuffer";
 import type { WebSource } from "@/types";
 import ChatSettings from "@/components/chat/ChatSettings";
 import MessageList from "@/components/chat/MessageList";
@@ -45,6 +49,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const threadLoaded = useChatStore((s) => s.threadLoaded);
   const switchThread = useChatStore((s) => s.switchThread);
   const addMessage = useChatStore((s) => s.addMessage);
+  const appendMessageToThread = useChatStore((s) => s.appendMessageToThread);
+  const updateMessageInThread = useChatStore((s) => s.updateMessageInThread);
   const clearMessages = useChatStore((s) => s.clearMessages);
   const updateMessage = useChatStore((s) => s.updateMessage);
   const isSending = useChatStore((s) => s.isSending);
@@ -73,6 +79,12 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     [messages],
   );
 
+  const summaryMessage = useMemo(
+    () => messages.find((message) => message.kind === "summary") ?? null,
+    [messages],
+  );
+  const summaryText = summaryMessage?.content.trim() ?? "";
+
   // Live estimate of what the next request will actually send, after history
   // trimming, plus how many older messages are omitted to stay in budget.
   const contextBudget = useMemo(
@@ -90,16 +102,34 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       requirements: application.requirements,
       companyResearch: application.companyResearch,
     };
-    const prompt = buildSystemPrompt(appCtx, profile, {
+    const basePrompt = buildSystemPrompt(appCtx, profile, {
       mode: config.systemPromptMode ?? "standard",
       customPrompt: config.customSystemPrompt ?? "",
     });
+    const baseReserved =
+      estimateTokens(basePrompt) + estimateTokens(inputValue);
+    const baseFitted = fitHistoryToBudget(conversationMessages, {
+      inputBudget: contextBudget.inputBudget,
+      reservedTokens: baseReserved,
+    });
+    // The summary only earns its tokens when something is actually omitted.
+    const summary = baseFitted.droppedCount > 0 ? summaryText : "";
+    const prompt = summary
+      ? buildSystemPrompt(appCtx, profile, {
+          mode: config.systemPromptMode ?? "standard",
+          customPrompt: config.customSystemPrompt ?? "",
+          conversationSummary: summary,
+        })
+      : basePrompt;
     const reserved =
       estimateTokens(prompt) + estimateTokens(inputValue);
-    const fitted = fitHistoryToBudget(conversationMessages, {
-      inputBudget: contextBudget.inputBudget,
-      reservedTokens: reserved,
-    });
+    const fitted =
+      summary || reserved !== baseReserved
+        ? fitHistoryToBudget(conversationMessages, {
+            inputBudget: contextBudget.inputBudget,
+            reservedTokens: reserved,
+          })
+        : baseFitted;
     return {
       tokens: reserved + fitted.historyTokens,
       dropped: fitted.droppedCount,
@@ -109,6 +139,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     profile,
     conversationMessages,
     inputValue,
+    summaryText,
     config.systemPromptMode,
     config.customSystemPrompt,
     contextBudget.inputBudget,
@@ -120,61 +151,42 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const [confirmReset, setConfirmReset] = useState(false);
   const [replyNotice, setReplyNotice] = useState<string | null>(null);
   const [toolActivity, setToolActivity] = useState<ToolActivity | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const sourcesRef = useRef<WebSource[]>([]);
 
   // Aborts the in-flight generation (used by the Stop button / Escape).
   const controllerRef = useRef<AbortController | null>(null);
 
-  // Streamed deltas are buffered and flushed at most once per animation frame.
-  // Rendering every SSE chunk is what made long threads feel sluggish.
-  const streamBufferRef = useRef("");
-  const streamRafRef = useRef<number | null>(null);
-
-  const cancelStreamBuffer = useCallback(() => {
-    if (streamRafRef.current !== null) {
-      cancelAnimationFrame(streamRafRef.current);
-      streamRafRef.current = null;
-    }
-    streamBufferRef.current = "";
-  }, []);
-
-  const flushStreamBuffer = useCallback(() => {
-    if (streamRafRef.current !== null) {
-      cancelAnimationFrame(streamRafRef.current);
-      streamRafRef.current = null;
-    }
-    const buffered = streamBufferRef.current;
-    streamBufferRef.current = "";
-    if (buffered) {
-      setStreamingText((previous) => previous + buffered);
-    }
-  }, [setStreamingText]);
-
-  const queueStreamDelta = useCallback(
-    (chunk: string) => {
-      streamBufferRef.current += chunk;
-      if (streamRafRef.current !== null) return;
-      streamRafRef.current = requestAnimationFrame(() => {
-        streamRafRef.current = null;
-        const buffered = streamBufferRef.current;
-        streamBufferRef.current = "";
-        if (buffered) {
-          setStreamingText((previous) => previous + buffered);
-        }
-      });
-    },
+  // Streamed deltas are coalesced into at most one state update per frame.
+  const streamBatcher = useMemo(
+    () =>
+      createStreamBatcher(
+        (text) => setStreamingText((previous) => previous + text),
+        (callback) => requestAnimationFrame(callback),
+        (handle) => cancelAnimationFrame(handle),
+      ),
     [setStreamingText],
   );
 
+  const cancelStreamBuffer = useCallback(
+    () => streamBatcher.cancel(),
+    [streamBatcher],
+  );
+
+  const flushStreamBuffer = useCallback(
+    () => streamBatcher.flush(),
+    [streamBatcher],
+  );
+
+  const queueStreamDelta = useCallback(
+    (chunk: string) => streamBatcher.push(chunk),
+    [streamBatcher],
+  );
+
   useEffect(() => {
-    return () => {
-      if (streamRafRef.current !== null) {
-        cancelAnimationFrame(streamRafRef.current);
-        streamRafRef.current = null;
-      }
-      streamBufferRef.current = "";
-    };
-  }, []);
+    return () => streamBatcher.cancel();
+  }, [streamBatcher]);
 
   // ── Load on mount ──
   useEffect(() => {
@@ -189,6 +201,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     cancelStreamBuffer();
     setReplyNotice(null);
     setToolActivity(null);
+    setSummaryError(null);
     sourcesRef.current = [];
     void switchThread(selectedId);
   }, [selectedId, switchThread, cancelStreamBuffer]);
@@ -216,12 +229,116 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     setDraft("");
     setReplyNotice(null);
     setToolActivity(null);
+    setSummaryError(null);
     sourcesRef.current = [];
     // A fresh thread means web search should behave like a first message
     // again: enabled for the next message, off afterwards by default.
     void setConfig({ webSearchEnabled: false });
     setConfirmReset(false);
   }, [clearMessages, setError, setDraft, setConfig]);
+
+  const handleSummarizeHistory = useCallback(async () => {
+    if (summarizing || isSending || !application) return;
+    const threadId = useChatStore.getState().activeThreadId;
+    if (!threadId) return;
+
+    const conversation = useChatStore
+      .getState()
+      .messages.filter(isConversationMessage);
+    const appCtx = {
+      company: application.companyName,
+      jobDescription: application.jobDescription,
+      language: application.applicationLanguage,
+      requirements: application.requirements,
+      companyResearch: application.companyResearch,
+    };
+    const basePrompt = buildSystemPrompt(appCtx, profile, {
+      mode: config.systemPromptMode ?? "standard",
+      customPrompt: config.customSystemPrompt ?? "",
+    });
+    const budget = getContextBudget(config.contextWindow);
+    const fitted = fitHistoryToBudget(conversation, {
+      inputBudget: budget.inputBudget,
+      reservedTokens:
+        estimateTokens(basePrompt) + estimateTokens(inputValue),
+    });
+    if (fitted.droppedCount === 0) {
+      setSummaryError(
+        "No older messages are being omitted yet; there is nothing to summarize.",
+      );
+      return;
+    }
+
+    // Keep the summarizer request itself bounded for very long threads.
+    const dropped = conversation.slice(0, fitted.droppedCount);
+    const capped = fitHistoryToBudget(dropped, {
+      inputBudget: Math.min(budget.inputBudget, 40_000),
+    });
+    const lastDropped = capped.messages[capped.messages.length - 1];
+    if (!lastDropped) return;
+
+    setSummarizing(true);
+    setSummaryError(null);
+    try {
+      const result = await sendMessage(
+        [
+          {
+            role: "user",
+            content: "Summarize the earlier conversation.",
+            timestamp: new Date().toISOString(),
+          },
+        ],
+        { ...config, webSearchEnabled: false },
+        buildConversationSummaryPrompt(capped.messages),
+      );
+      if (result.error) {
+        setSummaryError(result.error);
+        return;
+      }
+      if (result.stopped || !result.content.trim()) return;
+
+      const existingSummary = useChatStore
+        .getState()
+        .messages.find((message) => message.kind === "summary");
+      if (existingSummary) {
+        await updateMessageInThread(
+          threadId,
+          messageKey(existingSummary),
+          (message) => ({
+            ...message,
+            content: result.content,
+            sourceKey: messageKey(lastDropped),
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      } else {
+        await appendMessageToThread(threadId, {
+          role: "assistant",
+          content: result.content,
+          timestamp: new Date().toISOString(),
+          kind: "summary",
+          sourceKey: messageKey(lastDropped),
+        });
+      }
+    } catch (err) {
+      setSummaryError(
+        err instanceof Error
+          ? err.message
+          : "Could not summarize the earlier conversation.",
+      );
+    } finally {
+      setSummarizing(false);
+    }
+  }, [
+    application,
+    appendMessageToThread,
+    config,
+    inputValue,
+    isSending,
+    profile,
+    summarizing,
+    updateMessageInThread,
+  ]);
 
   // ── Send a message to the chat ──
   // Three modes:
@@ -371,7 +488,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         languages: freshProfile.languages,
       };
 
-      const systemPrompt = buildSystemPrompt(appCtx, profileData, {
+      const baseSystemPrompt = buildSystemPrompt(appCtx, profileData, {
         mode: config.systemPromptMode ?? "standard",
         customPrompt: config.customSystemPrompt ?? "",
         fitEvaluation: isFitEvaluation,
@@ -386,10 +503,32 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       const history = isRegenerate
         ? conversation.filter((m) => messageKey(m) !== opts.regenerateKey)
         : conversation;
-      const fitted = fitHistoryToBudget(history, {
-        inputBudget: getContextBudget(config.contextWindow).inputBudget,
-        reservedTokens: estimateTokens(systemPrompt),
+      const budget = getContextBudget(config.contextWindow);
+      const baseFitted = fitHistoryToBudget(history, {
+        inputBudget: budget.inputBudget,
+        reservedTokens: estimateTokens(baseSystemPrompt),
       });
+      const summaryAtSend =
+        baseFitted.droppedCount > 0
+          ? (useChatStore
+              .getState()
+              .messages.find((message) => message.kind === "summary")
+              ?.content.trim() ?? "")
+          : "";
+      const systemPrompt = summaryAtSend
+        ? buildSystemPrompt(appCtx, profileData, {
+            mode: config.systemPromptMode ?? "standard",
+            customPrompt: config.customSystemPrompt ?? "",
+            fitEvaluation: isFitEvaluation,
+            conversationSummary: summaryAtSend,
+          })
+        : baseSystemPrompt;
+      const fitted = summaryAtSend
+        ? fitHistoryToBudget(history, {
+            inputBudget: budget.inputBudget,
+            reservedTokens: estimateTokens(systemPrompt),
+          })
+        : baseFitted;
       let sendHistory = fitted.messages;
       // A re-send targets a message that may be older than the trimmed
       // window; make sure the retried prompt is actually part of the request.
@@ -741,10 +880,31 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       )}
 
       {contextUsage.dropped > 0 && (
-        <p className="px-4 pt-2 text-[10px] leading-snug text-text-muted">
-          {contextUsage.dropped} older message
-          {contextUsage.dropped === 1 ? "" : "s"} will be omitted from the next
-          request to stay within the context budget.
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2 text-[10px] leading-snug text-text-muted">
+          <span>
+            {contextUsage.dropped} older message
+            {contextUsage.dropped === 1 ? "" : "s"} will be omitted from the next
+            request to stay within the context budget.
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleSummarizeHistory()}
+            disabled={summarizing || isSending}
+            className="text-primary transition-colors hover:text-primary/80 disabled:opacity-50"
+            title="Summarize the omitted messages so the agent keeps their context"
+          >
+            {summarizing
+              ? "Summarizing…"
+              : summaryText
+                ? "Update summary"
+                : "Summarize omitted messages"}
+          </button>
+        </div>
+      )}
+
+      {summaryError && (
+        <p className="px-4 pt-1 text-[10px] leading-snug text-destructive">
+          {summaryError}
         </p>
       )}
 

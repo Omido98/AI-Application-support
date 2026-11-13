@@ -472,7 +472,11 @@ export default function MessageList({
     return null;
   })();
 
-  if (messages.length === 0 && !isSending) {
+  const hasVisibleMessages = messages.some(
+    (message) => message.kind !== "summary",
+  );
+
+  if (!hasVisibleMessages && !isSending) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center max-w-md space-y-4">
@@ -499,6 +503,7 @@ export default function MessageList({
       className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
     >
       {messages.map((msg) => {
+        if (msg.kind === "summary") return null;
         const isUser = msg.role === "user";
         const key = messageKey(msg);
         const feedback =

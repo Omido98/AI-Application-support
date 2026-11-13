@@ -39,7 +39,7 @@ export interface ChatMessage {
    * Non-conversational artifacts produced by the refine actions. They are
    * rendered as review/suggestion cards and excluded from the model's history.
    */
-  kind?: "review" | "improve" | "deslop";
+  kind?: "review" | "improve" | "deslop" | "summary";
   /** For review/improve/deslop messages: the message they were derived from. */
   sourceKey?: string;
 }
@@ -89,7 +89,8 @@ export function normalizeChatMessages(value: unknown): ChatMessage[] {
     const kind =
       candidate.kind === "review" ||
       candidate.kind === "improve" ||
-      candidate.kind === "deslop"
+      candidate.kind === "deslop" ||
+      candidate.kind === "summary"
         ? candidate.kind
         : undefined;
     const sourceKey =
