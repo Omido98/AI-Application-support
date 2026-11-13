@@ -48,6 +48,59 @@ describe("normalizeApplicationsPayload", () => {
     expect(result?.selectedApplicationId).toBe("a");
   });
 
+  it("normalizes tracker fields and repairs status history", () => {
+    const result = normalizeApplicationsPayload({
+      applications: [
+        {
+          id: "a",
+          status: "applied",
+          priority: "urgent",
+          workMode: "remote",
+          tags: ["  remote ", "remote", "", 42, "fintech"],
+          appliedAt: "2026-02-31",
+          deadline: "2026-03-15T10:00:00Z",
+          followUpAt: "sometime soon",
+          contactEmail: "jobs@example.com",
+          statusHistory: [
+            { status: "wishlist", at: "2026-01-01T00:00:00.000Z" },
+            { status: "bogus", at: "2026-01-02T00:00:00.000Z" },
+            { status: "applied" },
+          ],
+        },
+      ],
+    });
+
+    const app = result?.applications[0];
+    expect(app?.priority).toBe("medium");
+    expect(app?.workMode).toBe("remote");
+    expect(app?.tags).toEqual(["remote", "fintech"]);
+    // 31 February is not a real date, so it must not reach a date input.
+    expect(app?.appliedAt).toBe("");
+    expect(app?.deadline).toBe("2026-03-15");
+    expect(app?.followUpAt).toBe("");
+    expect(app?.contactEmail).toBe("jobs@example.com");
+    expect(app?.statusHistory.map((entry) => entry.status)).toEqual([
+      "wishlist",
+      "applied",
+    ]);
+    expect(app?.statusHistory.every((entry) => entry.at)).toBe(true);
+  });
+
+  it("seeds status history for files that predate it", () => {
+    const result = normalizeApplicationsPayload({
+      applications: [
+        {
+          id: "old",
+          status: "interview",
+          createdAt: "2025-05-01T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(result?.applications[0].statusHistory).toEqual([
+      { status: "interview", at: "2025-05-01T00:00:00.000Z" },
+    ]);
+  });
+
   it("generates ids for missing or duplicate ids", () => {
     const result = normalizeApplicationsPayload({
       applications: [

@@ -3,6 +3,7 @@ import type { ApplicationStatus } from "@/types";
 
 export type TabId = "application" | "chat" | "profile";
 export type ApplicationViewMode = "active" | "archived";
+export type ApplicationSortMode = "status" | "updated" | "company" | "deadline";
 
 /**
  * Small amount of cross-tab UI state. Keeping the application filters here
@@ -20,6 +21,8 @@ interface AppState {
   setApplicationStatusFilter: (status: ApplicationStatus | null) => void;
   applicationViewMode: ApplicationViewMode;
   setApplicationViewMode: (mode: ApplicationViewMode) => void;
+  applicationSortMode: ApplicationSortMode;
+  setApplicationSortMode: (mode: ApplicationSortMode) => void;
   resetApplicationFilters: () => void;
 }
 
@@ -34,6 +37,8 @@ export const useAppStore = create<AppState>((set) => ({
     set({ applicationStatusFilter: status }),
   applicationViewMode: "active",
   setApplicationViewMode: (mode) => set({ applicationViewMode: mode }),
+  applicationSortMode: "status",
+  setApplicationSortMode: (mode) => set({ applicationSortMode: mode }),
   resetApplicationFilters: () =>
     set({
       applicationFilter: "",

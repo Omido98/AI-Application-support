@@ -10,6 +10,7 @@ import { useProfileStore } from "@/stores/profileStore";
 import { useAppStore } from "@/stores/useAppStore";
 import { sendMessage, type ToolActivity } from "@/utils/api";
 import {
+  applicationContextFrom,
   buildConversationSummaryPrompt,
   buildSystemPrompt,
 } from "@/utils/systemPrompt";
@@ -95,13 +96,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     if (!application) {
       return { tokens: 0, dropped: 0 };
     }
-    const appCtx = {
-      company: application.companyName,
-      jobDescription: application.jobDescription,
-      language: application.applicationLanguage,
-      requirements: application.requirements,
-      companyResearch: application.companyResearch,
-    };
+    const appCtx = applicationContextFrom(application);
     const basePrompt = buildSystemPrompt(appCtx, profile, {
       mode: config.systemPromptMode ?? "standard",
       customPrompt: config.customSystemPrompt ?? "",
@@ -245,13 +240,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     const conversation = useChatStore
       .getState()
       .messages.filter(isConversationMessage);
-    const appCtx = {
-      company: application.companyName,
-      jobDescription: application.jobDescription,
-      language: application.applicationLanguage,
-      requirements: application.requirements,
-      companyResearch: application.companyResearch,
-    };
+    const appCtx = applicationContextFrom(application);
     const basePrompt = buildSystemPrompt(appCtx, profile, {
       mode: config.systemPromptMode ?? "standard",
       customPrompt: config.customSystemPrompt ?? "",
@@ -446,13 +435,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       sourcesRef.current = [];
 
       // Application context of the current thread
-      const appCtx = {
-        company: application.companyName,
-        jobDescription: application.jobDescription,
-        language: application.applicationLanguage,
-        requirements: application.requirements,
-        companyResearch: application.companyResearch,
-      };
+      const appCtx = applicationContextFrom(application);
 
       // Make sure the profile has been loaded from disk before it is sent.
       // App startup loads it too; this covers sends racing that load.

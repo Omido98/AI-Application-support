@@ -1,4 +1,4 @@
-import type { ProfileData } from "@/types";
+import type { JobApplication, ProfileData } from "@/types";
 
 export interface ApplicationContext {
   company: string;
@@ -6,6 +6,75 @@ export interface ApplicationContext {
   language: string;
   requirements: string;
   companyResearch: string;
+  /** Optional Phase 2 tracker details, omitted from prompts when empty. */
+  location?: string;
+  workMode?: string;
+  salary?: string;
+  source?: string;
+  priority?: string;
+  tags?: string[];
+  appliedAt?: string;
+  deadline?: string;
+  followUpAt?: string;
+  contactName?: string;
+  contactEmail?: string;
+}
+
+/** Build the prompt-facing context from a tracked application. */
+export function applicationContextFrom(
+  application: JobApplication,
+): ApplicationContext {
+  return {
+    company: application.companyName,
+    jobDescription: application.jobDescription,
+    language: application.applicationLanguage,
+    requirements: application.requirements,
+    companyResearch: application.companyResearch,
+    location: application.location,
+    workMode: application.workMode,
+    salary: application.salary,
+    source: application.source,
+    priority: application.priority,
+    tags: application.tags,
+    appliedAt: application.appliedAt,
+    deadline: application.deadline,
+    followUpAt: application.followUpAt,
+    contactName: application.contactName,
+    contactEmail: application.contactEmail,
+  };
+}
+
+/** Extra "Application Context" lines, present only when the user filled them. */
+function applicationDetailLines(application: ApplicationContext): string[] {
+  const lines: string[] = [];
+  const add = (label: string, raw?: string) => {
+    const value = (raw ?? "").trim();
+    if (value) lines.push(`- ${label}: ${value}`);
+  };
+  add("Location", application.location);
+  add(
+    "Work mode",
+    application.workMode
+      ? application.workMode.charAt(0).toUpperCase() +
+          application.workMode.slice(1)
+      : "",
+  );
+  add("Salary", application.salary);
+  add("Source", application.source);
+  add("Priority", application.priority);
+  if (application.tags && application.tags.length > 0) {
+    add("Tags", application.tags.join(", "));
+  }
+  add("Applied on", application.appliedAt);
+  add("Deadline", application.deadline);
+  add("Follow-up", application.followUpAt);
+  add(
+    "Contact",
+    [application.contactName, application.contactEmail]
+      .filter(Boolean)
+      .join(" / "),
+  );
+  return lines;
 }
 
 export interface PromptOptions {
@@ -203,6 +272,7 @@ export function buildDraftReviewPrompt(
     "",
     "Application Context",
     `- Company: ${company || "(not provided)"}`,
+    ...applicationDetailLines(application),
     `- Job Description: ${jobDescription || "(not provided)"}`,
     `- Application Language: ${language || "(not provided)"}`,
     `- Application Requirements: ${requirements || "(not provided)"}`,
@@ -387,6 +457,7 @@ export function buildSystemPrompt(
   sections.push(
     "Application Context",
     `- Company: ${company || "(not provided)"}`,
+    ...applicationDetailLines(application),
     `- Job Description: ${jobDescription || "(not provided)"}`,
     `- Application Language: ${language || "(not provided)"}`,
     `- Application Requirements: ${requirements || "(not provided)"}`,

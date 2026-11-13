@@ -112,6 +112,20 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
         requirements: legacyRequirements,
         companyResearch: legacyResearch,
         notes: "",
+        location: "",
+        workMode: "",
+        salary: "",
+        source: "",
+        priority: "medium",
+        tags: [],
+        appliedAt: "",
+        deadline: "",
+        followUpAt: "",
+        contactName: "",
+        contactEmail: "",
+        statusHistory: [
+          { status: "wishlist", at: new Date().toISOString() },
+        ],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -140,6 +154,18 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
       requirements: "",
       companyResearch: "",
       notes: "",
+      location: "",
+      workMode: "",
+      salary: "",
+      source: "",
+      priority: "medium",
+      tags: [],
+      appliedAt: "",
+      deadline: "",
+      followUpAt: "",
+      contactName: "",
+      contactEmail: "",
+      statusHistory: [{ status: "wishlist", at: now }],
       createdAt: now,
       updatedAt: now,
     };
@@ -164,12 +190,23 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
   },
 
   updateApplication: (id, patch) => {
+    const now = new Date().toISOString();
     set((s) => ({
-      applications: s.applications.map((a) =>
-        a.id === id
-          ? { ...a, ...patch, updatedAt: new Date().toISOString() }
-          : a,
-      ),
+      applications: s.applications.map((a) => {
+        if (a.id !== id) return a;
+        const nextStatus = patch.status;
+        const statusChanged =
+          nextStatus !== undefined && nextStatus !== a.status;
+        return {
+          ...a,
+          ...patch,
+          statusHistory:
+            statusChanged && nextStatus !== undefined
+              ? [...a.statusHistory, { status: nextStatus, at: now }]
+              : a.statusHistory,
+          updatedAt: now,
+        };
+      }),
     }));
     debouncedSave();
   },

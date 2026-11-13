@@ -140,6 +140,17 @@ export type ApplicationStatus =
   | "offer"
   | "rejected";
 
+export type ApplicationPriority = "low" | "medium" | "high";
+
+export type WorkMode = "onsite" | "hybrid" | "remote" | "";
+
+/** One status change, recorded so the pipeline history survives restarts. */
+export interface StatusHistoryEntry {
+  status: ApplicationStatus;
+  /** ISO timestamp of the change. */
+  at: string;
+}
+
 /** A single tracked job application, with its own chat thread. */
 export interface JobApplication {
   id: string;
@@ -152,6 +163,20 @@ export interface JobApplication {
   requirements: string;
   companyResearch: string;
   notes: string;
+  /** Phase 2 tracker fields. Empty strings mean "not set". */
+  location: string;
+  workMode: WorkMode;
+  salary: string;
+  source: string;
+  priority: ApplicationPriority;
+  tags: string[];
+  /** Date-only (YYYY-MM-DD) values, kept as strings for plain-JSON storage. */
+  appliedAt: string;
+  deadline: string;
+  followUpAt: string;
+  contactName: string;
+  contactEmail: string;
+  statusHistory: StatusHistoryEntry[];
   createdAt: string;
   updatedAt: string;
 }

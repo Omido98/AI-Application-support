@@ -8,6 +8,7 @@ import {
   MIN_CONTEXT_WINDOW,
 } from "@/utils/tokens";
 import type {
+  ApplicationPriority,
   ApplicationStatus,
   Certification,
   CoverLetter,
@@ -20,7 +21,9 @@ import type {
   ProfileData,
   Project,
   Skill,
+  StatusHistoryEntry,
   WorkExperience,
+  WorkMode,
 } from "@/types";
 
 /**
@@ -98,6 +101,81 @@ function normalizeStatus(value: unknown): ApplicationStatus {
     (APPLICATION_STATUSES as string[]).includes(value)
     ? (value as ApplicationStatus)
     : "wishlist";
+}
+
+function isApplicationStatus(value: unknown): value is ApplicationStatus {
+  return (
+    typeof value === "string" &&
+    (APPLICATION_STATUSES as string[]).includes(value)
+  );
+}
+
+const APPLICATION_PRIORITIES: ApplicationPriority[] = ["low", "medium", "high"];
+
+function normalizePriority(value: unknown): ApplicationPriority {
+  return typeof value === "string" &&
+    (APPLICATION_PRIORITIES as string[]).includes(value)
+    ? (value as ApplicationPriority)
+    : "medium";
+}
+
+const WORK_MODES: WorkMode[] = ["onsite", "hybrid", "remote"];
+
+function normalizeWorkMode(value: unknown): WorkMode {
+  return typeof value === "string" && (WORK_MODES as string[]).includes(value)
+    ? (value as WorkMode)
+    : "";
+}
+
+/** Trimmed, de-duplicated tags with empty values removed. */
+function normalizeTags(value: unknown): string[] {
+  const tags = asStringArray(value)
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0)
+    .map((tag) => tag.slice(0, 40));
+  return [...new Set(tags)].slice(0, 20);
+}
+
+/** Accept only real `YYYY-MM-DD` dates; anything else becomes "not set". */
+function normalizeDate(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  if (!match) return "";
+  const date = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  if (date.toISOString().slice(0, 10) !== `${match[1]}-${match[2]}-${match[3]}`) {
+    return "";
+  }
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+/**
+ * Repair the audit trail: drop malformed entries, always seed at least the
+ * creation status, and append the current status when an old file (or an
+ * older version of the app) changed it without recording history.
+ */
+function normalizeStatusHistory(
+  value: unknown,
+  status: ApplicationStatus,
+  createdAt: string,
+  updatedAt: string,
+): StatusHistoryEntry[] {
+  const entries: StatusHistoryEntry[] = [];
+  for (const item of asArray(value)) {
+    if (!isRecord(item) || !isApplicationStatus(item.status)) continue;
+    const at = asString(item.at);
+    if (!at || Number.isNaN(new Date(at).getTime())) continue;
+    entries.push({ status: item.status, at });
+  }
+  if (entries.length === 0) {
+    entries.push({ status, at: createdAt || updatedAt });
+  } else if (entries[entries.length - 1].status !== status) {
+    entries.push({
+      status,
+      at: updatedAt || entries[entries.length - 1].at,
+    });
+  }
+  return entries.slice(-100);
 }
 
 const FLUENCY_LEVELS: FluencyLevel[] = [
@@ -232,19 +310,39 @@ function normalizeLanguage(value: unknown): Language | null {
 function normalizeApplication(value: unknown): JobApplication | null {
   if (!isRecord(value)) return null;
   const now = new Date().toISOString();
+  const status = normalizeStatus(value.status);
+  const createdAt = asString(value.createdAt, now);
+  const updatedAt = asString(value.updatedAt, now);
   return {
     id: normalizeId(value.id),
     companyName: asString(value.companyName),
     jobTitle: asString(value.jobTitle),
     applicationUrl: asString(value.applicationUrl),
-    status: normalizeStatus(value.status),
+    status,
     jobDescription: asString(value.jobDescription),
     applicationLanguage: asString(value.applicationLanguage),
     requirements: asString(value.requirements),
     companyResearch: asString(value.companyResearch),
     notes: asString(value.notes),
-    createdAt: asString(value.createdAt, now),
-    updatedAt: asString(value.updatedAt, now),
+    location: asString(value.location),
+    workMode: normalizeWorkMode(value.workMode),
+    salary: asString(value.salary),
+    source: asString(value.source),
+    priority: normalizePriority(value.priority),
+    tags: normalizeTags(value.tags),
+    appliedAt: normalizeDate(value.appliedAt),
+    deadline: normalizeDate(value.deadline),
+    followUpAt: normalizeDate(value.followUpAt),
+    contactName: asString(value.contactName),
+    contactEmail: asString(value.contactEmail),
+    statusHistory: normalizeStatusHistory(
+      value.statusHistory,
+      status,
+      createdAt,
+      updatedAt,
+    ),
+    createdAt,
+    updatedAt,
   };
 }
 

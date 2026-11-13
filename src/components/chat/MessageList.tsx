@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { formatTokenCount } from "@/utils/tokens";
 import { openExternalUrl } from "@/utils/links";
 import { formatUsageCost } from "@/utils/zenPricing";
+import { applicationContextFrom } from "@/utils/systemPrompt";
 import {
   Copy,
   Check,
@@ -326,13 +327,7 @@ export default function MessageList({
     setActionActivity(null);
     setError(null);
 
-    const appCtx = {
-      company: application.companyName,
-      jobDescription: application.jobDescription,
-      language: application.applicationLanguage,
-      requirements: application.requirements,
-      companyResearch: application.companyResearch,
-    };
+    const appCtx = applicationContextFrom(application);
 
     const profileData = await loadProfileData();
     const sources: WebSource[] = [];
@@ -423,13 +418,7 @@ export default function MessageList({
     setActionActivity(null);
     setError(null);
 
-    const appCtx = {
-      company: application.companyName,
-      jobDescription: application.jobDescription,
-      language: application.applicationLanguage,
-      requirements: application.requirements,
-      companyResearch: application.companyResearch,
-    };
+    const appCtx = applicationContextFrom(application);
 
     const profileData = await loadProfileData();
     const sources: WebSource[] = [];
