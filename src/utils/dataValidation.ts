@@ -408,9 +408,12 @@ export function normalizeProfileData(value: unknown): ProfileData | null {
   };
 }
 
-export function normalizeSettingsData(
-  value: unknown,
-): { theme: "dark" | "light" | "system"; accent: string } | null {
+export function normalizeSettingsData(value: unknown): {
+  theme: "dark" | "light" | "system";
+  accent: string;
+  lastTab: "application" | "chat" | "profile";
+  onboardingDone: boolean;
+} | null {
   if (!isRecord(value)) return null;
   const theme =
     value.theme === "light" || value.theme === "system" ? value.theme : "dark";
@@ -418,7 +421,11 @@ export function normalizeSettingsData(
     typeof value.accent === "string" && /^#[0-9a-f]{6}$/i.test(value.accent)
       ? value.accent
       : "";
-  return { theme, accent };
+  const lastTab =
+    value.lastTab === "chat" || value.lastTab === "profile"
+      ? value.lastTab
+      : "application";
+  return { theme, accent, lastTab, onboardingDone: value.onboardingDone === true };
 }
 
 /**

@@ -15,6 +15,7 @@ import ApplicationTab from "@/components/tabs/ApplicationTab";
 import ChatTab from "@/components/tabs/ChatTab";
 import ProfileTab from "@/components/tabs/ProfileTab";
 import SettingsDialog from "@/components/settings/SettingsDialog";
+import OnboardingDialog from "@/components/OnboardingDialog";
 import StorageAlert from "@/components/StorageAlert";
 import { Button } from "@/components/ui/button";
 
@@ -38,6 +39,10 @@ function App() {
   const loadSettings = useSettingsStore((s) => s.loadSettings);
   const theme = useSettingsStore((s) => s.theme);
   const accent = useSettingsStore((s) => s.accent);
+  const lastTab = useSettingsStore((s) => s.lastTab);
+  const setLastTab = useSettingsStore((s) => s.setLastTab);
+  const onboardingDone = useSettingsStore((s) => s.onboardingDone);
+  const setOnboardingDone = useSettingsStore((s) => s.setOnboardingDone);
 
   const [showSettings, setShowSettings] = useState(false);
 
@@ -126,6 +131,39 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDarkTheme);
   }, [isDarkTheme]);
+
+  // Restore the tab from the previous session once, then keep settings.json
+  // in sync whenever the user switches sections.
+  const [restoredTab, setRestoredTab] = useState(false);
+  useEffect(() => {
+    if (!settingsLoaded || restoredTab) return;
+    setRestoredTab(true);
+    if (lastTab !== activeTab) setActiveTab(lastTab);
+  }, [settingsLoaded, restoredTab, lastTab, activeTab, setActiveTab]);
+
+  useEffect(() => {
+    if (!restoredTab) return;
+    if (activeTab !== lastTab) setLastTab(activeTab);
+  }, [restoredTab, activeTab, lastTab, setLastTab]);
+
+  // Keyboard shortcuts: Ctrl/Cmd+1..3 switch sections, Ctrl/Cmd+, opens Settings.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key === ",") {
+        event.preventDefault();
+        setShowSettings(true);
+        return;
+      }
+      const index = ["1", "2", "3"].indexOf(event.key);
+      if (index >= 0) {
+        event.preventDefault();
+        setActiveTab(tabs[index].id);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [setActiveTab]);
 
   // Apply accent colour (+ readable foreground)
   useEffect(() => {
@@ -255,6 +293,10 @@ function App() {
       </main>
 
       <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
+      <OnboardingDialog
+        open={!onboardingDone}
+        onDone={() => setOnboardingDone(true)}
+      />
     </div>
   );
 }

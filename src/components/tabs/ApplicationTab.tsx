@@ -6,8 +6,10 @@ import {
   MessageSquare,
   ExternalLink,
   Archive,
+  Download,
 } from "lucide-react";
 import { openExternalUrl } from "@/utils/links";
+import { exportApplicationsCsv } from "@/utils/csv";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useChatStore } from "@/stores/chatStore";
 import {
@@ -217,6 +219,22 @@ export default function ApplicationTab() {
   const resetFilters = useAppStore((s) => s.resetApplicationFilters);
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+
+  const handleExportCsv = async () => {
+    setExportStatus(null);
+    try {
+      const path = await exportApplicationsCsv(applications);
+      if (path) {
+        const fileName = path.split(/[\\/]/).pop() ?? path;
+        setExportStatus(`Exported ${fileName}.`);
+      }
+    } catch (err) {
+      setExportStatus(
+        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
 
   useEffect(() => {
     if (!isLoaded) loadApplications();
@@ -612,6 +630,15 @@ export default function ApplicationTab() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => void handleExportCsv()}
+                disabled={applications.length === 0}
+              >
+                <Download className="size-4 mr-1.5" />
+                Export CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setActiveTab("chat")}
               >
                 <MessageSquare className="size-4 mr-1.5" />
@@ -629,6 +656,9 @@ export default function ApplicationTab() {
             </div>
 
             {/* Status */}
+            {exportStatus && (
+              <p className="text-xs text-text-muted">{exportStatus}</p>
+            )}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
                 <Label

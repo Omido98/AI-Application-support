@@ -1862,6 +1862,75 @@ async fn export_backup_file(
     written.map(Some)
 }
 
+/// CSV exports are plain text and page-sized, so a modest cap is plenty.
+const MAX_CSV_FILE_BYTES: usize = 8 * 1024 * 1024;
+
+fn sanitize_csv_name(name: &str) -> String {
+    let file = Path::new(name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    let stem = file
+        .trim_end_matches(".csv")
+        .trim_end_matches(".CSV")
+        .trim();
+    let stem = if stem.is_empty() { "applications" } else { stem };
+    format!("{stem}.csv")
+}
+
+fn ensure_csv_extension(path: &Path) -> Result<(), String> {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some(extension) if extension.eq_ignore_ascii_case("csv") => Ok(()),
+        _ => Err("The export file must be a .csv file.".to_string()),
+    }
+}
+
+/// Save a CSV export chosen through the same native dialog as backups. The
+/// webview supplies contents and a suggested name, never a filesystem path.
+#[tauri::command]
+async fn export_csv_file(
+    app: tauri::AppHandle,
+    default_name: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    if contents.len() > MAX_CSV_FILE_BYTES {
+        return Err("The CSV export is larger than the 8 MB limit.".to_string());
+    }
+    let file_name = sanitize_csv_name(&default_name);
+    let parent = app.get_webview_window("main");
+    let app_for_dialog = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app_for_dialog
+            .dialog()
+            .file()
+            .add_filter("CSV", &["csv"])
+            .set_file_name(file_name);
+        let dialog = match parent {
+            Some(window) => dialog.set_parent(&window),
+            None => dialog,
+        };
+        dialog.blocking_save_file()
+    })
+    .await
+    .map_err(|err| format!("CSV dialog failed: {err}"))?;
+
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|err| format!("Invalid CSV path: {err}"))?;
+    ensure_csv_extension(&path)?;
+    let display_path = path.display().to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        write_text_file_atomic(&path, &contents)?;
+        Ok::<String, String>(display_path)
+    })
+    .await
+    .map_err(|err| format!("CSV write task failed: {err}"))?
+    .map(Some)
+}
+
 /// Open a user-selected backup and return its text. The dialog and the read
 /// both happen in Rust; the webview has no filesystem read permission.
 #[tauri::command]
@@ -1972,6 +2041,20 @@ fn focus_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Open the app-data directory in the system file manager, so users can find
+/// their JSON files without guessing where Tauri stores them.
+#[tauri::command]
+fn open_data_folder(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Could not resolve the data directory: {e}"))?;
+    app.opener()
+        .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| format!("Could not open the data folder: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Shared across every command for connection/TLS/DNS reuse.
@@ -1997,6 +2080,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(navigation_guard())
         .setup(|app| {
             logging::init(app.handle());
@@ -2014,10 +2098,12 @@ pub fn run() {
             save_data_file,
             delete_data_file,
             export_backup_file,
+            export_csv_file,
             import_backup_file,
             keyring_get,
             keyring_set,
             keyring_delete,
+            open_data_folder,
             logging::frontend_log,
             logging::get_diagnostics
         ])
@@ -2378,6 +2464,23 @@ mod tests {
         assert!(!backup_path(&path).exists());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn csv_export_names_and_extensions_are_safe() {
+        assert_eq!(sanitize_csv_name("applications.csv"), "applications.csv");
+        assert_eq!(sanitize_csv_name("My Export.CSV"), "My Export.csv");
+        assert_eq!(sanitize_csv_name("../../evil"), "evil.csv");
+        assert_eq!(sanitize_csv_name("   "), "applications.csv");
+        assert_eq!(
+            sanitize_csv_name("C:\\temp\\tracker.csv"),
+            "tracker.csv"
+        );
+
+        assert!(ensure_csv_extension(Path::new("applications.csv")).is_ok());
+        assert!(ensure_csv_extension(Path::new("applications.CSV")).is_ok());
+        assert!(ensure_csv_extension(Path::new("applications.json")).is_err());
+        assert!(ensure_csv_extension(Path::new("applications")).is_err());
     }
 
     #[test]

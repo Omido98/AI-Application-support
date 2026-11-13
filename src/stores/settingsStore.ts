@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { saveJson, loadJson, reportDataIssue } from "@/utils/storage";
 import { normalizeSettingsData } from "@/utils/dataValidation";
+import type { TabId } from "@/stores/useAppStore";
 
 // ──────────────────────────────────────────────
 // Settings types
@@ -11,12 +12,18 @@ export type ThemePreference = "dark" | "light" | "system";
 export interface Settings {
   theme: ThemePreference;
   accent: string;
+  /** Tab open at the end of the previous session. */
+  lastTab: TabId;
+  /** The first-run walkthrough is only shown once. */
+  onboardingDone: boolean;
 }
 
 export const DEFAULT_ACCENT = "#34d399";
 export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   accent: DEFAULT_ACCENT,
+  lastTab: "application",
+  onboardingDone: false,
 };
 
 // ──────────────────────────────────────────────
@@ -47,10 +54,18 @@ interface SettingsState extends Settings {
   loadSettings: () => Promise<void>;
   setTheme: (theme: ThemePreference) => void;
   setAccent: (accent: string) => void;
+  setLastTab: (tab: TabId) => void;
+  setOnboardingDone: (done: boolean) => void;
 }
 
-function persist(theme: ThemePreference, accent: string) {
-  void saveJson("settings.json", { theme, accent } as Settings);
+function persist(state: SettingsState) {
+  const settings: Settings = {
+    theme: state.theme,
+    accent: state.accent,
+    lastTab: state.lastTab,
+    onboardingDone: state.onboardingDone,
+  };
+  void saveJson("settings.json", settings);
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -70,6 +85,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({
         theme: normalized?.theme ?? DEFAULT_SETTINGS.theme,
         accent: normalized?.accent || DEFAULT_ACCENT,
+        lastTab: normalized?.lastTab ?? DEFAULT_SETTINGS.lastTab,
+        onboardingDone:
+          normalized?.onboardingDone ?? DEFAULT_SETTINGS.onboardingDone,
         isLoaded: true,
       });
     } else {
@@ -79,11 +97,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setTheme: (theme) => {
     set({ theme });
-    persist(theme, get().accent);
+    persist(get());
   },
 
   setAccent: (accent) => {
     set({ accent });
-    persist(get().theme, accent);
+    persist(get());
+  },
+
+  setLastTab: (lastTab) => {
+    set({ lastTab });
+    persist(get());
+  },
+
+  setOnboardingDone: (onboardingDone) => {
+    set({ onboardingDone });
+    persist(get());
   },
 }));

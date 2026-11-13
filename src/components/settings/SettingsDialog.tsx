@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
   ClipboardCopy,
+  FolderOpen,
   Monitor,
   Moon,
   Plus,
@@ -12,6 +13,8 @@ import {
 import { ask } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   useSettingsStore,
   getAccentForeground,
@@ -28,6 +31,7 @@ import {
   copyDiagnostics,
   logToFileInBackground,
 } from "@/utils/diagnostics";
+import { isTauriRuntime } from "@/utils/runtime";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
@@ -84,6 +88,8 @@ export default function SettingsDialog({
   const [diagnosticsStatus, setDiagnosticsStatus] = useState<string | null>(
     null,
   );
+  const [folderStatus, setFolderStatus] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   // Bumped after an import so the API form remounts from the restored config
   // instead of writing its pre-import local state back over it.
   const [configFormKey, setConfigFormKey] = useState(0);
@@ -235,6 +241,24 @@ export default function SettingsDialog({
   };
 
   // ── Diagnostics ──
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    void getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion(null));
+  }, []);
+
+  const handleOpenDataFolder = async () => {
+    setFolderStatus(null);
+    try {
+      await invoke("open_data_folder");
+    } catch (err) {
+      setFolderStatus(
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  };
 
   const handleCopyDiagnostics = async () => {
     setDiagnosticsStatus(null);
@@ -444,20 +468,39 @@ export default function SettingsDialog({
           {/* Diagnostics */}
           <div className="space-y-2">
             <h3 className="text-xs font-medium text-text-secondary">Diagnostics</h3>
-            <Button
-              variant="outline"
-              onClick={() => void handleCopyDiagnostics()}
-              className="justify-center w-full"
-            >
-              <ClipboardCopy className="size-4 mr-1.5" />
-              Copy diagnostics
-            </Button>
+            {appVersion && (
+              <p className="font-mono text-[11px] text-text-muted">
+                AI Application Support {appVersion}
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void handleCopyDiagnostics()}
+                className="justify-center"
+              >
+                <ClipboardCopy className="size-4 mr-1.5" />
+                Copy diagnostics
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => void handleOpenDataFolder()}
+                className="justify-center"
+              >
+                <FolderOpen className="size-4 mr-1.5" />
+                Open data folder
+              </Button>
+            </div>
             <p className="text-xs text-text-muted">
-              Copies app and OS versions, data-file names and sizes, and the
-              recent log. API keys and chat contents are never included.
+              Diagnostics include app and OS versions, data-file names and
+              sizes, and the recent log. API keys and chat contents are never
+              included.
             </p>
             {diagnosticsStatus && (
               <p className="text-xs text-text-muted">{diagnosticsStatus}</p>
+            )}
+            {folderStatus && (
+              <p className="text-xs text-destructive">{folderStatus}</p>
             )}
           </div>
         </div>

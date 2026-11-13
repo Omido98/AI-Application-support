@@ -156,16 +156,34 @@ describe("normalizeSettingsData", () => {
     expect(normalizeSettingsData({ theme: "light", accent: "#34d399" })).toEqual({
       theme: "light",
       accent: "#34d399",
+      lastTab: "application",
+      onboardingDone: false,
     });
     expect(
       normalizeSettingsData({ theme: "system", accent: "#34d399" }),
     ).toEqual({
       theme: "system",
       accent: "#34d399",
+      lastTab: "application",
+      onboardingDone: false,
+    });
+    expect(
+      normalizeSettingsData({
+        theme: "dark",
+        accent: "#34d399",
+        lastTab: "chat",
+      }),
+    ).toEqual({
+      theme: "dark",
+      accent: "#34d399",
+      lastTab: "chat",
+      onboardingDone: false,
     });
     expect(normalizeSettingsData({ theme: "neon", accent: "red" })).toEqual({
       theme: "dark",
       accent: "",
+      lastTab: "application",
+      onboardingDone: false,
     });
     expect(normalizeSettingsData("nope")).toBeNull();
   });
