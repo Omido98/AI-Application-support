@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import { saveJson, loadJson, deleteFile } from "@/utils/storage";
+import {
+  saveJson,
+  loadJson,
+  deleteFile,
+  reportDataIssue,
+} from "@/utils/storage";
+import { normalizeApplicationsPayload } from "@/utils/dataValidation";
 import type { JobApplication } from "@/types";
 
 // ──────────────────────────────────────────────
@@ -25,12 +31,13 @@ function debouncedSave() {
 }
 
 /** Flush any pending debounced save immediately (called on window close). */
-export async function flushApplicationSave(): Promise<void> {
+export async function flushApplicationSave(): Promise<boolean> {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    await writeSnapshot();
+    return writeSnapshot();
   }
+  return true;
 }
 
 // ──────────────────────────────────────────────
@@ -46,16 +53,19 @@ interface ApplicationState {
   loadApplications: () => Promise<void>;
   /** Create a new empty application, select it, and return its id */
   addApplication: () => string;
-  /** Delete an application and its chat thread file */
-  removeApplication: (id: string) => Promise<void>;
+  /**
+   * Remove an application from the list and return a snapshot for undo. The
+   * chat file is deleted separately by `deleteApplicationThread` once the undo
+   * window has passed.
+   */
+  removeApplication: (id: string) => JobApplication | null;
+  /** Put a snapshot from `removeApplication` back and select it. */
+  restoreApplication: (application: JobApplication) => void;
+  /** Delete the chat thread file of a removed application. */
+  deleteApplicationThread: (id: string) => Promise<void>;
   /** Patch a single application (touches updatedAt) */
   updateApplication: (id: string, patch: Partial<JobApplication>) => void;
   selectApplication: (id: string | null) => void;
-}
-
-interface PersistedApplications {
-  applications: JobApplication[];
-  selectedApplicationId: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -70,51 +80,71 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
 
   // ── Load ──
   loadApplications: async () => {
-    const data = await loadJson<PersistedApplications>("applications.json");
+    const data = await loadJson<unknown>("applications.json");
 
     if (data) {
-      if (data.applications.length > 0) {
-        const valid = data.selectedApplicationId
-          ? data.applications.some((a) => a.id === data.selectedApplicationId)
-          : false;
-        set({
-          applications: data.applications,
-          selectedApplicationId: valid
-            ? data.selectedApplicationId
-            : data.applications[0].id,
-          isLoaded: true,
-        });
-      } else {
-        set({ applications: [], selectedApplicationId: null, isLoaded: true });
+      const normalized = normalizeApplicationsPayload(data);
+      if (!normalized) {
+        reportDataIssue(
+          "applications.json",
+          "The file has an unexpected structure. The application list was left empty and the file was not modified.",
+        );
+        set({ isLoaded: true });
+        return;
       }
+      set({ ...normalized, isLoaded: true });
       return;
     }
 
     // First run — migrate the legacy single-application file if present.
-    const legacy = await loadJson<{
-      companyName?: string;
-      jobDescription?: string;
-      applicationLanguage?: string;
-      requirements?: string;
-      companyResearch?: string;
-    }>("current_application.json");
+    const legacy = await loadJson<Record<string, unknown>>(
+      "current_application.json",
+    );
+    const legacyCompany =
+      typeof legacy?.companyName === "string" ? legacy.companyName : "";
+    const legacyJobDescription =
+      typeof legacy?.jobDescription === "string" ? legacy.jobDescription : "";
+    const legacyLanguage =
+      typeof legacy?.applicationLanguage === "string"
+        ? legacy.applicationLanguage
+        : "";
+    const legacyRequirements =
+      typeof legacy?.requirements === "string" ? legacy.requirements : "";
+    const legacyResearch =
+      typeof legacy?.companyResearch === "string" ? legacy.companyResearch : "";
 
-    if (legacy && (legacy.companyName || legacy.jobDescription)) {
+    if (legacyCompany || legacyJobDescription) {
       const app: JobApplication = {
         id: crypto.randomUUID(),
-        companyName: legacy.companyName ?? "",
+        companyName: legacyCompany,
         jobTitle: "",
         applicationUrl: "",
         status: "wishlist",
-        jobDescription: legacy.jobDescription ?? "",
-        applicationLanguage: legacy.applicationLanguage ?? "",
-        requirements: legacy.requirements ?? "",
-        companyResearch: legacy.companyResearch ?? "",
+        jobDescription: legacyJobDescription,
+        applicationLanguage: legacyLanguage,
+        requirements: legacyRequirements,
+        companyResearch: legacyResearch,
         notes: "",
+        location: "",
+        workMode: "",
+        salary: "",
+        source: "",
+        priority: "medium",
+        tags: [],
+        appliedAt: "",
+        deadline: "",
+        followUpAt: "",
+        contactName: "",
+        contactEmail: "",
+        statusHistory: [{ status: "wishlist", at: new Date().toISOString() }],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      set({ applications: [app], selectedApplicationId: app.id, isLoaded: true });
+      set({
+        applications: [app],
+        selectedApplicationId: app.id,
+        isLoaded: true,
+      });
       await saveJson("applications.json", {
         applications: [app],
         selectedApplicationId: app.id,
@@ -139,6 +169,18 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
       requirements: "",
       companyResearch: "",
       notes: "",
+      location: "",
+      workMode: "",
+      salary: "",
+      source: "",
+      priority: "medium",
+      tags: [],
+      appliedAt: "",
+      deadline: "",
+      followUpAt: "",
+      contactName: "",
+      contactEmail: "",
+      statusHistory: [{ status: "wishlist", at: now }],
       createdAt: now,
       updatedAt: now,
     };
@@ -150,25 +192,50 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
     return app.id;
   },
 
-  removeApplication: async (id) => {
+  removeApplication: (id) => {
     const s = get();
-    const next = s.applications.filter((a) => a.id !== id);
+    const removed = s.applications.find((app) => app.id === id) ?? null;
+    if (!removed) return null;
+    const next = s.applications.filter((app) => app.id !== id);
     const nextSelected =
       s.selectedApplicationId === id
         ? (next[0]?.id ?? null)
         : s.selectedApplicationId;
     set({ applications: next, selectedApplicationId: nextSelected });
     debouncedSave();
+    return removed;
+  },
+
+  restoreApplication: (application) => {
+    set((s) => ({
+      applications: [application, ...s.applications],
+      selectedApplicationId: application.id,
+    }));
+    debouncedSave();
+  },
+
+  deleteApplicationThread: async (id) => {
     await deleteFile(`chat_${id}.json`);
   },
 
   updateApplication: (id, patch) => {
+    const now = new Date().toISOString();
     set((s) => ({
-      applications: s.applications.map((a) =>
-        a.id === id
-          ? { ...a, ...patch, updatedAt: new Date().toISOString() }
-          : a,
-      ),
+      applications: s.applications.map((a) => {
+        if (a.id !== id) return a;
+        const nextStatus = patch.status;
+        const statusChanged =
+          nextStatus !== undefined && nextStatus !== a.status;
+        return {
+          ...a,
+          ...patch,
+          statusHistory:
+            statusChanged && nextStatus !== undefined
+              ? [...a.statusHistory, { status: nextStatus, at: now }]
+              : a.statusHistory,
+          updatedAt: now,
+        };
+      }),
     }));
     debouncedSave();
   },

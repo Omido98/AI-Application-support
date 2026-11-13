@@ -30,6 +30,7 @@ const baseConfig: ApiConfig = {
   apiKey: "test-key",
   model: "deepseek-v4-flash-free",
   reasoningEffort: null,
+  contextWindow: 128_000,
   webSearchEnabled: true,
   systemPromptMode: "standard",
   customSystemPrompt: "",
@@ -137,6 +138,76 @@ describe("sendMessage (OpenAI-compatible)", () => {
     expect(deltas).toEqual(["Hello", " world", "!"]);
   });
 
+  it("handles a delta that arrives before the stream command resolves", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd !== "zen_chat_stream") return null;
+      streamOnEvent(args)?.onmessage({ type: "delta", text: "early" });
+      streamOnEvent(args)?.onmessage({
+        type: "done",
+        data: openaiMessage({ content: "early" }),
+      });
+      return "req-1";
+    });
+
+    const deltas: string[] = [];
+    const result = await sendMessage([], baseConfig, "system", {
+      onDelta: (text) => deltas.push(text),
+    });
+
+    expect(deltas).toEqual(["early"]);
+    expect(result).toEqual({ content: "early" });
+  });
+
+  it("passes the provider finish reason and usage through", async () => {
+    mockChatSequence([
+      {
+        kind: "stream",
+        data: {
+          choices: [
+            { finish_reason: "length", message: { content: "cut off" } },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        },
+      },
+    ]);
+
+    const result = await sendMessage([], baseConfig, "system");
+
+    expect(result).toEqual({
+      content: "cut off",
+      finishReason: "length",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+  });
+
+  it("reports tool activity and the sources that were consulted", async () => {
+    mockChatSequence([
+      {
+        kind: "stream",
+        data: openaiMessage({
+          content: null,
+          tool_calls: [openaiToolCall("web_search", "Acme Corp")],
+        }),
+      },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Acme is a company." }),
+      },
+    ]);
+
+    const activities: unknown[] = [];
+    const sources: unknown[] = [];
+    await sendMessage([], baseConfig, "system", {
+      onToolActivity: (activity) => activities.push(activity),
+      onSource: (source) => sources.push(source),
+    });
+
+    expect(activities).toEqual([{ tool: "web_search", detail: "Acme Corp" }]);
+    expect(sources).toEqual([
+      { title: "Acme Corp", url: "https://acme.example" },
+    ]);
+  });
+
   it("runs tool calls and returns the final answer", async () => {
     mockChatSequence([
       {
@@ -146,13 +217,18 @@ describe("sendMessage (OpenAI-compatible)", () => {
           tool_calls: [openaiToolCall("web_search", "Acme Corp")],
         }),
       },
-      { kind: "stream", data: openaiMessage({ content: "Acme is a company." }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Acme is a company." }),
+      },
     ]);
     const result = await sendMessage([], baseConfig, "system");
     expect(result).toEqual({ content: "Acme is a company." });
     expect(mockedInvoke).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ payload: expect.objectContaining({ tools: expect.any(Array) }) }),
+      expect.objectContaining({
+        payload: expect.objectContaining({ tools: expect.any(Array) }),
+      }),
     );
   });
 
@@ -160,9 +236,15 @@ describe("sendMessage (OpenAI-compatible)", () => {
     mockChatSequence([
       { kind: "stream", data: openaiMessage({ content: "Plain answer." }) },
     ]);
-    const result = await sendMessage([], { ...baseConfig, webSearchEnabled: false }, "system");
+    const result = await sendMessage(
+      [],
+      { ...baseConfig, webSearchEnabled: false },
+      "system",
+    );
     expect(result).toEqual({ content: "Plain answer." });
-    const chatCalls = mockedInvoke.mock.calls.filter((c) => c[0] === "zen_chat_stream");
+    const chatCalls = mockedInvoke.mock.calls.filter(
+      (c) => c[0] === "zen_chat_stream",
+    );
     expect(chatCalls.length).toBeGreaterThan(0);
     for (const call of chatCalls) {
       expect(call[1]).not.toHaveProperty("payload.tools");
@@ -180,7 +262,10 @@ describe("sendMessage (OpenAI-compatible)", () => {
         kind: "stream",
         data: openaiMessage({ content: null, tool_calls: [sameCall] }),
       },
-      { kind: "stream", data: openaiMessage({ content: "Acme is a company." }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Acme is a company." }),
+      },
     ]);
     const result = await sendMessage([], baseConfig, "system");
     expect(result).toEqual({ content: "Acme is a company." });
@@ -209,7 +294,10 @@ describe("sendMessage (OpenAI-compatible)", () => {
           tool_calls: [openaiToolCall("web_search", "Acme Corp")],
         }),
       },
-      { kind: "stream", data: openaiMessage({ content: "Acme is a company." }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Acme is a company." }),
+      },
     ]);
     const result = await sendMessage([], baseConfig, "system");
     expect(result).toEqual({ content: "Acme is a company." });
@@ -220,7 +308,10 @@ describe("sendMessage (OpenAI-compatible)", () => {
     mockChatSequence([
       {
         kind: "stream",
-        data: openaiMessage({ content: "Let me research that.", tool_calls: [sameCall] }),
+        data: openaiMessage({
+          content: "Let me research that.",
+          tool_calls: [sameCall],
+        }),
       },
       {
         kind: "stream",
@@ -241,9 +332,18 @@ describe("sendMessage (OpenAI-compatible)", () => {
   it("fails cleanly when three repeats and the tools-free round draft nothing", async () => {
     const sameCall = openaiToolCall("web_search", "Acme Corp");
     mockChatSequence([
-      { kind: "stream", data: openaiMessage({ content: null, tool_calls: [sameCall] }) },
-      { kind: "stream", data: openaiMessage({ content: null, tool_calls: [sameCall] }) },
-      { kind: "stream", data: openaiMessage({ content: null, tool_calls: [sameCall] }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: null, tool_calls: [sameCall] }),
+      },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: null, tool_calls: [sameCall] }),
+      },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: null, tool_calls: [sameCall] }),
+      },
       { kind: "plain", data: openaiMessage({ content: null }) },
     ]);
     const result = await sendMessage([], baseConfig, "system");
@@ -256,7 +356,8 @@ describe("sendMessage (OpenAI-compatible)", () => {
       if (cmd === "zen_web_search") return searchResult;
       if (cmd === "zen_fetch_page") return "Page text.";
       if (cmd === "zen_chat_stream_cancel") return null;
-      if (cmd === "zen_chat") return openaiMessage({ content: "Final answer." });
+      if (cmd === "zen_chat")
+        return openaiMessage({ content: "Final answer." });
       if (cmd === "zen_chat_stream") {
         round += 1;
         const query = `query-${round}`;
@@ -308,8 +409,14 @@ describe("sendMessage (OpenAI-compatible)", () => {
 
   it("retries without tools when the model rejects the tools field", async () => {
     mockChatSequence([
-      { kind: "streamError", message: "API error (400): tools are not supported" },
-      { kind: "plain", data: openaiMessage({ content: "Plain answer without tools." }) },
+      {
+        kind: "streamError",
+        message: "API error (400): tools are not supported",
+      },
+      {
+        kind: "plain",
+        data: openaiMessage({ content: "Plain answer without tools." }),
+      },
     ]);
     const result = await sendMessage([], baseConfig, "system");
     expect(result.content).toContain("[Web search unavailable");
@@ -318,7 +425,10 @@ describe("sendMessage (OpenAI-compatible)", () => {
 
   it("falls back to one-shot requests when the provider rejects streaming", async () => {
     mockChatSequence([
-      { kind: "streamError", message: "SSE streaming is not supported by this provider" },
+      {
+        kind: "streamError",
+        message: "SSE streaming is not supported by this provider",
+      },
       { kind: "plain", data: openaiMessage({ content: "One-shot answer." }) },
     ]);
     const result = await sendMessage([], baseConfig, "system");
@@ -435,7 +545,9 @@ describe("sendMessage (Anthropic)", () => {
       "system",
     );
     expect(result).toEqual({ content: "Plain answer." });
-    const chatCalls = mockedInvoke.mock.calls.filter((c) => c[0] === "zen_chat_stream");
+    const chatCalls = mockedInvoke.mock.calls.filter(
+      (c) => c[0] === "zen_chat_stream",
+    );
     for (const call of chatCalls) {
       expect(call[1]).not.toHaveProperty("payload.tools");
     }
@@ -455,12 +567,14 @@ describe("deslopText", () => {
     );
     expect(chatCalls.length).toBeGreaterThan(0);
     for (const call of chatCalls) {
-      const payload = (call[1] as {
-        payload: {
-          messages: Array<{ role: string; content?: string | null }>;
-          tools?: unknown;
-        };
-      }).payload;
+      const payload = (
+        call[1] as {
+          payload: {
+            messages: Array<{ role: string; content?: string | null }>;
+            tools?: unknown;
+          };
+        }
+      ).payload;
       expect(payload.tools).toBeUndefined();
       expect(payload.messages[0].role).toBe("system");
       expect(payload.messages[0].content).toContain("Anti-slop writing rules");
@@ -505,12 +619,14 @@ describe("reviewDraft", () => {
     );
     expect(chatCalls.length).toBeGreaterThan(0);
     for (const call of chatCalls) {
-      const payload = (call[1] as {
-        payload: {
-          messages: Array<{ role: string; content?: string | null }>;
-          tools?: unknown;
-        };
-      }).payload;
+      const payload = (
+        call[1] as {
+          payload: {
+            messages: Array<{ role: string; content?: string | null }>;
+            tools?: unknown;
+          };
+        }
+      ).payload;
       expect(payload.tools).toBeDefined();
       expect(payload.messages[0].role).toBe("system");
       expect(payload.messages[0].content).toContain("hiring manager proxy");
@@ -524,12 +640,10 @@ describe("reviewDraft", () => {
   });
 
   it("returns an error when the API key is missing", async () => {
-    const result = await reviewDraft(
-      "Draft.",
-      appContext,
-      null,
-      { ...baseConfig, apiKey: "" },
-    );
+    const result = await reviewDraft("Draft.", appContext, null, {
+      ...baseConfig,
+      apiKey: "",
+    });
     expect(result.content).toBe("");
     expect(result.error).toMatch(/API key/i);
   });
@@ -540,7 +654,11 @@ describe("verifyDraft", () => {
     mockChatSequence([
       { kind: "stream", data: openaiMessage({ content: "VERDICT: PASS" }) },
     ]);
-    const result = await verifyDraft("Revised draft.", "Review feedback.", baseConfig);
+    const result = await verifyDraft(
+      "Revised draft.",
+      "Review feedback.",
+      baseConfig,
+    );
     expect(result).toEqual({ content: "VERDICT: PASS" });
 
     const chatCalls = mockedInvoke.mock.calls.filter(
@@ -548,12 +666,14 @@ describe("verifyDraft", () => {
     );
     expect(chatCalls.length).toBeGreaterThan(0);
     for (const call of chatCalls) {
-      const payload = (call[1] as {
-        payload: {
-          messages: Array<{ role: string; content?: string | null }>;
-          tools?: unknown;
-        };
-      }).payload;
+      const payload = (
+        call[1] as {
+          payload: {
+            messages: Array<{ role: string; content?: string | null }>;
+            tools?: unknown;
+          };
+        }
+      ).payload;
       expect(payload.tools).toBeUndefined();
       expect(payload.messages[0].role).toBe("system");
       expect(payload.messages[0].content).toContain("check-reading");
@@ -562,7 +682,8 @@ describe("verifyDraft", () => {
       expect(payload.messages[0].content).toContain("Review feedback.");
       expect(payload.messages[1]).toEqual({
         role: "user",
-        content: "Verify whether the revised draft above addresses the feedback below.",
+        content:
+          "Verify whether the revised draft above addresses the feedback below.",
       });
     }
   });
@@ -613,15 +734,19 @@ describe("reviseDraft", () => {
     );
     expect(chatCalls.length).toBeGreaterThan(0);
     for (const call of chatCalls) {
-      const payload = (call[1] as {
-        payload: {
-          messages: Array<{ role: string; content?: string | null }>;
-          tools?: unknown;
-        };
-      }).payload;
+      const payload = (
+        call[1] as {
+          payload: {
+            messages: Array<{ role: string; content?: string | null }>;
+            tools?: unknown;
+          };
+        }
+      ).payload;
       expect(payload.tools).toBeUndefined();
       expect(payload.messages[0].role).toBe("system");
-      expect(payload.messages[0].content).toContain("senior application writer");
+      expect(payload.messages[0].content).toContain(
+        "senior application writer",
+      );
       expect(payload.messages[0].content).toContain("Review feedback.");
       expect(payload.messages[0].content).toContain("Dear Acme Corp, ...");
       expect(payload.messages[0].content).not.toContain("Job Description");
@@ -634,12 +759,10 @@ describe("reviseDraft", () => {
   });
 
   it("returns an error when the API key is missing", async () => {
-    const result = await reviseDraft(
-      "Draft.",
-      "Review.",
-      null,
-      { ...baseConfig, apiKey: "" },
-    );
+    const result = await reviseDraft("Draft.", "Review.", null, {
+      ...baseConfig,
+      apiKey: "",
+    });
     expect(result.content).toBe("");
     expect(result.error).toMatch(/API key/i);
   });
@@ -656,13 +779,22 @@ describe("improveDraft", () => {
 
   it("runs only the de-slop pass when the first review passes", async () => {
     mockChatSequence([
-      { kind: "stream", data: openaiMessage({ content: "No issues.\n\nVERDICT: PASS" }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "No issues.\n\nVERDICT: PASS" }),
+      },
       { kind: "stream", data: openaiMessage({ content: "Final draft." }) },
     ]);
     const steps: string[] = [];
-    const result = await improveDraft("Original draft.", appContext, null, baseConfig, {
-      onStep: (s) => steps.push(s),
-    });
+    const result = await improveDraft(
+      "Original draft.",
+      appContext,
+      null,
+      baseConfig,
+      {
+        onStep: (s) => steps.push(s),
+      },
+    );
     expect(result.content).toBe("Final draft.");
     expect(result.rounds).toBe(0);
     expect(result.verdict).toBe("pass");
@@ -671,10 +803,21 @@ describe("improveDraft", () => {
 
   it("keeps the draft when the de-slop pass finds nothing to change", async () => {
     mockChatSequence([
-      { kind: "stream", data: openaiMessage({ content: "Good.\n\nVERDICT: PASS" }) },
-      { kind: "stream", data: openaiMessage({ content: "No changes needed." }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Good.\n\nVERDICT: PASS" }),
+      },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "No changes needed." }),
+      },
     ]);
-    const result = await improveDraft("Original draft.", appContext, null, baseConfig);
+    const result = await improveDraft(
+      "Original draft.",
+      appContext,
+      null,
+      baseConfig,
+    );
     expect(result.content).toBe("Original draft.");
     expect(result.rounds).toBe(0);
     expect(result.verdict).toBe("pass");
@@ -682,7 +825,10 @@ describe("improveDraft", () => {
 
   it("runs a single revise round and stops in quick mode", async () => {
     mockChatSequence([
-      { kind: "stream", data: openaiMessage({ content: "Needs work.\n\nVERDICT: REVISE" }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Needs work.\n\nVERDICT: REVISE" }),
+      },
       {
         kind: "stream",
         deltas: ["Improved ", "draft."],
@@ -691,10 +837,16 @@ describe("improveDraft", () => {
     ]);
     const steps: string[] = [];
     const deltas: string[] = [];
-    const result = await improveDraft("Original draft.", appContext, null, baseConfig, {
-      onStep: (s) => steps.push(s),
-      onDelta: (t) => deltas.push(t),
-    });
+    const result = await improveDraft(
+      "Original draft.",
+      appContext,
+      null,
+      baseConfig,
+      {
+        onStep: (s) => steps.push(s),
+        onDelta: (t) => deltas.push(t),
+      },
+    );
     expect(result.content).toBe("Improved draft.");
     expect(result.rounds).toBe(1);
     expect(result.verdict).toBe("revise");
@@ -733,20 +885,32 @@ describe("deepImproveDraft", () => {
 
   it("verifies after each round and stops when the verifier passes", async () => {
     mockChatSequence([
-      { kind: "stream", data: openaiMessage({ content: "Needs work.\n\nVERDICT: REVISE" }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Needs work.\n\nVERDICT: REVISE" }),
+      },
       {
         kind: "stream",
         deltas: ["Improved ", "draft."],
         data: openaiMessage({ content: "Improved draft." }),
       },
-      { kind: "stream", data: openaiMessage({ content: "Better.\n\nVERDICT: PASS" }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Better.\n\nVERDICT: PASS" }),
+      },
     ]);
     const steps: string[] = [];
     const deltas: string[] = [];
-    const result = await deepImproveDraft("Original draft.", appContext, null, baseConfig, {
-      onStep: (s) => steps.push(s),
-      onDelta: (t) => deltas.push(t),
-    });
+    const result = await deepImproveDraft(
+      "Original draft.",
+      appContext,
+      null,
+      baseConfig,
+      {
+        onStep: (s) => steps.push(s),
+        onDelta: (t) => deltas.push(t),
+      },
+    );
     expect(result.content).toBe("Improved draft.");
     expect(result.rounds).toBe(1);
     expect(result.verdict).toBe("pass");
@@ -756,31 +920,49 @@ describe("deepImproveDraft", () => {
 
   it("iterates until the verifier passes and revises against the original review feedback", async () => {
     mockChatSequence([
-      { kind: "stream", data: openaiMessage({ content: "REVISE round 1.\n\nVERDICT: REVISE" }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "REVISE round 1.\n\nVERDICT: REVISE" }),
+      },
       { kind: "stream", data: openaiMessage({ content: "Draft v1." }) },
-      { kind: "stream", data: openaiMessage({ content: "STILL REVISE.\n\nVERDICT: REVISE" }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "STILL REVISE.\n\nVERDICT: REVISE" }),
+      },
       { kind: "stream", data: openaiMessage({ content: "Draft v2." }) },
-      { kind: "stream", data: openaiMessage({ content: "Acceptable.\n\nVERDICT: PASS" }) },
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Acceptable.\n\nVERDICT: PASS" }),
+      },
     ]);
     const steps: string[] = [];
-    const result = await deepImproveDraft("Original draft.", appContext, null, baseConfig, {
-      onStep: (s) => steps.push(s),
-    });
+    const result = await deepImproveDraft(
+      "Original draft.",
+      appContext,
+      null,
+      baseConfig,
+      {
+        onStep: (s) => steps.push(s),
+      },
+    );
     expect(result.content).toBe("Draft v2.");
     expect(result.rounds).toBe(2);
     expect(result.verdict).toBe("pass");
-    expect(steps).toEqual([
-      "review",
-      "revise",
-      "verify",
-      "revise",
-      "verify",
-    ]);
+    expect(steps).toEqual(["review", "revise", "verify", "revise", "verify"]);
 
     // Every revise call must embed the same original review report as feedback.
     const payloads = mockedInvoke.mock.calls
       .filter((c) => c[0] === "zen_chat_stream")
-      .map((c) => (c[1] as { payload: { messages: Array<{ role: string; content?: string | null }> } }).payload);
+      .map(
+        (c) =>
+          (
+            c[1] as {
+              payload: {
+                messages: Array<{ role: string; content?: string | null }>;
+              };
+            }
+          ).payload,
+      );
     const reviseSystemPrompts = payloads
       .map((p) => p.messages[0].content ?? "")
       .filter((c) => c.includes("senior application writer"));
@@ -791,13 +973,27 @@ describe("deepImproveDraft", () => {
 
   it("caps the loop at MAX_REVISION_LOOPS and returns the last draft", async () => {
     const rounds: Round[] = [];
-    rounds.push({ kind: "stream", data: openaiMessage({ content: "REVISE.\n\nVERDICT: REVISE" }) });
+    rounds.push({
+      kind: "stream",
+      data: openaiMessage({ content: "REVISE.\n\nVERDICT: REVISE" }),
+    });
     for (let i = 1; i <= MAX_REVISION_LOOPS; i++) {
-      rounds.push({ kind: "stream", data: openaiMessage({ content: `Draft v${i}.` }) });
-      rounds.push({ kind: "stream", data: openaiMessage({ content: "REVISE.\n\nVERDICT: REVISE" }) });
+      rounds.push({
+        kind: "stream",
+        data: openaiMessage({ content: `Draft v${i}.` }),
+      });
+      rounds.push({
+        kind: "stream",
+        data: openaiMessage({ content: "REVISE.\n\nVERDICT: REVISE" }),
+      });
     }
     mockChatSequence(rounds);
-    const result = await deepImproveDraft("Original draft.", appContext, null, baseConfig);
+    const result = await deepImproveDraft(
+      "Original draft.",
+      appContext,
+      null,
+      baseConfig,
+    );
     expect(result.content).toBe(`Draft v${MAX_REVISION_LOOPS}.`);
     expect(result.rounds).toBe(MAX_REVISION_LOOPS);
     expect(result.verdict).toBe("revise");

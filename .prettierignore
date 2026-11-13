@@ -1,0 +1,9 @@
+dist
+node_modules
+src-tauri
+package-lock.json
+README.md
+AGENTS.md
+DESIGN.md
+playwright-report
+test-results

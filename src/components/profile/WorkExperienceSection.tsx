@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import type { WorkExperience, Project } from "@/types";
+import { YEARS, rangeWarning } from "@/utils/yearOptions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,11 +15,19 @@ import ConfirmDeleteDialog, {
 } from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
-
-const YEARS = Array.from({ length: 31 }, (_, i) => String(2000 + i));
 
 function createEmptyWorkExperience(): WorkExperience {
   return {
@@ -91,7 +100,9 @@ export default function WorkExperienceSection() {
     }
     const title = [we.role, we.company].filter(Boolean).join(" @ ");
     setDeleteTarget({
-      label: title ? `the work experience entry "${title}"` : "this work experience entry",
+      label: title
+        ? `the work experience entry "${title}"`
+        : "this work experience entry",
       onConfirm: () => removeWorkExperience(we.id),
     });
   };
@@ -115,7 +126,9 @@ export default function WorkExperienceSection() {
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <CardTitle className="text-text-primary text-lg">Work Experience</CardTitle>
+        <CardTitle className="text-text-primary text-lg">
+          Work Experience
+        </CardTitle>
         <Button
           variant="outline"
           size="sm"
@@ -129,15 +142,18 @@ export default function WorkExperienceSection() {
       <CardContent className="space-y-3">
         {workExperience.length === 0 && (
           <p className="text-text-muted text-sm text-center py-4">
-            No work experience entries yet. Click "Add Work Experience" to get started.
+            No work experience entries yet. Click "Add Work Experience" to get
+            started.
           </p>
         )}
 
-        {workExperience.map((we) => {
+        {workExperience.map((we, index) => {
           const isExpanded = expanded[we.id] ?? false;
           const title = [we.role, we.company].filter(Boolean).join(" @ ");
           const dateRange = `${we.startMonth} ${we.startYear} – ${
-            we.isCurrent ? "Present" : `${we.endMonth ?? ""} ${we.endYear ?? ""}`
+            we.isCurrent
+              ? "Present"
+              : `${we.endMonth ?? ""} ${we.endYear ?? ""}`
           }`;
 
           return (
@@ -203,23 +219,39 @@ export default function WorkExperienceSection() {
                     {/* Company + Role side by side */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">Company</Label>
+                        <Label
+                          htmlFor={`work-${index}-company`}
+                          className="text-text-secondary text-xs"
+                        >
+                          Company
+                        </Label>
                         <Input
+                          id={`work-${index}-company`}
                           className={inputClass}
                           value={we.company}
                           onChange={(e) =>
-                            updateWorkExperience(we.id, { company: e.target.value })
+                            updateWorkExperience(we.id, {
+                              company: e.target.value,
+                            })
                           }
                           placeholder="e.g. Acme Corp"
                         />
                       </div>
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">Role</Label>
+                        <Label
+                          htmlFor={`work-${index}-role`}
+                          className="text-text-secondary text-xs"
+                        >
+                          Role
+                        </Label>
                         <Input
+                          id={`work-${index}-role`}
                           className={inputClass}
                           value={we.role}
                           onChange={(e) =>
-                            updateWorkExperience(we.id, { role: e.target.value })
+                            updateWorkExperience(we.id, {
+                              role: e.target.value,
+                            })
                           }
                           placeholder="e.g. Software Engineer"
                         />
@@ -228,28 +260,44 @@ export default function WorkExperienceSection() {
 
                     {/* Start Date */}
                     <div className="grid gap-1.5">
-                      <Label className="text-text-secondary text-xs">Start Date</Label>
+                      <Label
+                        htmlFor={`work-${index}-start-month`}
+                        className="text-text-secondary text-xs"
+                      >
+                        Start Date
+                      </Label>
                       <div className="flex gap-2">
                         <select
+                          id={`work-${index}-start-month`}
                           className={selectClass}
                           value={we.startMonth}
                           onChange={(e) =>
-                            updateWorkExperience(we.id, { startMonth: e.target.value })
+                            updateWorkExperience(we.id, {
+                              startMonth: e.target.value,
+                            })
                           }
                         >
                           {MONTHS.map((m) => (
-                            <option key={m} value={m}>{m}</option>
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
                           ))}
                         </select>
                         <select
+                          id={`work-${index}-start-year`}
+                          aria-label="Start year"
                           className={selectClass}
                           value={we.startYear}
                           onChange={(e) =>
-                            updateWorkExperience(we.id, { startYear: e.target.value })
+                            updateWorkExperience(we.id, {
+                              startYear: e.target.value,
+                            })
                           }
                         >
                           {YEARS.map((y) => (
-                            <option key={y} value={y}>{y}</option>
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -258,18 +306,19 @@ export default function WorkExperienceSection() {
                     {/* Current occupation checkbox */}
                     <div className="flex items-center gap-2">
                       <Checkbox
-                        id={`current-${we.id}`}
+                        id={`work-${index}-current`}
                         checked={we.isCurrent}
                         onCheckedChange={(checked) =>
                           updateWorkExperience(we.id, {
                             isCurrent: checked === true,
-                            endMonth: checked === true ? undefined : we.endMonth,
+                            endMonth:
+                              checked === true ? undefined : we.endMonth,
                             endYear: checked === true ? undefined : we.endYear,
                           })
                         }
                       />
                       <Label
-                        htmlFor={`current-${we.id}`}
+                        htmlFor={`work-${index}-current`}
                         className="text-text-secondary text-sm cursor-pointer"
                       >
                         This is my current occupation
@@ -279,38 +328,71 @@ export default function WorkExperienceSection() {
                     {/* End Date — hidden when current */}
                     {!we.isCurrent && (
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">End Date</Label>
+                        <Label
+                          htmlFor={`work-${index}-end-month`}
+                          className="text-text-secondary text-xs"
+                        >
+                          End Date
+                        </Label>
                         <div className="flex gap-2">
                           <select
+                            id={`work-${index}-end-month`}
                             className={selectClass}
                             value={we.endMonth ?? "June"}
                             onChange={(e) =>
-                              updateWorkExperience(we.id, { endMonth: e.target.value })
+                              updateWorkExperience(we.id, {
+                                endMonth: e.target.value,
+                              })
                             }
                           >
                             {MONTHS.map((m) => (
-                              <option key={m} value={m}>{m}</option>
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
                             ))}
                           </select>
                           <select
+                            id={`work-${index}-end-year`}
+                            aria-label="End year"
                             className={selectClass}
                             value={we.endYear ?? "2024"}
                             onChange={(e) =>
-                              updateWorkExperience(we.id, { endYear: e.target.value })
+                              updateWorkExperience(we.id, {
+                                endYear: e.target.value,
+                              })
                             }
                           >
                             {YEARS.map((y) => (
-                              <option key={y} value={y}>{y}</option>
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
                             ))}
                           </select>
                         </div>
                       </div>
                     )}
+                    {rangeWarning(
+                      we.startYear,
+                      we.startMonth,
+                      we.endYear,
+                      we.endMonth,
+                      we.isCurrent,
+                    ) !== null && (
+                      <p className="text-xs text-destructive">
+                        End date is before the start date.
+                      </p>
+                    )}
 
                     {/* Job Description */}
                     <div className="grid gap-1.5">
-                      <Label className="text-text-secondary text-xs">Job Description</Label>
+                      <Label
+                        htmlFor={`work-${index}-job-description`}
+                        className="text-text-secondary text-xs"
+                      >
+                        Job Description
+                      </Label>
                       <Textarea
+                        id={`work-${index}-job-description`}
                         className={textareaClass}
                         value={we.jobDescription}
                         onChange={(e) =>
@@ -349,16 +431,22 @@ export default function WorkExperienceSection() {
                         >
                           <div className="flex items-start gap-2">
                             <div className="grid gap-1.5 flex-1">
-                              <Label className="text-text-secondary text-xs">
+                              <Label
+                                htmlFor={`work-${index}-project-${pi}-description`}
+                                className="text-text-secondary text-xs"
+                              >
                                 Project / initiative description
                               </Label>
                               <Textarea
+                                id={`work-${index}-project-${pi}-description`}
                                 className={textareaClass}
                                 value={proj.name}
                                 onChange={(e) => {
                                   const next = [...we.projects];
                                   next[pi] = { ...proj, name: e.target.value };
-                                  updateWorkExperience(we.id, { projects: next });
+                                  updateWorkExperience(we.id, {
+                                    projects: next,
+                                  });
                                 }}
                                 placeholder="Describe what you did in this project / initiative…"
                               />
@@ -375,34 +463,54 @@ export default function WorkExperienceSection() {
 
                           <div className="grid grid-cols-2 gap-4">
                             <div className="grid gap-1.5">
-                              <Label className="text-text-secondary text-xs">
+                              <Label
+                                htmlFor={`work-${index}-project-${pi}-start-month`}
+                                className="text-text-secondary text-xs"
+                              >
                                 Start Date
                               </Label>
                               <div className="flex gap-2">
                                 <select
+                                  id={`work-${index}-project-${pi}-start-month`}
                                   className={selectClass}
                                   value={proj.startMonth || "January"}
                                   onChange={(e) => {
                                     const next = [...we.projects];
-                                    next[pi] = { ...proj, startMonth: e.target.value };
-                                    updateWorkExperience(we.id, { projects: next });
+                                    next[pi] = {
+                                      ...proj,
+                                      startMonth: e.target.value,
+                                    };
+                                    updateWorkExperience(we.id, {
+                                      projects: next,
+                                    });
                                   }}
                                 >
                                   {MONTHS.map((m) => (
-                                    <option key={m} value={m}>{m}</option>
+                                    <option key={m} value={m}>
+                                      {m}
+                                    </option>
                                   ))}
                                 </select>
                                 <select
+                                  id={`work-${index}-project-${pi}-start-year`}
+                                  aria-label="Start year"
                                   className={selectClass}
                                   value={proj.startYear || "2024"}
                                   onChange={(e) => {
                                     const next = [...we.projects];
-                                    next[pi] = { ...proj, startYear: e.target.value };
-                                    updateWorkExperience(we.id, { projects: next });
+                                    next[pi] = {
+                                      ...proj,
+                                      startYear: e.target.value,
+                                    };
+                                    updateWorkExperience(we.id, {
+                                      projects: next,
+                                    });
                                   }}
                                 >
                                   {YEARS.map((y) => (
-                                    <option key={y} value={y}>{y}</option>
+                                    <option key={y} value={y}>
+                                      {y}
+                                    </option>
                                   ))}
                                 </select>
                               </div>
@@ -410,34 +518,54 @@ export default function WorkExperienceSection() {
 
                             {!proj.isCurrent && (
                               <div className="grid gap-1.5">
-                                <Label className="text-text-secondary text-xs">
+                                <Label
+                                  htmlFor={`work-${index}-project-${pi}-end-month`}
+                                  className="text-text-secondary text-xs"
+                                >
                                   End Date
                                 </Label>
                                 <div className="flex gap-2">
                                   <select
+                                    id={`work-${index}-project-${pi}-end-month`}
                                     className={selectClass}
                                     value={proj.endMonth ?? "June"}
                                     onChange={(e) => {
                                       const next = [...we.projects];
-                                      next[pi] = { ...proj, endMonth: e.target.value };
-                                      updateWorkExperience(we.id, { projects: next });
+                                      next[pi] = {
+                                        ...proj,
+                                        endMonth: e.target.value,
+                                      };
+                                      updateWorkExperience(we.id, {
+                                        projects: next,
+                                      });
                                     }}
                                   >
                                     {MONTHS.map((m) => (
-                                      <option key={m} value={m}>{m}</option>
+                                      <option key={m} value={m}>
+                                        {m}
+                                      </option>
                                     ))}
                                   </select>
                                   <select
+                                    id={`work-${index}-project-${pi}-end-year`}
+                                    aria-label="End year"
                                     className={selectClass}
                                     value={proj.endYear ?? "2024"}
                                     onChange={(e) => {
                                       const next = [...we.projects];
-                                      next[pi] = { ...proj, endYear: e.target.value };
-                                      updateWorkExperience(we.id, { projects: next });
+                                      next[pi] = {
+                                        ...proj,
+                                        endYear: e.target.value,
+                                      };
+                                      updateWorkExperience(we.id, {
+                                        projects: next,
+                                      });
                                     }}
                                   >
                                     {YEARS.map((y) => (
-                                      <option key={y} value={y}>{y}</option>
+                                      <option key={y} value={y}>
+                                        {y}
+                                      </option>
                                     ))}
                                   </select>
                                 </div>
@@ -447,21 +575,25 @@ export default function WorkExperienceSection() {
 
                           <div className="flex items-center gap-2">
                             <Checkbox
-                              id={`project-current-${proj.id}`}
+                              id={`work-${index}-project-${pi}-current`}
                               checked={proj.isCurrent}
                               onCheckedChange={(checked) => {
                                 const next = [...we.projects];
                                 next[pi] = {
                                   ...proj,
                                   isCurrent: checked === true,
-                                  endMonth: checked === true ? undefined : proj.endMonth,
-                                  endYear: checked === true ? undefined : proj.endYear,
+                                  endMonth:
+                                    checked === true
+                                      ? undefined
+                                      : proj.endMonth,
+                                  endYear:
+                                    checked === true ? undefined : proj.endYear,
                                 };
                                 updateWorkExperience(we.id, { projects: next });
                               }}
                             />
                             <Label
-                              htmlFor={`project-current-${proj.id}`}
+                              htmlFor={`work-${index}-project-${pi}-current`}
                               className="text-text-secondary text-sm cursor-pointer"
                             >
                               This project is ongoing
