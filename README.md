@@ -8,6 +8,10 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
 
 ## Features
 
+- **Pipeline overview** — an Overview tab with totals, response/interview/offer
+  rates, status distribution, upcoming deadlines/follow-ups, six-month
+  activity and recent status changes. Click any item to jump to its
+  application.
 - **Application tracking** — manage multiple job applications with company,
   job description, requirements, company research, notes, and a status
   (Wishlist / Applied / Interview / Offer / Rejected). Track applied,
@@ -16,7 +20,8 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   Deadlines and follow-ups due within a week (or overdue) are flagged in the
   list. Search covers postings, notes and tags, sort by status, recency,
   company or deadline, export everything to CSV, and undo a deletion for
-  eight seconds.
+  eight seconds. A fit matrix matches requirement lines against your profile
+  evidence and highlights gaps.
 - **First-run walkthrough** — a three-step introduction to tracking,
   chatting and the profile, shown once.
 - **AI chat assistant** — one chat thread per application. The agent knows the
@@ -31,6 +36,7 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
     per message.
   - Improve/deslop results arrive as versioned suggestion cards with a word
     diff and Accept / Discard; draft reviews have their own card and verdict.
+  - Any draft can be exported as a PDF or DOCX from its action menu.
   - Long conversations respect a configurable context budget. Older messages
     are omitted from requests, and can be summarized into a compact hidden
     context note when needed.
@@ -39,7 +45,9 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   previous cover letters, and a public profile (e.g. LinkedIn) URL that the
   AI can reference. Sections can be reordered, year pickers cover the relevant
   range automatically, date ranges are validated, and cover letters saved from
-  chat link back to their application.
+  chat link back to their application. **Import CV** reads a PDF, DOCX or TXT
+  locally, structures it with your AI provider, and offers merge or replace
+  after a preview.
 - **Settings** — light, dark or follow-system theme, accent colour, AI
   provider/model/context window, backup and restore, update checks, a
   **Copy diagnostics** report with versions, data-file sizes and the recent
@@ -108,6 +116,7 @@ npm run tauri dev
 Useful commands:
 
 - `npm test` — run the Vitest unit tests
+- `npm run eval` — run the offline prompt/response eval harness
 - `npx tsc --noEmit` — TypeScript typecheck
 - `npm run build` — frontend production build
 - `npm run build:arm64` / `npm run build:x64` — Windows ARM64 / x64 Tauri bundles
@@ -157,5 +166,8 @@ repository secrets to be set before tagging (generate a key pair with
 - Settings and theme are applied after load to avoid a light/dark flash on
   startup.
 - Window size/position and the last active section are restored on the next
-  launch. Keyboard shortcuts: Ctrl/Cmd+1/2/3 switch sections, Ctrl/Cmd+,
+  launch. Keyboard shortcuts: Ctrl/Cmd+1/2/3/4 switch sections, Ctrl/Cmd+,
   opens Settings.
+- PDF and DOCX exports are rendered locally in the webview; CV files are
+  parsed locally and only the extracted text is sent to the configured AI
+  provider when you start the import analysis.
