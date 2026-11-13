@@ -386,7 +386,10 @@ export default function ApplicationTab() {
             {/* Status */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-status"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   Status
                 </Label>
                 <Select
@@ -399,7 +402,10 @@ export default function ApplicationTab() {
                     }
                   }}
                 >
-                  <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+                  <SelectTrigger
+                    id="app-status"
+                    className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -416,10 +422,14 @@ export default function ApplicationTab() {
             {/* Company Name */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-company"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   Company Name
                 </Label>
                 <Input
+                  id="app-company"
                   value={selected.companyName}
                   onChange={(e) =>
                     updateApplication(selected.id, {
@@ -435,10 +445,14 @@ export default function ApplicationTab() {
             {/* Job Title */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-job-title"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   Job Title
                 </Label>
                 <Input
+                  id="app-job-title"
                   value={selected.jobTitle}
                   onChange={(e) =>
                     updateApplication(selected.id, {
@@ -454,11 +468,15 @@ export default function ApplicationTab() {
             {/* Application URL */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-url"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   Application URL
                 </Label>
                 <div className="flex gap-2">
                   <Input
+                    id="app-url"
                     value={selected.applicationUrl}
                     onChange={(e) =>
                       updateApplication(selected.id, {
@@ -485,10 +503,14 @@ export default function ApplicationTab() {
             {/* Job Description */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-description"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   Job Description
                 </Label>
                 <Textarea
+                  id="app-description"
                   value={selected.jobDescription}
                   onChange={(e) =>
                     updateApplication(selected.id, {
@@ -504,10 +526,14 @@ export default function ApplicationTab() {
             {/* Application Language */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-language"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   Application Language
                 </Label>
                 <Input
+                  id="app-language"
                   value={selected.applicationLanguage}
                   onChange={(e) =>
                     updateApplication(selected.id, {
@@ -523,10 +549,14 @@ export default function ApplicationTab() {
             {/* Requirements */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-requirements"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   What does the application require?
                 </Label>
                 <Textarea
+                  id="app-requirements"
                   value={selected.requirements}
                   onChange={(e) =>
                     updateApplication(selected.id, {
@@ -542,10 +572,14 @@ export default function ApplicationTab() {
             {/* Company Research (optional) */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-research"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   Company Research (optional)
                 </Label>
                 <Textarea
+                  id="app-research"
                   value={selected.companyResearch}
                   onChange={(e) =>
                     updateApplication(selected.id, {
@@ -561,10 +595,14 @@ export default function ApplicationTab() {
             {/* Notes */}
             <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
               <CardContent className="pt-4 space-y-2">
-                <Label className="text-text-secondary text-sm font-medium">
+                <Label
+                  htmlFor="app-notes"
+                  className="text-text-secondary text-sm font-medium"
+                >
                   Notes
                 </Label>
                 <Textarea
+                  id="app-notes"
                   value={selected.notes}
                   onChange={(e) =>
                     updateApplication(selected.id, { notes: e.target.value })
