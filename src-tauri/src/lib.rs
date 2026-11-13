@@ -389,6 +389,7 @@ struct StreamAccumulator {
     provider: String,
     openai_content: String,
     openai_tool_calls: Vec<OpenAIToolCallAcc>,
+    openai_finish_reason: Option<String>,
     openai_finished: bool,
     anthropic_blocks: Vec<AnthropicBlockAcc>,
     anthropic_stop_reason: Option<String>,
@@ -401,6 +402,7 @@ impl StreamAccumulator {
             provider: provider.to_string(),
             openai_content: String::new(),
             openai_tool_calls: Vec::new(),
+            openai_finish_reason: None,
             openai_finished: false,
             anthropic_blocks: Vec::new(),
             anthropic_stop_reason: None,
@@ -426,6 +428,17 @@ impl StreamAccumulator {
         }
         let parsed: serde_json::Value = serde_json::from_str(data)
             .map_err(|e| format!("Failed to parse streamed event: {e}"))?;
+        // Both providers can emit an in-band error event after the stream has
+        // started. Surface it instead of ending with an empty answer.
+        if let Some(error) = parsed.get("error") {
+            if !error.is_null() {
+                let message = error
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("The provider reported a streaming error.");
+                return Err(message.to_string());
+            }
+        }
         if self.provider == "anthropic" {
             self.feed_anthropic(&parsed)
         } else {
@@ -437,10 +450,9 @@ impl StreamAccumulator {
         let Some(choice) = parsed.pointer("/choices/0") else {
             return Ok(None);
         };
-        if let Some(reason) = choice.get("finish_reason") {
-            if !reason.is_null() {
-                self.openai_finished = true;
-            }
+        if let Some(reason) = choice.get("finish_reason").and_then(|r| r.as_str()) {
+            self.openai_finish_reason = Some(reason.to_string());
+            self.openai_finished = true;
         }
         let Some(delta) = choice.get("delta") else {
             return Ok(None);
@@ -623,6 +635,7 @@ impl StreamAccumulator {
                 .collect();
             serde_json::json!({
                 "choices": [{
+                    "finish_reason": self.openai_finish_reason,
                     "message": {
                         "content": content,
                         "tool_calls": if tool_calls.is_empty() {
@@ -636,6 +649,11 @@ impl StreamAccumulator {
         }
     }
 }
+
+/// A streamed provider response that stops producing bytes for this long is
+/// treated as dead. Without this a silently stalled connection can leave the
+/// UI spinning forever.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Read an SSE response body chunk-by-chunk, feed events into the
 /// accumulator (emitting text deltas as they arrive), and finish with the
@@ -653,7 +671,16 @@ async fn stream_sse(
     let mut acc = StreamAccumulator::new(provider);
 
     let consume = async {
-        while let Some(chunk) = stream.next().await {
+        loop {
+            let next = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next())
+                .await
+                .map_err(|_| {
+                    "No data was received from the model for 120 seconds, so the request was cancelled."
+                        .to_string()
+                })?;
+            let Some(chunk) = next else {
+                break;
+            };
             let chunk = chunk
                 .map_err(|e| format!("Failed to read response stream: {e}"))?;
             buffer.extend_from_slice(&chunk);
@@ -1867,6 +1894,7 @@ mod tests {
 
         let data = acc.finish();
         assert_eq!(data["choices"][0]["message"]["content"], "Hello");
+        assert_eq!(data["choices"][0]["finish_reason"], "tool_calls");
         let calls = data["choices"][0]["message"]["tool_calls"].as_array().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0]["id"], "call_1");
@@ -1892,6 +1920,24 @@ mod tests {
         acc.feed(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#).unwrap();
         let data = acc.finish();
         assert!(data["choices"][0]["message"]["tool_calls"].is_null());
+        assert_eq!(data["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[test]
+    fn provider_error_events_are_surfaced() {
+        let mut anthropic = StreamAccumulator::new("anthropic");
+        let error = anthropic
+            .feed(
+                r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+            )
+            .unwrap_err();
+        assert!(error.contains("Overloaded"));
+
+        let mut openai = StreamAccumulator::new("openai");
+        let error = openai
+            .feed(r#"{"error":{"message":"Rate limited"}}"#)
+            .unwrap_err();
+        assert!(error.contains("Rate limited"));
     }
 
     #[test]

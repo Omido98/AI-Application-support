@@ -105,6 +105,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   // ── Input state ──
   const [showConfig, setShowConfig] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [replyNotice, setReplyNotice] = useState<string | null>(null);
 
   // Aborts the in-flight generation (used by the Stop button / Escape).
   const controllerRef = useRef<AbortController | null>(null);
@@ -171,6 +172,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     controllerRef.current?.abort();
     controllerRef.current = null;
     cancelStreamBuffer();
+    setReplyNotice(null);
     void switchThread(selectedId);
   }, [selectedId, switchThread, cancelStreamBuffer]);
 
@@ -195,6 +197,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     clearMessages();
     setError(null);
     setDraft("");
+    setReplyNotice(null);
     // A fresh thread means web search should behave like a first message
     // again: enabled for the next message, off afterwards by default.
     void setConfig({ webSearchEnabled: false });
@@ -300,6 +303,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       setStreamingText("");
       setIsSending(true);
       setError(null);
+      setReplyNotice(null);
 
       // Application context of the current thread
       const appCtx = {
@@ -435,6 +439,18 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
             content: result.content,
             timestamp: new Date().toISOString(),
           });
+        }
+        if (result.finishReason === "length" || result.finishReason === "max_tokens") {
+          setReplyNotice(
+            "The reply hit the model's output limit and may be incomplete. Ask it to continue if needed.",
+          );
+        } else if (
+          result.finishReason === "content_filter" ||
+          result.finishReason === "refusal"
+        ) {
+          setReplyNotice(
+            "The model stopped because of a safety or content filter; rephrasing the request may help.",
+          );
         }
         setStreamingText("");
         setIsSending(false);
@@ -640,6 +656,12 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         onResend={(key) => void sendText({ resendKey: key })}
         onRegenerate={(key) => void sendText({ regenerateKey: key })}
       />
+
+      {replyNotice && (
+        <p className="px-4 pt-2 text-[10px] leading-snug text-amber-500">
+          {replyNotice}
+        </p>
+      )}
 
       {contextUsage.dropped > 0 && (
         <p className="px-4 pt-2 text-[10px] leading-snug text-text-muted">

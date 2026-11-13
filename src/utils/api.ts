@@ -16,6 +16,8 @@ export interface ApiResponse {
   error?: string;
   /** True when the user stopped generation; `content` holds the partial answer. */
   stopped?: boolean;
+  /** Provider stop reason, e.g. "length"/"max_tokens" when the reply truncated. */
+  finishReason?: string | null;
 }
 
 /** The reviewer's verdict on a draft, parsed from its feedback report. */
@@ -114,6 +116,7 @@ interface ToolCall {
 
 interface ChatResponse {
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
       content?: string | null;
       tool_calls?: ToolCall[];
@@ -548,8 +551,62 @@ async function streamChat(
     return { stopped: true };
   }
 
-  const channel = new Channel<ChatStreamEvent>();
   let requestId = "";
+  let aborted = false;
+  let settled = false;
+  let resolveResult!: (result: {
+    data?: unknown;
+    error?: string;
+    stopped?: boolean;
+  }) => void;
+  const resultPromise = new Promise<{
+    data?: unknown;
+    error?: string;
+    stopped?: boolean;
+  }>((resolve) => {
+    resolveResult = resolve;
+  });
+
+  function finish(result: {
+    data?: unknown;
+    error?: string;
+    stopped?: boolean;
+  }) {
+    if (settled) return;
+    settled = true;
+    options.signal?.removeEventListener("abort", onAbort);
+    resolveResult(result);
+  }
+
+  function onAbort() {
+    aborted = true;
+    if (requestId) {
+      // Best-effort: tell Rust to close the HTTP connection.
+      void invoke("zen_chat_stream_cancel", { id: requestId }).catch(() => {});
+    }
+    finish({ stopped: true });
+  }
+
+  const channel = new Channel<ChatStreamEvent>();
+  // Attach the handler BEFORE invoking the backend: the first SSE chunk can
+  // arrive before `invoke` resolves, and Tauri's Channel drops messages that
+  // have no handler yet.
+  channel.onmessage = (event: ChatStreamEvent) => {
+    switch (event.type) {
+      case "delta":
+        if (!settled) onChunk(event.text);
+        break;
+      case "done":
+        finish({ data: event.data });
+        break;
+      case "error":
+        finish({ error: event.message });
+        break;
+    }
+  };
+
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+
   try {
     requestId = await invoke<string>("zen_chat_stream", {
       baseUrl,
@@ -558,49 +615,18 @@ async function streamChat(
       payload,
       onEvent: channel,
     });
+    // The user aborted while the backend was still starting the request; now
+    // that we have an id, cancel the actual stream.
+    if (aborted) {
+      void invoke("zen_chat_stream_cancel", { id: requestId }).catch(() => {});
+    }
   } catch (err) {
-    return {
+    finish({
       error: typeof err === "string" ? err : "An unknown error occurred.",
-    };
+    });
   }
 
-  return new Promise((resolve) => {
-    let settled = false;
-
-    function cleanup() {
-      options.signal?.removeEventListener("abort", onAbort);
-    }
-
-    function onAbort() {
-      if (requestId) {
-        // Best-effort: tell Rust to close the HTTP connection.
-        void invoke("zen_chat_stream_cancel", { id: requestId }).catch(() => {});
-      }
-      finish({ stopped: true });
-    }
-
-    function finish(result: { data?: unknown; error?: string; stopped?: boolean }) {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(result);
-    }
-
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    channel.onmessage = (event: ChatStreamEvent) => {
-      switch (event.type) {
-        case "delta":
-          onChunk(event.text);
-          break;
-        case "done":
-          finish({ data: event.data });
-          break;
-        case "error":
-          finish({ error: event.message });
-          break;
-      }
-    };
-  });
+  return resultPromise;
 }
 
 /**
@@ -856,7 +882,11 @@ async function sendOpenAICompatMessage(
         error: "API response did not contain a message.",
       };
     }
-    return { content: drafted };
+    const finishReason = data?.choices?.[0]?.finish_reason ?? null;
+    return {
+      content: drafted,
+      ...(finishReason ? { finishReason } : {}),
+    };
   }
 
   // Ran out of tool rounds: force a tools-free final answer instead of
@@ -1132,7 +1162,10 @@ async function sendAnthropicMessage(
         error: "API response did not contain a message.",
       };
     }
-    return { content: text };
+    return {
+      content: text,
+      ...(data?.stop_reason ? { finishReason: data.stop_reason } : {}),
+    };
   }
 
   // Ran out of tool rounds: force a tools-free final answer instead of

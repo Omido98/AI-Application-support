@@ -138,6 +138,43 @@ describe("sendMessage (OpenAI-compatible)", () => {
     expect(deltas).toEqual(["Hello", " world", "!"]);
   });
 
+  it("handles a delta that arrives before the stream command resolves", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd !== "zen_chat_stream") return null;
+      streamOnEvent(args)?.onmessage({ type: "delta", text: "early" });
+      streamOnEvent(args)?.onmessage({
+        type: "done",
+        data: openaiMessage({ content: "early" }),
+      });
+      return "req-1";
+    });
+
+    const deltas: string[] = [];
+    const result = await sendMessage([], baseConfig, "system", {
+      onDelta: (text) => deltas.push(text),
+    });
+
+    expect(deltas).toEqual(["early"]);
+    expect(result).toEqual({ content: "early" });
+  });
+
+  it("passes the provider finish reason through", async () => {
+    mockChatSequence([
+      {
+        kind: "stream",
+        data: {
+          choices: [
+            { finish_reason: "length", message: { content: "cut off" } },
+          ],
+        },
+      },
+    ]);
+
+    const result = await sendMessage([], baseConfig, "system");
+
+    expect(result).toEqual({ content: "cut off", finishReason: "length" });
+  });
+
   it("runs tool calls and returns the final answer", async () => {
     mockChatSequence([
       {
