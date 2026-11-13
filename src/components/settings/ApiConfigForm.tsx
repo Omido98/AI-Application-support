@@ -339,12 +339,20 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
       <div className="space-y-4">
         {/* Provider */}
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-xs">Provider</Label>
+          <Label
+            htmlFor="api-provider"
+            className="text-text-secondary text-xs"
+          >
+            Provider
+          </Label>
           <Select
             value={provider}
             onValueChange={(v) => applyProvider((v ?? "zen") as ProviderId)}
           >
-            <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+            <SelectTrigger
+              id="api-provider"
+              className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+            >
               <SelectValue>
                 {(v) => getProvider((v as ProviderId) || provider).label}
               </SelectValue>
@@ -361,9 +369,15 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
 
         {/* API Base URL */}
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-xs">API Base URL</Label>
+          <Label
+            htmlFor="api-base-url"
+            className="text-text-secondary text-xs"
+          >
+            API Base URL
+          </Label>
           <div className="flex gap-2">
             <Input
+              id="api-base-url"
               value={baseUrl}
               onChange={(e) => {
                 setBaseUrl(e.target.value);
@@ -400,8 +414,11 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
 
         {/* API Key */}
         <div className="space-y-1.5">
-          <Label className="text-text-secondary text-xs">API Key</Label>
+          <Label htmlFor="api-key" className="text-text-secondary text-xs">
+            API Key
+          </Label>
           <Input
+            id="api-key"
             type="password"
             value={apiKey}
             onChange={(e) => handleApiKeyChange(e.target.value)}
@@ -454,7 +471,9 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
         {/* Model */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <Label className="text-text-secondary text-xs">Model</Label>
+            <Label htmlFor="api-model" className="text-text-secondary text-xs">
+              Model
+            </Label>
             <button
               onClick={() => loadModels(baseUrl)}
               disabled={modelsLoading}
@@ -475,7 +494,10 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
             onValueChange={(v) => handleModelSelect(v ?? "")}
             disabled={modelsLoading}
           >
-            <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+            <SelectTrigger
+              id="api-model"
+              className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+            >
               <SelectValue>
                 {(v) => (v ? displayName(v) : "Select a model…")}
               </SelectValue>
@@ -541,6 +563,7 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
               value={customModel}
               onChange={(e) => setCustomModel(e.target.value)}
               placeholder="e.g. deepseek-v4-flash-free"
+              aria-label="Custom model ID"
               className={inputClass}
             />
           )}
@@ -622,14 +645,20 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
         {/* Reasoning Effort */}
         {provider !== "anthropic" ? (
           <div className="space-y-1.5">
-            <Label className="text-text-secondary text-xs">
+            <Label
+              htmlFor="api-reasoning-effort"
+              className="text-text-secondary text-xs"
+            >
               Reasoning Effort
             </Label>
             <Select
               value={reasoningEffort}
               onValueChange={(v) => setReasoningEffort(v ?? "")}
             >
-              <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+              <SelectTrigger
+                id="api-reasoning-effort"
+                className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+              >
                 <SelectValue>
                   {(v) =>
                     v

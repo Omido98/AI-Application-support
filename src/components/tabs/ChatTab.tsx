@@ -698,16 +698,6 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     );
   }
 
-  // ── Show chat agent settings (web search + prompt) when explicitly opened ──
-  if (showConfig) {
-    return (
-      <ChatSettings
-        onDone={() => setShowConfig(false)}
-        onOpenSettings={onOpenSettings}
-      />
-    );
-  }
-
   // ── No API key yet: explain and offer to configure ──
   if (!config.apiKey) {
     return (
@@ -842,15 +832,15 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setShowConfig(true)}
-                title="Chat agent settings"
-                aria-label="Chat agent settings"
-              >
-                <Settings className="size-4 text-text-secondary" />
-              </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setShowConfig(true)}
+            title="Chat agent settings"
+            aria-label="Chat agent settings"
+          >
+            <Settings className="size-4 text-text-secondary" />
+          </Button>
         </div>
       </div>
 
@@ -919,6 +909,29 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         contextLimit={contextBudget.inputBudget}
         droppedMessages={contextUsage.dropped}
       />
+
+      {/* Chat agent settings: a modal so the conversation stays visible and
+          closing without saving is a real cancel. */}
+      <Dialog open={showConfig} onOpenChange={setShowConfig}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Chat agent settings</DialogTitle>
+            <DialogDescription>
+              Web search and the prompt apply only to the chat agent. Your
+              provider, API key and model are configured in Settings.
+            </DialogDescription>
+          </DialogHeader>
+          {showConfig && (
+            <ChatSettings
+              onDone={() => setShowConfig(false)}
+              onOpenSettings={() => {
+                setShowConfig(false);
+                onOpenSettings();
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -144,11 +144,26 @@ function App() {
   };
 
   const handleTabKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const key = e.key;
+    if (
+      key !== "ArrowLeft" &&
+      key !== "ArrowRight" &&
+      key !== "Home" &&
+      key !== "End"
+    ) {
+      return;
+    }
     e.preventDefault();
     const idx = tabs.findIndex((t) => t.id === activeTab);
-    const dir = e.key === "ArrowRight" ? 1 : -1;
-    const next = tabs[(idx + dir + tabs.length) % tabs.length];
+    let next;
+    if (key === "Home") {
+      next = tabs[0];
+    } else if (key === "End") {
+      next = tabs[tabs.length - 1];
+    } else {
+      const dir = key === "ArrowRight" ? 1 : -1;
+      next = tabs[(idx + dir + tabs.length) % tabs.length];
+    }
     setActiveTab(next.id);
     document.getElementById(`tab-${next.id}`)?.focus();
   };
@@ -161,19 +176,34 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen w-screen bg-background overflow-hidden">
+      <a
+        href="#tabpanel-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text-primary focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        Skip to content
+      </a>
+
       {/* Tab Bar */}
       <header className="relative flex items-center justify-center px-6 py-4 border-b border-border">
-        <nav className="flex gap-2" role="tablist" onKeyDown={handleTabKeyDown}>
+        <nav
+          className="flex gap-2"
+          role="tablist"
+          aria-label="Main sections"
+          onKeyDown={handleTabKeyDown}
+        >
           {tabs.map((tab) => (
             <button
               key={tab.id}
               id={`tab-${tab.id}`}
+              type="button"
               role="tab"
               aria-selected={activeTab === tab.id}
               aria-controls="tabpanel-main"
+              tabIndex={activeTab === tab.id ? 0 : -1}
               onClick={() => setActiveTab(tab.id)}
               className={`
                 px-6 py-2 rounded-full text-sm font-medium transition-colors duration-200 select-none
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
                 ${
                   activeTab === tab.id
                     ? "bg-primary text-primary-foreground"
@@ -202,7 +232,13 @@ function App() {
 
       {/* Content Area */}
       <StorageAlert />
-      <main className="flex-1 overflow-auto" role="tabpanel" id="tabpanel-main">
+      <main
+        className="flex-1 overflow-auto"
+        role="tabpanel"
+        id="tabpanel-main"
+        aria-labelledby={`tab-${activeTab}`}
+        tabIndex={-1}
+      >
         {renderTab()}
       </main>
 

@@ -33,7 +33,6 @@ import { useChatStore } from "@/stores/chatStore";
 import ApiConfigForm from "./ApiConfigForm";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -262,7 +261,7 @@ export default function SettingsDialog({
         <div className="space-y-6 py-2">
           {/* Theme */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">Theme</Label>
+            <h3 className="text-xs font-medium text-text-secondary">Theme</h3>
             <div className="grid grid-cols-2 gap-2">
               <Button
                 variant={theme === "light" ? "default" : "outline"}
@@ -286,15 +285,15 @@ export default function SettingsDialog({
           {/* Accent colour */}
           <div className="space-y-2">
             <div className="flex items-center gap-3">
-              <Label className="text-text-secondary text-xs">
+              <h3 className="text-xs font-medium text-text-secondary">
                 Accent colour:
-              </Label>
+              </h3>
               <button
                 type="button"
                 title="Choose accent colour"
                 aria-label="Choose accent colour"
                 onClick={() => setShowPalette((v) => !v)}
-                className="size-7 rounded-md border border-border shadow-sm transition-transform hover:scale-105"
+                className="size-8 rounded-md border border-border shadow-sm transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 style={{ backgroundColor: accent }}
               />
             </div>
@@ -311,7 +310,7 @@ export default function SettingsDialog({
                       aria-label={c.name}
                       onClick={() => setAccent(c.value)}
                       className={cn(
-                        "size-7 rounded-md border transition-transform hover:scale-105",
+                        "size-8 rounded-md border transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                         selected
                           ? "border-foreground ring-2 ring-primary/50"
                           : "border-border",
@@ -333,7 +332,7 @@ export default function SettingsDialog({
                   title="Custom colour"
                   aria-label="Custom colour"
                   className={cn(
-                    "flex items-center justify-center size-7 rounded-md border border-dashed cursor-pointer transition-transform hover:scale-105",
+                    "flex items-center justify-center size-8 rounded-md border border-dashed cursor-pointer transition-transform hover:scale-105 focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
                     PRESET_ACCENTS.every((c) => accent.toLowerCase() !== c.value)
                       ? "border-foreground ring-2 ring-primary/50 bg-field"
                       : "border-border",
@@ -353,9 +352,9 @@ export default function SettingsDialog({
 
           {/* Backup & restore */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">
+            <h3 className="text-xs font-medium text-text-secondary">
               Backup &amp; restore
-            </Label>
+            </h3>
             <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="outline"
@@ -383,17 +382,17 @@ export default function SettingsDialog({
 
           {/* API configuration */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">
+            <h3 className="text-xs font-medium text-text-secondary">
               API configuration
-            </Label>
+            </h3>
             <ApiConfigForm key={configFormKey} />
           </div>
 
           {/* Updates */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">
+            <h3 className="text-xs font-medium text-text-secondary">
               Software updates
-            </Label>
+            </h3>
             <Button
               variant="outline"
               onClick={() => void handleCheckForUpdates()}
@@ -434,7 +433,7 @@ export default function SettingsDialog({
 
           {/* Diagnostics */}
           <div className="space-y-2">
-            <Label className="text-text-secondary text-xs">Diagnostics</Label>
+            <h3 className="text-xs font-medium text-text-secondary">Diagnostics</h3>
             <Button
               variant="outline"
               onClick={() => void handleCopyDiagnostics()}

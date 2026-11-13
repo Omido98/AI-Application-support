@@ -59,8 +59,9 @@ export default function ChatSettings({
         <p className="text-xs text-text-muted">
           Your AI provider, API key and model are configured in{" "}
           <button
+            type="button"
             onClick={onOpenSettings}
-            className="text-primary hover:text-primary/80 select-none"
+            className="text-primary hover:text-primary/80 select-none focus-visible:outline-none focus-visible:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-sm"
           >
             Settings
           </button>
@@ -99,7 +100,10 @@ export default function ChatSettings({
 
       {/* Chat Agent Prompt */}
       <div className="space-y-1.5">
-        <Label className="text-text-secondary text-xs">
+        <Label
+          htmlFor="chat-prompt-mode"
+          className="text-text-secondary text-xs"
+        >
           Chat Agent Prompt
         </Label>
         <Select
@@ -108,7 +112,10 @@ export default function ChatSettings({
             setPromptMode((v ?? "standard") as "standard" | "custom")
           }
         >
-          <SelectTrigger className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9">
+          <SelectTrigger
+            id="chat-prompt-mode"
+            className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+          >
             <SelectValue>
               {(v) => (v === "custom" ? "Custom prompt" : "Standard prompt")}
             </SelectValue>
@@ -126,18 +133,28 @@ export default function ChatSettings({
           instructions only.
         </p>
 
-        <Label className="text-text-secondary text-xs">
+        <Label
+          htmlFor="chat-standard-prompt"
+          className="text-text-secondary text-xs"
+        >
           Standard prompt (read-only)
         </Label>
         <Textarea
+          id="chat-standard-prompt"
           readOnly
           value={standardPrompt}
           rows={8}
           className="text-xs leading-relaxed bg-field border-border text-text-muted resize-y"
         />
 
-        <Label className="text-text-secondary text-xs">Custom prompt</Label>
+        <Label
+          htmlFor="chat-custom-prompt"
+          className="text-text-secondary text-xs"
+        >
+          Custom prompt
+        </Label>
         <Textarea
+          id="chat-custom-prompt"
           value={customPrompt}
           onChange={(e) => setCustomPrompt(e.target.value)}
           placeholder="Write your own instructions for the chat agent…"
@@ -146,12 +163,17 @@ export default function ChatSettings({
         />
       </div>
 
-      <Button
-        onClick={handleSave}
-        className="w-full bg-primary hover:bg-primary/80 text-primary-foreground"
-      >
-        Save
-      </Button>
+      <div className="flex flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:justify-end">
+        <Button variant="outline" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button
+          onClick={() => void handleSave()}
+          className="bg-primary hover:bg-primary/80 text-primary-foreground"
+        >
+          Save changes
+        </Button>
+      </div>
     </div>
   );
 }
