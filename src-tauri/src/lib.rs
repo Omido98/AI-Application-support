@@ -1602,14 +1602,19 @@ async fn export_backup_file(
         return Err("The backup is larger than the 64 MB limit.".to_string());
     }
     let file_name = sanitize_backup_name(&default_name);
+    let parent = app.get_webview_window("main");
     let app_for_dialog = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        app_for_dialog
+        let dialog = app_for_dialog
             .dialog()
             .file()
             .add_filter("JSON", &["json"])
-            .set_file_name(file_name)
-            .blocking_save_file()
+            .set_file_name(file_name);
+        let dialog = match parent {
+            Some(window) => dialog.set_parent(&window),
+            None => dialog,
+        };
+        dialog.blocking_save_file()
     })
     .await
     .map_err(|err| format!("Backup dialog failed: {err}"))?;
@@ -1636,13 +1641,18 @@ async fn export_backup_file(
 /// both happen in Rust; the webview has no filesystem read permission.
 #[tauri::command]
 async fn import_backup_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let parent = app.get_webview_window("main");
     let app_for_dialog = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        app_for_dialog
+        let dialog = app_for_dialog
             .dialog()
             .file()
-            .add_filter("JSON", &["json"])
-            .blocking_pick_file()
+            .add_filter("JSON", &["json"]);
+        let dialog = match parent {
+            Some(window) => dialog.set_parent(&window),
+            None => dialog,
+        };
+        dialog.blocking_pick_file()
     })
     .await
     .map_err(|err| format!("Backup dialog failed: {err}"))?;
