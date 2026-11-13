@@ -76,17 +76,29 @@ export default function ApplicationTab() {
   const selectApplication = useApplicationStore((s) => s.selectApplication);
 
   const setActiveTab = useAppStore((s) => s.setActiveTab);
+  const filter = useAppStore((s) => s.applicationFilter);
+  const setFilter = useAppStore((s) => s.setApplicationFilter);
+  const statusFilter = useAppStore((s) => s.applicationStatusFilter);
+  const setStatusFilter = useAppStore((s) => s.setApplicationStatusFilter);
+  const viewMode = useAppStore((s) => s.applicationViewMode);
+  const setViewMode = useAppStore((s) => s.setApplicationViewMode);
+  const resetFilters = useAppStore((s) => s.resetApplicationFilters);
 
-  const [filter, setFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ApplicationStatus | null>(
-    null,
-  );
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"active" | "archived">("active");
 
   useEffect(() => {
     if (!isLoaded) loadApplications();
   }, [isLoaded, loadApplications]);
+
+  /**
+   * A brand-new application starts empty in the Wishlist column. If a search,
+   * status filter or the archive view is active it would be invisible, so
+   * clear those first and put the user on the new row.
+   */
+  const handleCreate = () => {
+    resetFilters();
+    addApplication();
+  };
 
   // Sort by status rank (Wishlist first, Rejected last), then alphabetically
   // by company within each status group.
@@ -163,7 +175,7 @@ export default function ApplicationTab() {
         </p>
         <Button
           className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
-          onClick={() => addApplication()}
+          onClick={handleCreate}
         >
           <Plus className="size-4 mr-1.5" />
           Add your first application
@@ -183,7 +195,7 @@ export default function ApplicationTab() {
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={() => addApplication()}
+            onClick={handleCreate}
             title="New application"
             aria-label="New application"
           >
