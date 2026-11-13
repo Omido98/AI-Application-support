@@ -37,31 +37,38 @@ writeJson("src-tauri/tauri.conf.json", tauri);
 
 const cargoTomlPath = file("src-tauri/Cargo.toml");
 const cargoToml = readFileSync(cargoTomlPath, "utf8");
-const nextToml = cargoToml.replace(
-  /(\[package\][\s\S]*?\nversion\s*=\s*")[^"]+(")/,
-  `$1${target}$2`,
-);
-if (nextToml === cargoToml) {
-  console.error(
-    "Could not find the [package] version in src-tauri/Cargo.toml.",
+const currentTomlVersion = /\[package\][\s\S]*?\r?\nversion = "([^"]+)"/.exec(
+  cargoToml,
+)?.[1];
+if (currentTomlVersion !== target) {
+  const nextToml = cargoToml.replace(
+    /(\[package\][\s\S]*?\r?\nversion = ")[^"]+(")/,
+    `$1${target}$2`,
   );
-  process.exit(1);
+  if (nextToml === cargoToml) {
+    console.error(
+      "Could not find the [package] version in src-tauri/Cargo.toml.",
+    );
+    process.exit(1);
+  }
+  writeFileSync(cargoTomlPath, nextToml);
 }
-writeFileSync(cargoTomlPath, nextToml);
 
 const cargoLockPath = file("src-tauri/Cargo.lock");
 const cargoLock = readFileSync(cargoLockPath, "utf8");
-const nextLock = cargoLock.replace(
-  /(\[\[package\]\]\nname = "ai-application-support"\nversion = ")[^"]+(")/,
-  `$1${target}$2`,
-);
-if (nextLock === cargoLock) {
-  console.error(
-    "Could not find the ai-application-support entry in src-tauri/Cargo.lock.",
-  );
-  process.exit(1);
+const lockPattern =
+  /(\[\[package\]\]\r?\nname = "ai-application-support"\r?\nversion = ")([^"]+)(")/;
+const currentLockVersion = lockPattern.exec(cargoLock)?.[2];
+if (currentLockVersion !== target) {
+  const nextLock = cargoLock.replace(lockPattern, `$1${target}$3`);
+  if (nextLock === cargoLock) {
+    console.error(
+      "Could not find the ai-application-support entry in src-tauri/Cargo.lock.",
+    );
+    process.exit(1);
+  }
+  writeFileSync(cargoLockPath, nextLock);
 }
-writeFileSync(cargoLockPath, nextLock);
 
 console.log(`Updated all release files to ${target}.`);
 console.log(

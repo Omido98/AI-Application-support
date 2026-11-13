@@ -21,7 +21,7 @@ const cargoVersion = /\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m.exec(
   cargoToml,
 )?.[1];
 const lockAppVersion =
-  /\[\[package\]\]\nname = "ai-application-support"\nversion = "([^"]+)"/.exec(
+  /\[\[package\]\]\r?\nname = "ai-application-support"\r?\nversion = "([^"]+)"/.exec(
     cargoLock,
   )?.[1];
 
