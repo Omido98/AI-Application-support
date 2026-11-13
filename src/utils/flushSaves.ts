@@ -1,6 +1,6 @@
-import { flushApplicationSave } from "@/stores/applicationStore";
+import { flushChatSave, flushDraftsSave } from "@/stores/chatStore";
 import { flushProfileSave } from "@/stores/profileStore";
-import { flushChatSave } from "@/stores/chatStore";
+import { flushApplicationSave } from "@/stores/applicationStore";
 
 /**
  * Flush every debounced save and report whether all writes succeeded.
@@ -12,6 +12,7 @@ export async function flushAllSaves(): Promise<boolean> {
     flushApplicationSave(),
     flushProfileSave(),
     flushChatSave(),
+    flushDraftsSave(),
   ]);
   return results.every(Boolean);
 }

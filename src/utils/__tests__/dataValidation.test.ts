@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeApiConfigData,
   normalizeApplicationsPayload,
+  normalizeDraftsData,
   normalizeProfileData,
   normalizeSettingsData,
 } from "@/utils/dataValidation";
@@ -108,6 +109,32 @@ describe("normalizeSettingsData", () => {
       accent: "",
     });
     expect(normalizeSettingsData("nope")).toBeNull();
+  });
+});
+
+describe("normalizeDraftsData", () => {
+  it("keeps only non-empty string drafts", () => {
+    expect(
+      normalizeDraftsData({
+        "app-1": "hello",
+        "app-2": "",
+        "app-3": 42,
+        "": "no thread",
+      }),
+    ).toEqual({ "app-1": "hello" });
+  });
+
+  it("rejects prototype-mutating keys", () => {
+    const drafts = normalizeDraftsData(
+      JSON.parse('{"__proto__":"polluted","constructor":"x","app-1":"ok"}'),
+    );
+    expect(drafts).toEqual({ "app-1": "ok" });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("returns null for a non-object", () => {
+    expect(normalizeDraftsData([])).toBeNull();
+    expect(normalizeDraftsData(null)).toBeNull();
   });
 });
 

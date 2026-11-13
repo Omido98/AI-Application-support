@@ -12,7 +12,7 @@ import {
   parseBackupBundle,
   restoreBackupBundle,
 } from "@/utils/backup";
-import { saveJson } from "@/utils/storage";
+import { saveJson, deleteFile } from "@/utils/storage";
 import { exportBackupFile, importBackupFile } from "@/utils/backupFiles";
 import { flushAllSaves } from "@/utils/flushSaves";
 import { useApplicationStore } from "@/stores/applicationStore";
@@ -151,10 +151,15 @@ export default function SettingsDialog({
       }
 
       await restoreBackupBundle(bundle);
+      // A backup without drafts means "no drafts", not "keep the old ones".
+      if (!("drafts.json" in bundle.files)) {
+        await deleteFile("drafts.json");
+      }
       // Reload every store so the restored data shows immediately.
       await useApplicationStore.getState().loadApplications();
       await useProfileStore.getState().loadProfile();
       await useChatStore.getState().loadConfig();
+      await useChatStore.getState().loadDrafts(true);
       await useChatStore
         .getState()
         .switchThread(useApplicationStore.getState().selectedApplicationId, true);

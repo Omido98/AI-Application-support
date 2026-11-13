@@ -24,6 +24,7 @@ const STATIC_FILE_NAMES = [
   "profile.json",
   "config.json",
   "settings.json",
+  "drafts.json",
   "zen-prices.json",
 ] as const;
 

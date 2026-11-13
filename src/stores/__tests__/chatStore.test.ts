@@ -12,6 +12,7 @@ import {
   useChatStore,
   messageKey,
   flushChatSave,
+  flushDraftsSave,
   normalizeChatMessages,
   type ChatMessage,
 } from "@/stores/chatStore";
@@ -37,9 +38,10 @@ const userMessage = (content = "Hello"): ChatMessage => ({
 });
 
 beforeEach(async () => {
-  // Drain any debounced thread save left over from the previous test so a
-  // stale timer cannot fire into the next test's assertions.
+  // Drain any debounced save left over from the previous test so a stale
+  // timer cannot fire into the next test's assertions.
   await flushChatSave();
+  await flushDraftsSave();
   saveJsonMock.mockReset();
   loadJsonMock.mockReset();
   deleteFileMock.mockReset();
@@ -54,6 +56,7 @@ beforeEach(async () => {
     error: null,
     isSending: false,
     drafts: {},
+    draftsLoaded: false,
   });
 });
 
@@ -272,5 +275,76 @@ describe("thread persistence", () => {
 
     expect(useChatStore.getState().messages).toEqual([]);
     expect(useChatStore.getState().threadLoaded).toBe(true);
+  });
+});
+
+describe("unsent drafts", () => {
+  it("persists a draft on flush, dropping empty drafts", async () => {
+    useChatStore.setState({
+      activeThreadId: "app-1",
+      drafts: { "app-1": "half-written", "app-2": "" },
+    });
+
+    await flushDraftsSave();
+
+    expect(saveJsonMock).toHaveBeenCalledWith("drafts.json", {
+      "app-1": "half-written",
+    });
+  });
+
+  it("debounces setDraft and saves the current thread text", async () => {
+    useChatStore.setState({ activeThreadId: "app-1" });
+    useChatStore.getState().setDraft("hello");
+
+    expect(useChatStore.getState().drafts["app-1"]).toBe("hello");
+    await flushDraftsSave();
+
+    expect(saveJsonMock).toHaveBeenCalledWith("drafts.json", {
+      "app-1": "hello",
+    });
+  });
+
+  it("loads saved drafts and keeps text typed while loading", async () => {
+    useChatStore.setState({ drafts: { "app-1": "typed now" } });
+    loadJsonMock.mockResolvedValue({
+      "app-1": "older stored text",
+      "app-2": "another draft",
+    });
+
+    await useChatStore.getState().loadDrafts();
+
+    expect(useChatStore.getState().drafts).toEqual({
+      "app-1": "typed now",
+      "app-2": "another draft",
+    });
+    expect(useChatStore.getState().draftsLoaded).toBe(true);
+  });
+
+  it("replaces drafts on a forced reload and clears them when the file is missing", async () => {
+    useChatStore.setState({
+      drafts: { "app-1": "old" },
+      draftsLoaded: true,
+    });
+    loadJsonMock.mockResolvedValue({ "app-2": "from backup" });
+
+    await useChatStore.getState().loadDrafts(true);
+    expect(useChatStore.getState().drafts).toEqual({
+      "app-2": "from backup",
+    });
+
+    loadJsonMock.mockResolvedValue(null);
+    await useChatStore.getState().loadDrafts(true);
+    expect(useChatStore.getState().drafts).toEqual({});
+  });
+
+  it("removes a deleted application's draft", async () => {
+    useChatStore.setState({
+      activeThreadId: "app-1",
+      drafts: { "app-1": "draft", "app-2": "keep" },
+    });
+
+    await useChatStore.getState().clearMessages();
+
+    expect(useChatStore.getState().drafts).toEqual({ "app-2": "keep" });
   });
 });

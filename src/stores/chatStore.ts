@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { saveJson, loadJson, deleteFile, reportDataIssue } from "@/utils/storage";
-import { normalizeApiConfigData } from "@/utils/dataValidation";
+import { normalizeApiConfigData, normalizeDraftsData } from "@/utils/dataValidation";
 import {
   API_KEY_ACCOUNT,
   deleteApiKeyFromKeychain,
@@ -181,6 +181,50 @@ export async function flushChatSave(): Promise<boolean> {
 }
 
 // ──────────────────────────────────────────────
+// Debounced draft save (all threads, one small file)
+// ──────────────────────────────────────────────
+
+const DRAFTS_FILE = "drafts.json";
+let draftsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Only non-empty drafts are worth writing to disk. */
+function persistableDrafts(
+  drafts: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(drafts).filter(
+      ([threadId, text]) => threadId.length > 0 && text.length > 0,
+    ),
+  );
+}
+
+function scheduleDraftsSave() {
+  if (draftsSaveTimer) clearTimeout(draftsSaveTimer);
+  draftsSaveTimer = setTimeout(async () => {
+    draftsSaveTimer = null;
+    await saveJson(
+      DRAFTS_FILE,
+      persistableDrafts(useChatStore.getState().drafts),
+    );
+  }, 500);
+}
+
+/** Flush unsent drafts immediately (window close / explicit flush). */
+export async function flushDraftsSave(): Promise<boolean> {
+  if (draftsSaveTimer) {
+    clearTimeout(draftsSaveTimer);
+    draftsSaveTimer = null;
+  }
+  const state = useChatStore.getState();
+  // Do not overwrite the stored drafts with an empty object before the
+  // startup load has completed. A draft typed during the load still wins.
+  if (!state.draftsLoaded && Object.keys(state.drafts).length === 0) {
+    return true;
+  }
+  return saveJson(DRAFTS_FILE, persistableDrafts(state.drafts));
+}
+
+// ──────────────────────────────────────────────
 // Store interface
 // ──────────────────────────────────────────────
 
@@ -197,8 +241,11 @@ interface ChatState {
   streamingText: string;
 
   /** Unsent message drafts, keyed by thread (application) id. Kept in
-   * memory so switching tabs does not wipe what the user is typing. */
+   * memory so switching tabs does not wipe what the user is typing, and
+   * persisted to drafts.json so closing the app does not either. */
   drafts: Record<string, string>;
+  /** Whether drafts.json has been read for this launch. */
+  draftsLoaded: boolean;
 
   /** API configuration */
   config: ApiConfig;
@@ -232,6 +279,11 @@ interface ChatState {
   /** Load (or reset) the chat thread for an application. `force` reloads even
    * when the same thread is already loaded (used after importing a backup). */
   switchThread: (applicationId: string | null, force?: boolean) => Promise<void>;
+  /** Load persisted unsent drafts. `force` replaces in-memory drafts instead
+   * of merging over them (used after importing a backup). */
+  loadDrafts: (force?: boolean) => Promise<void>;
+  /** Remove the draft belonging to a deleted application. */
+  discardDraft: (threadId: string) => void;
 
   // Config actions
   /** Merge the given fields into the stored config and persist the result. */
@@ -262,6 +314,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   streamingText: "",
   drafts: {},
+  draftsLoaded: false,
 
   config: { ...defaultApiConfig },
 
@@ -333,7 +386,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
       delete drafts[threadId];
       return { drafts };
     });
+    scheduleDraftsSave();
     await deleteFile(`chat_${threadId}.json`);
+  },
+
+  loadDrafts: async (force = false) => {
+    const raw = await loadJson<unknown>(DRAFTS_FILE);
+    if (raw == null) {
+      // A missing file is normal. On a forced reload (import) it means the
+      // restored backup has no drafts, so clear the old ones.
+      set((s) => ({
+        drafts: force ? {} : s.drafts,
+        draftsLoaded: true,
+      }));
+      return;
+    }
+    const loaded = normalizeDraftsData(raw);
+    if (!loaded) {
+      reportDataIssue(
+        DRAFTS_FILE,
+        "The drafts file has an unexpected structure. Unsaved drafts from the previous session were not restored.",
+      );
+      set({ draftsLoaded: true });
+      return;
+    }
+    // A draft typed while the file was loading wins over the stored text.
+    set((s) => ({
+      drafts: force ? loaded : { ...loaded, ...s.drafts },
+      draftsLoaded: true,
+    }));
+  },
+
+  discardDraft: (threadId) => {
+    const current = get().drafts;
+    if (!(threadId in current)) return;
+    const drafts = { ...current };
+    delete drafts[threadId];
+    set({ drafts });
+    scheduleDraftsSave();
   },
 
   switchThread: async (applicationId, force = false) => {
@@ -470,11 +560,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ? (updater as (prev: string) => string)(s.streamingText)
           : updater,
     })),
-  setDraft: (value) =>
+  setDraft: (value) => {
+    const threadId = get().activeThreadId;
+    if (!threadId) return;
     set((s) => ({
       drafts: {
         ...s.drafts,
-        [get().activeThreadId ?? ""]: value,
+        [threadId]: value,
       },
-    })),
+    }));
+    scheduleDraftsSave();
+  },
 }));

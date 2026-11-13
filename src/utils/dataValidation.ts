@@ -318,6 +318,29 @@ export function normalizeSettingsData(
   return { theme, accent };
 }
 
+/**
+ * Unsent drafts are keyed by application/thread id. Empty drafts are dropped
+ * (they need no disk space) and prototype-mutating keys are rejected.
+ */
+export function normalizeDraftsData(
+  value: unknown,
+): Record<string, string> | null {
+  if (!isRecord(value)) return null;
+  const drafts: Record<string, string> = {};
+  for (const [threadId, draft] of Object.entries(value)) {
+    if (threadId.length === 0 || typeof draft !== "string") continue;
+    if (
+      threadId === "__proto__" ||
+      threadId === "constructor" ||
+      threadId === "prototype"
+    ) {
+      continue;
+    }
+    if (draft.length > 0) drafts[threadId] = draft;
+  }
+  return drafts;
+}
+
 export function normalizeApiConfigData(value: unknown): ApiConfig | null {
   if (!isRecord(value)) return null;
   const baseUrl = asString(value.baseUrl);

@@ -56,6 +56,7 @@ All data lives in your system's app-data directory as plain JSON files:
 - `config.json` — provider, base URL, model, prompt settings (no API key
   when the keychain works)
 - `settings.json` — theme and accent
+- `drafts.json` — unsent chat messages, keyed by application
 - `zen-prices.json` — cached model prices from the Zen docs
 
 Changes are auto-saved (debounced) and flushed when you close the app. Writes

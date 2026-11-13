@@ -47,6 +47,8 @@ beforeEach(() => {
         return configWithSecret;
       case "settings.json":
         return { theme: "dark", accent: "#34d399" };
+      case "drafts.json":
+        return { [app.id]: "unsent draft" };
       case `chat_${app.id}.json`:
         return [{ role: "user", content: "hi", timestamp: "t" }];
       default:
@@ -65,6 +67,7 @@ describe("buildBackupBundle", () => {
       [
         "applications.json",
         "config.json",
+        "drafts.json",
         "profile.json",
         "settings.json",
         `chat_${app.id}.json`,

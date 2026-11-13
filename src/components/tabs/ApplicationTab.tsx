@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { openExternalUrl } from "@/utils/links";
 import { useApplicationStore } from "@/stores/applicationStore";
+import { useChatStore } from "@/stores/chatStore";
 import { useAppStore } from "@/stores/useAppStore";
 import type { ApplicationStatus } from "@/types";
 import { cn } from "@/lib/utils";
@@ -585,7 +586,10 @@ export default function ApplicationTab() {
             <Button
               variant="destructive"
               onClick={() => {
-                if (pendingDeleteId) void removeApplication(pendingDeleteId);
+                if (pendingDeleteId) {
+                  useChatStore.getState().discardDraft(pendingDeleteId);
+                  void removeApplication(pendingDeleteId);
+                }
                 setPendingDeleteId(null);
               }}
             >

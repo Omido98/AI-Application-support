@@ -9,6 +9,7 @@ import {
   getAccentForeground,
 } from "@/stores/settingsStore";
 import { useProfileStore } from "@/stores/profileStore";
+import { useChatStore } from "@/stores/chatStore";
 import { flushAllSaves } from "@/utils/flushSaves";
 import ApplicationTab from "@/components/tabs/ApplicationTab";
 import ChatTab from "@/components/tabs/ChatTab";
@@ -50,6 +51,13 @@ function App() {
   useEffect(() => {
     void useProfileStore.getState().loadProfile();
   }, []);
+
+  // Restore unsent chat drafts from the previous session.
+  const draftsLoaded = useChatStore((s) => s.draftsLoaded);
+  const loadDrafts = useChatStore((s) => s.loadDrafts);
+  useEffect(() => {
+    if (!draftsLoaded) void loadDrafts();
+  }, [draftsLoaded, loadDrafts]);
 
   // Flush debounced saves when the window closes, so the last edit is never lost
   useEffect(() => {
