@@ -30,6 +30,7 @@ import {
   RotateCcw,
   RefreshCw,
   Link2,
+  X,
 } from "lucide-react";
 import type { ProfileData, WebSource } from "@/types";
 
@@ -39,6 +40,22 @@ function sourceLabel(title: string, url: string): string {
   } catch {
     return title;
   }
+}
+
+/** Short local clock time plus a full, hoverable/AT-friendly label. */
+function formatMessageTime(timestamp: string): { label: string; full: string } {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return { label: "", full: "" };
+  return {
+    label: date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    full: date.toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }),
+  };
 }
 
 export default function MessageList({
@@ -506,6 +523,7 @@ export default function MessageList({
         if (msg.kind === "summary") return null;
         const isUser = msg.role === "user";
         const key = messageKey(msg);
+        const time = formatMessageTime(msg.timestamp);
         const feedback =
           copiedId === key
             ? "copied"
@@ -573,53 +591,71 @@ export default function MessageList({
 
             <div
               className={cn(
-                "whitespace-pre-wrap break-words",
-                isUser
-                  ? "max-w-[80%] rounded-lg px-4 py-3 text-sm leading-relaxed bg-primary text-primary-foreground"
-                  : "max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3",
+                "flex flex-col",
+                isUser ? "items-end max-w-[80%]" : "items-start max-w-[75ch]",
               )}
             >
-              {isUser ? (
-                <p>{msg.content}</p>
-              ) : (
-                <Markdown>{msg.content}</Markdown>
-              )}
+              <div
+                className={cn(
+                  "whitespace-pre-wrap break-words",
+                  isUser
+                    ? "rounded-lg px-4 py-3 text-sm leading-relaxed bg-primary text-primary-foreground"
+                    : "rounded-lg bg-surface text-text-primary border border-border px-4 py-3",
+                )}
+              >
+                {isUser ? (
+                  <p>{msg.content}</p>
+                ) : (
+                  <Markdown>{msg.content}</Markdown>
+                )}
 
-              {!isUser && msg.sources && msg.sources.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/60 pt-2">
-                  {msg.sources.map((source) => (
-                    <button
-                      key={source.url}
-                      type="button"
-                      onClick={() => openExternalUrl(source.url)}
-                      title={`${source.title} — ${source.url}`}
-                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-field px-2 py-0.5 text-[10px] text-text-secondary transition-colors hover:border-primary/40 hover:text-primary"
-                    >
-                      <Link2 className="size-3 shrink-0" aria-hidden="true" />
-                      <span className="truncate">
-                        {sourceLabel(source.title, source.url)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
+                {!isUser && msg.sources && msg.sources.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/60 pt-2">
+                    {msg.sources.map((source) => (
+                      <button
+                        key={source.url}
+                        type="button"
+                        onClick={() => openExternalUrl(source.url)}
+                        title={`${source.title} — ${source.url}`}
+                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-field px-2 py-0.5 text-[10px] text-text-secondary transition-colors hover:border-primary/40 hover:text-primary"
+                      >
+                        <Link2 className="size-3 shrink-0" aria-hidden="true" />
+                        <span className="truncate">
+                          {sourceLabel(source.title, source.url)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-              {!isUser && msg.usage && (
-                <p className="mt-1.5 font-mono text-[10px] leading-none text-text-muted">
-                  {[
-                    msg.usage.inputTokens !== undefined
-                      ? `${formatTokenCount(msg.usage.inputTokens)} in`
-                      : null,
-                    msg.usage.outputTokens !== undefined
-                      ? `${formatTokenCount(msg.usage.outputTokens)} out`
-                      : null,
-                    msg.costUsd !== undefined
-                      ? formatUsageCost(msg.costUsd)
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
+                {!isUser && msg.usage && (
+                  <p className="mt-1.5 font-mono text-[10px] leading-none text-text-muted">
+                    {[
+                      msg.usage.inputTokens !== undefined
+                        ? `${formatTokenCount(msg.usage.inputTokens)} in`
+                        : null,
+                      msg.usage.outputTokens !== undefined
+                        ? `${formatTokenCount(msg.usage.outputTokens)} out`
+                        : null,
+                      msg.costUsd !== undefined
+                        ? formatUsageCost(msg.costUsd)
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
+              </div>
+
+              {time.label && (
+                <time
+                  dateTime={msg.timestamp}
+                  title={time.full}
+                  aria-label={`Sent ${time.full}`}
+                  className="mt-1 select-text px-0.5 font-mono text-[10px] leading-none text-text-muted"
+                >
+                  {time.label}
+                </time>
               )}
             </div>
 
@@ -795,8 +831,20 @@ export default function MessageList({
 
       {error && (
         <div className="flex justify-center">
-          <div className="bg-destructive/10 text-destructive text-sm rounded-lg px-4 py-2 border border-destructive/20 max-w-lg text-center">
+          <div
+            role="alert"
+            className="relative max-w-lg rounded-lg border border-destructive/20 bg-destructive/10 py-2 pl-4 pr-9 text-center text-sm text-destructive"
+          >
             {error}
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              title="Dismiss"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-destructive/70 transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
+            >
+              <X className="size-3.5" />
+            </button>
           </div>
         </div>
       )}
