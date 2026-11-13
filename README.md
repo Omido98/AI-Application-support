@@ -117,6 +117,11 @@ Useful commands:
 
 - `npm test` — run the Vitest unit tests
 - `npm run eval` — run the offline prompt/response eval harness
+- `npm run lint` — ESLint
+- `npm run format:check` / `npm run format` — Prettier check / rewrite
+- `npm run test:e2e` — Playwright browser-mode end-to-end tests
+- `npm run version:check` / `npm run version:bump -- X.Y.Z` — release version
+  consistency check and five-file bump (see [docs/releasing.md](docs/releasing.md))
 - `npx tsc --noEmit` — TypeScript typecheck
 - `npm run build` — frontend production build
 - `npm run build:arm64` / `npm run build:x64` — Windows ARM64 / x64 Tauri bundles
@@ -136,10 +141,9 @@ Releases are built by CI (`.github/workflows/release.yml`) when a `v*` tag is
 pushed. Never release directly from `main` — the release flow is:
 
 1. Create a branch from main: `git checkout -b release-vX.Y.Z`
-2. Bump the version in **all 5 files**: `package.json`,
-   `package-lock.json` (root entries only), `src-tauri/tauri.conf.json`,
-   `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` (the
-   `ai-application-support` package entry only).
+2. Bump the version in **all 5 files** with
+   `npm run version:bump -- X.Y.Z`, then run `npm run version:check`
+   (see [docs/releasing.md](docs/releasing.md)).
 3. Commit, push the branch, then tag and push:
    `git tag vX.Y.Z && git push origin vX.Y.Z`
 4. Open a pull request into `main` and stop — CI uploads the installers to a
@@ -171,3 +175,6 @@ repository secrets to be set before tagging (generate a key pair with
 - PDF and DOCX exports are rendered locally in the webview; CV files are
   parsed locally and only the extracted text is sent to the configured AI
   provider when you start the import analysis.
+- Data stays in plain JSON with an in-memory search. SQLite/FTS is deferred
+  until the tracker outgrows personal-scale search; see
+  [docs/releasing.md](docs/releasing.md#data-storage).
