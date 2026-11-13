@@ -30,6 +30,7 @@ const baseConfig: ApiConfig = {
   apiKey: "test-key",
   model: "deepseek-v4-flash-free",
   reasoningEffort: null,
+  contextWindow: 128_000,
   webSearchEnabled: true,
   systemPromptMode: "standard",
   customSystemPrompt: "",

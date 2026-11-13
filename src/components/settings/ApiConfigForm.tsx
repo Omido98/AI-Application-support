@@ -28,6 +28,10 @@ import {
   ZEN_MODEL_NAMES,
   type ModelPrice,
 } from "@/utils/zenPricing";
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  MIN_CONTEXT_WINDOW,
+} from "@/utils/tokens";
 import { saveJson, loadJson } from "@/utils/storage";
 import { openExternalUrl } from "@/utils/links";
 import {
@@ -96,6 +100,9 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
   const [selection, setSelection] = useState<string>(model);
   const [reasoningEffort, setReasoningEffort] = useState(
     config.reasoningEffort ?? "",
+  );
+  const [contextWindowInput, setContextWindowInput] = useState(
+    String(config.contextWindow ?? DEFAULT_CONTEXT_WINDOW),
   );
 
   const [models, setModels] = useState<string[] | null>(null);
@@ -309,13 +316,21 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
   };
 
   const handleSave = async () => {
+    const parsedContextWindow = Number.parseInt(contextWindowInput, 10);
+    const contextWindow =
+      Number.isFinite(parsedContextWindow) &&
+      parsedContextWindow >= MIN_CONTEXT_WINDOW
+        ? parsedContextWindow
+        : DEFAULT_CONTEXT_WINDOW;
     await setConfig({
       provider,
       baseUrl: baseUrl.trim() || getProvider(provider).defaultBaseUrl,
       apiKey: apiKey.trim(),
       model: resolvedModel,
       reasoningEffort: reasoningEffort.trim() !== "" ? reasoningEffort : null,
+      contextWindow,
     });
+    setContextWindowInput(String(contextWindow));
     onDone?.();
   };
 
@@ -577,6 +592,31 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
               {pricingStatus}
             </p>
           )}
+        </div>
+
+        {/* Context window */}
+        <div className="space-y-1.5">
+          <Label
+            htmlFor="context-window"
+            className="text-text-secondary text-xs"
+          >
+            Context window (tokens)
+          </Label>
+          <Input
+            id="context-window"
+            type="number"
+            min={MIN_CONTEXT_WINDOW}
+            step={1000}
+            value={contextWindowInput}
+            onChange={(e) => setContextWindowInput(e.target.value)}
+            className={inputClass}
+          />
+          <p className="text-xs text-text-muted">
+            Older chat messages are omitted from a request once it would exceed
+            this budget. Set it to your model's total context window (prompt
+            plus reply). Default: {DEFAULT_CONTEXT_WINDOW.toLocaleString()}{" "}
+            tokens; minimum {MIN_CONTEXT_WINDOW.toLocaleString()}.
+          </p>
         </div>
 
         {/* Reasoning Effort */}

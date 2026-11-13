@@ -9,6 +9,7 @@ import {
 } from "@/utils/keychain";
 import type { ProviderId } from "@/utils/providers";
 import { getProvider } from "@/utils/providers";
+import { DEFAULT_CONTEXT_WINDOW } from "@/utils/tokens";
 
 // ──────────────────────────────────────────────
 // Chat message type (lighter than the full Message type)
@@ -85,6 +86,9 @@ export interface ApiConfig {
   apiKey: string;
   model: string;
   reasoningEffort: string | null;
+  /** Usable input context window in tokens. Older chat history is trimmed to
+   * fit this budget, keeping replies from failing on long threads. */
+  contextWindow: number;
   /** Whether the chat agent may use web search / page fetch tools. */
   webSearchEnabled: boolean;
   /** Which system prompt the chat agent uses. */
@@ -107,6 +111,7 @@ const defaultApiConfig: ApiConfig = {
   apiKey: "",
   model: "deepseek-v4-flash-free",
   reasoningEffort: null,
+  contextWindow: DEFAULT_CONTEXT_WINDOW,
   webSearchEnabled: false,
   systemPromptMode: "standard",
   customSystemPrompt: "",
@@ -527,6 +532,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         keychainAccount: keychainKey != null ? API_KEY_ACCOUNT : null,
         sessionKeyOnly,
         reasoningEffort: base.reasoningEffort ?? null,
+        contextWindow: base.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
         webSearchEnabled: base.webSearchEnabled ?? false,
         systemPromptMode: base.systemPromptMode ?? "standard",
         customSystemPrompt: base.customSystemPrompt ?? "",

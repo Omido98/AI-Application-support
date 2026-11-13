@@ -6,6 +6,7 @@ import { useAppStore } from "@/stores/useAppStore";
 import { sendMessage } from "@/utils/api";
 import { buildSystemPrompt } from "@/utils/systemPrompt";
 import { estimateTokens } from "@/utils/tokens";
+import { fitHistoryToBudget, getContextBudget } from "@/utils/contextBudget";
 import ChatSettings from "@/components/chat/ChatSettings";
 import MessageList from "@/components/chat/MessageList";
 import MessageInput from "@/components/chat/MessageInput";
@@ -59,10 +60,16 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const loadProfile = useProfileStore((s) => s.loadProfile);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
 
-  // Live estimate of the input tokens the next send would consume
-  // (system prompt + conversation history + typed draft).
-  const tokenEstimate = useMemo(() => {
-    if (!application) return 0;
+  // Live estimate of what the next request will actually send, after history
+  // trimming, plus how many older messages are omitted to stay in budget.
+  const contextBudget = useMemo(
+    () => getContextBudget(config.contextWindow),
+    [config.contextWindow],
+  );
+  const contextUsage = useMemo(() => {
+    if (!application) {
+      return { tokens: 0, dropped: 0 };
+    }
     const appCtx = {
       company: application.companyName,
       jobDescription: application.jobDescription,
@@ -74,8 +81,16 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       mode: config.systemPromptMode ?? "standard",
       customPrompt: config.customSystemPrompt ?? "",
     });
-    const historyText = messages.map((m) => m.content).join("\n");
-    return estimateTokens(`${prompt}\n${historyText}\n${inputValue}`);
+    const reserved =
+      estimateTokens(prompt) + estimateTokens(inputValue);
+    const fitted = fitHistoryToBudget(messages, {
+      inputBudget: contextBudget.inputBudget,
+      reservedTokens: reserved,
+    });
+    return {
+      tokens: reserved + fitted.historyTokens,
+      dropped: fitted.droppedCount,
+    };
   }, [
     application,
     profile,
@@ -83,7 +98,9 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     inputValue,
     config.systemPromptMode,
     config.customSystemPrompt,
+    contextBudget.inputBudget,
   ]);
+  const tokenEstimate = contextUsage.tokens;
 
   // ── Input state ──
   const [showConfig, setShowConfig] = useState(false);
@@ -287,8 +304,22 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       const history = isRegenerate
         ? messages.filter((m) => messageKey(m) !== opts.regenerateKey)
         : messages;
+      const fitted = fitHistoryToBudget(history, {
+        inputBudget: getContextBudget(config.contextWindow).inputBudget,
+        reservedTokens: estimateTokens(systemPrompt),
+      });
+      let sendHistory = fitted.messages;
+      // A re-send targets a message that may be older than the trimmed
+      // window; make sure the retried prompt is actually part of the request.
+      if (
+        isResend &&
+        target &&
+        !sendHistory.some((m) => messageKey(m) === opts.resendKey)
+      ) {
+        sendHistory = [...sendHistory, target];
+      }
       const result = await sendMessage(
-        history,
+        sendHistory,
         { ...config, webSearchEnabled },
         systemPrompt,
         {
@@ -549,6 +580,14 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         onRegenerate={(key) => void sendText({ regenerateKey: key })}
       />
 
+      {contextUsage.dropped > 0 && (
+        <p className="px-4 pt-2 text-[10px] leading-snug text-text-muted">
+          {contextUsage.dropped} older message
+          {contextUsage.dropped === 1 ? "" : "s"} will be omitted from the next
+          request to stay within the context budget.
+        </p>
+      )}
+
       {/* Input */}
       <MessageInput
         value={inputValue}
@@ -557,6 +596,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         onStop={handleStop}
         disabled={isSending}
         tokenEstimate={tokenEstimate}
+        contextLimit={contextBudget.inputBudget}
+        droppedMessages={contextUsage.dropped}
       />
     </div>
   );

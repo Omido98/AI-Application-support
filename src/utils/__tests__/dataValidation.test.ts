@@ -154,11 +154,24 @@ describe("normalizeApiConfigData", () => {
       baseUrl: "https://api.anthropic.com",
       apiKey: "",
       model: "",
+      contextWindow: 128_000,
       webSearchEnabled: false,
       customSystemPrompt: "",
       reasoningEffort: null,
       systemPromptMode: "standard",
     });
+  });
+
+  it("validates the configured context window", () => {
+    expect(
+      normalizeApiConfigData({ contextWindow: 32_000 })?.contextWindow,
+    ).toBe(32_000);
+    expect(
+      normalizeApiConfigData({ contextWindow: 100 })?.contextWindow,
+    ).toBe(128_000);
+    expect(
+      normalizeApiConfigData({ contextWindow: "many" })?.contextWindow,
+    ).toBe(128_000);
   });
 
   it("defaults an empty config to Zen and preserves custom mode", () => {

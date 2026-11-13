@@ -3,6 +3,10 @@ import {
   inferProviderFromBaseUrl,
   isKnownProviderId,
 } from "@/utils/providers";
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  MIN_CONTEXT_WINDOW,
+} from "@/utils/tokens";
 import type {
   ApplicationStatus,
   Certification,
@@ -357,6 +361,12 @@ export function normalizeApiConfigData(value: unknown): ApiConfig | null {
       typeof value.reasoningEffort === "string" && value.reasoningEffort
         ? value.reasoningEffort
         : null,
+    contextWindow:
+      typeof value.contextWindow === "number" &&
+      Number.isFinite(value.contextWindow) &&
+      value.contextWindow >= MIN_CONTEXT_WINDOW
+        ? Math.floor(value.contextWindow)
+        : DEFAULT_CONTEXT_WINDOW,
     webSearchEnabled: asBoolean(value.webSearchEnabled),
     systemPromptMode: value.systemPromptMode === "custom" ? "custom" : "standard",
     customSystemPrompt: asString(value.customSystemPrompt),
