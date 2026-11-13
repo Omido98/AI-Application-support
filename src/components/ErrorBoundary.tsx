@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { flushAllSaves } from "@/utils/flushSaves";
+import { logToFileInBackground } from "@/utils/diagnostics";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -28,6 +29,9 @@ export default class ErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[app] Unhandled render error:", error, info.componentStack);
+    logToFileInBackground(
+      `[render] ${error.name}: ${error.message}\n${info.componentStack ?? ""}`,
+    );
     // Give any debounced edit one last chance to reach disk before the user
     // reloads.
     void flushAllSaves();

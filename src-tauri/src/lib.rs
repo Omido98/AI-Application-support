@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -14,6 +15,8 @@ use tauri::ipc::Channel;
 use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio_util::sync::CancellationToken;
+
+mod logging;
 
 /// Service name under which API keys are stored in the OS keychain.
 const KEYCHAIN_SERVICE: &str = "com.ai-application-support.app";
@@ -1016,24 +1019,181 @@ fn collect_text(
     false
 }
 
-/// Fetch a web page and return its plain text (tags stripped, ~8000 chars max),
-/// so the chat agent can read an actual company page.
-#[tauri::command]
-async fn zen_fetch_page(clients: State<'_, HttpClients>, url: String) -> Result<String, String> {
-    let parsed =
-        reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
-    let scheme = parsed.scheme();
+/// Maximum number of HTTP redirects "zen_fetch_page" will follow. Every hop is
+/// re-validated so a public URL cannot bounce the request onto localhost or a
+/// cloud metadata endpoint.
+const MAX_FETCH_REDIRECTS: usize = 5;
+
+/// True when an address is loopback, private, link-local or otherwise not a
+/// normal public internet destination. Chat models can be talked into fetching
+/// arbitrary URLs, so the page tool must never reach the user's LAN, the local
+/// machine, or a cloud metadata service.
+fn is_internal_ipv4(ip: Ipv4Addr) -> bool {
+    let o = ip.octets();
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_multicast()
+        || ip.is_unspecified()
+        || o[0] == 0 // "this network" 0.0.0.0/8
+        || (o[0] == 100 && (64..=127).contains(&o[1])) // CGNAT 100.64.0.0/10
+        || (o[0] == 198 && (o[1] == 18 || o[1] == 19)) // benchmarking 198.18.0.0/15
+        || (o[0] == 192 && o[1] == 0 && o[2] == 0) // IETF assignments 192.0.0.0/24
+        || o[0] >= 240 // reserved 240.0.0.0/4
+}
+
+fn is_internal_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_internal_ipv4(ip),
+        IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            if ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() {
+                return true;
+            }
+            if (segments[0] & 0xfe00) == 0xfc00 // unique local fc00::/7
+                || (segments[0] & 0xffc0) == 0xfe80 // link local fe80::/10
+                || (segments[0] & 0xffc0) == 0xfec0 // deprecated site local fec0::/10
+                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+            // documentation 2001:db8::/32
+            {
+                return true;
+            }
+
+            // Wrapped IPv4 forms: ::ffff:a.b.c.d (mapped), the deprecated
+            // ::a.b.c.d (compatible), 64:ff9b::/96 (NAT64) and 2002::/16
+            // (6to4) all tunnel an IPv4 address that may itself be internal.
+            let bytes = ip.octets();
+            let mapped = bytes[..10].iter().all(|b| *b == 0)
+                && bytes[10] == 0xff
+                && bytes[11] == 0xff;
+            let compatible = bytes[..12].iter().all(|b| *b == 0)
+                && !(bytes[12] == 0
+                    && bytes[13] == 0
+                    && bytes[14] == 0
+                    && (bytes[15] == 0 || bytes[15] == 1));
+            let nat64 = segments[0] == 0x0064
+                && segments[1] == 0xff9b
+                && segments[2..6].iter().all(|s| *s == 0);
+            let six_to_four = bytes[0] == 0x20 && bytes[1] == 0x02;
+
+            if mapped || compatible || nat64 {
+                return is_internal_ipv4(Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]));
+            }
+            if six_to_four {
+                return is_internal_ipv4(Ipv4Addr::new(bytes[2], bytes[3], bytes[4], bytes[5]));
+            }
+            false
+        }
+    }
+}
+
+/// Validate the static parts of a fetch URL: scheme, credentials, port and
+/// literal IP addresses. DNS names are checked separately once resolved.
+fn validate_fetch_url(url: &reqwest::Url) -> Result<(String, u16), String> {
+    let scheme = url.scheme();
     if scheme != "http" && scheme != "https" {
         return Err(format!("Unsupported URL scheme: {scheme}"));
     }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("URLs with embedded credentials are not allowed".to_string());
+    }
+    let host = url
+        .host_str()
+        .map(|h| h.trim_start_matches('[').trim_end_matches(']'))
+        .filter(|h| !h.is_empty())
+        .ok_or_else(|| "URL has no host".to_string())?;
+    // 80/443 only: public sites live there, while internal services tend to
+    // listen on high ports that would otherwise widen the SSRF surface.
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| "URL has no known port".to_string())?;
+    if port != 80 && port != 443 {
+        return Err(format!("Only ports 80 and 443 can be fetched, got {port}"));
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_internal_ip(ip) {
+            return Err("Refusing to fetch a local or private network address".to_string());
+        }
+    }
+    Ok((host.to_string(), port))
+}
 
-    let mut response = clients
-        .scrape
-        .get(parsed)
+/// Resolve a hostname and reject the whole host when any answer is internal.
+/// Mixed public/private answers are a classic DNS-rebinding setup, so one bad
+/// address is enough to refuse the request.
+async fn resolve_public_addrs(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| format!("Could not resolve {host}: {e}"))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(format!("{host} did not resolve to any address"));
+    }
+    if addrs.iter().any(|addr| is_internal_ip(addr.ip())) {
+        return Err(
+            "Refusing to fetch a hostname that resolves to a local or private network".to_string(),
+        );
+    }
+    Ok(addrs)
+}
+
+/// Send one validated GET and return the response, pinning the connection to
+/// the addresses that were just checked. Pinning closes the TOCTOU window where
+/// reqwest would resolve the name a second time and could be handed a private
+/// address by a rebinding DNS server.
+async fn send_fetch_request(url: &reqwest::Url) -> Result<reqwest::Response, String> {
+    let (host, port) = validate_fetch_url(url)?;
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .user_agent(BROWSER_USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none());
+    if host.parse::<IpAddr>().is_err() {
+        let addrs = resolve_public_addrs(&host, port).await?;
+        builder = builder.resolve_to_addrs(&host, &addrs);
+    }
+    let client = builder
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+    client
+        .get(url.clone())
         .timeout(Duration::from_secs(30))
         .send()
         .await
-        .map_err(|e| format!("Network error: {e}"))?;
+        .map_err(|e| format!("Network error: {e}"))
+}
+
+/// Fetch a web page and return its plain text (tags stripped, ~8000 chars max),
+/// so the chat agent can read an actual company page.
+#[tauri::command]
+async fn zen_fetch_page(url: String) -> Result<String, String> {
+    let mut current =
+        reqwest::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+
+    // Follow redirects by hand so every hop passes the same public-address
+    // checks. reqwest's automatic redirects would happily visit localhost.
+    let mut redirects = 0usize;
+    let mut response = loop {
+        let candidate = send_fetch_request(&current).await?;
+        if !candidate.status().is_redirection() {
+            break candidate;
+        }
+        if redirects >= MAX_FETCH_REDIRECTS {
+            return Err(format!(
+                "Page redirected more than {MAX_FETCH_REDIRECTS} times"
+            ));
+        }
+        redirects += 1;
+        let location = candidate
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| "Redirect response had no Location header".to_string())?;
+        current = current
+            .join(location)
+            .map_err(|e| format!("Invalid redirect URL: {e}"))?;
+    };
 
     if !response.status().is_success() {
         return Err(format!("Page returned HTTP {}", response.status()));
@@ -1799,18 +1959,49 @@ fn keyring_delete(key: String) -> Result<(), String> {
     }
 }
 
+/// Bring the existing window back to the foreground when a second copy of the
+/// app is launched. Without this the second process would exit silently on
+/// some platforms and leave the user staring at nothing, and worse, two
+/// concurrently running instances could overwrite each other's JSON data.
+#[cfg(desktop)]
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Shared across every command for connection/TLS/DNS reuse.
     let http_clients = HttpClients::new().expect("failed to initialise HTTP clients");
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .manage(http_clients)
-        .manage(StreamState::default())
+        .manage(StreamState::default());
+
+    // Register this before any other plugin: it is what decides whether the
+    // current process is the primary instance. A second launch just raises the
+    // existing window and exits, so two instances can never write the same
+    // data files concurrently.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_main_window(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(navigation_guard())
+        .setup(|app| {
+            logging::init(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             zen_list_models,
             zen_chat,
@@ -1826,7 +2017,9 @@ pub fn run() {
             import_backup_file,
             keyring_get,
             keyring_set,
-            keyring_delete
+            keyring_delete,
+            logging::frontend_log,
+            logging::get_diagnostics
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -2185,5 +2378,75 @@ mod tests {
         assert!(!backup_path(&path).exists());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ssrf_guard_rejects_internal_addresses() {
+        for raw in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "172.31.255.254",
+            "192.168.1.10",
+            "169.254.169.254",
+            "0.0.0.0",
+            "100.64.0.1",
+            "198.18.0.1",
+            "192.0.0.8",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::1",
+            "::",
+            "fd12:3456::1",
+            "fe80::1",
+            "ff02::1",
+            "2001:db8::1",
+            "::ffff:127.0.0.1",
+            "::127.0.0.1",
+            "64:ff9b::a00:1",
+            "2002:7f00:1::",
+        ] {
+            let ip: IpAddr = raw.parse().unwrap();
+            assert!(is_internal_ip(ip), "{ip} should be treated as internal");
+        }
+    }
+
+    #[test]
+    fn ssrf_guard_allows_public_addresses() {
+        for raw in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "93.184.216.34",
+            "172.32.0.1",
+            "2606:4700:4700::1111",
+            "64:ff9b::808:808",
+        ] {
+            let ip: IpAddr = raw.parse().unwrap();
+            assert!(!is_internal_ip(ip), "{ip} should be treated as public");
+        }
+    }
+
+    #[test]
+    fn fetch_url_validation_blocks_local_and_unsafe_urls() {
+        let parse = |raw: &str| reqwest::Url::parse(raw).unwrap();
+
+        assert!(validate_fetch_url(&parse("http://127.0.0.1/")).is_err());
+        assert!(validate_fetch_url(&parse("https://169.254.169.254/latest/meta-data")).is_err());
+        assert!(validate_fetch_url(&parse("https://[::1]/")).is_err());
+        assert!(validate_fetch_url(&parse("http://10.0.0.5/")).is_err());
+        // WHATWG URL parsing accepts numeric shorthands for IPv4; they must
+        // not slip past the literal-IP check.
+        assert!(validate_fetch_url(&parse("http://0x7f000001/")).is_err());
+        assert!(validate_fetch_url(&parse("http://2130706433/")).is_err());
+        assert!(validate_fetch_url(&parse("http://127.1/")).is_err());
+        assert!(validate_fetch_url(&parse("ftp://example.com/")).is_err());
+        assert!(validate_fetch_url(&parse("https://user:pass@example.com/")).is_err());
+        assert!(validate_fetch_url(&parse("https://example.com:8443/")).is_err());
+
+        // Hostnames are only checked after DNS resolution; the static rules
+        // still accept ordinary public URLs on ports 80/443.
+        assert!(validate_fetch_url(&parse("https://example.com/jobs")).is_ok());
+        assert!(validate_fetch_url(&parse("http://example.com:80/")).is_ok());
+        assert!(validate_fetch_url(&parse("http://localhost/")).is_ok());
     }
 }

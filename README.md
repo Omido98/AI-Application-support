@@ -32,7 +32,8 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   previous cover letters, and a public profile (e.g. LinkedIn) URL that the
   AI can reference.
 - **Settings** — theme, accent colour, AI provider/model/context window, backup
-  and restore, and update checks.
+  and restore, update checks, and a **Copy diagnostics** report with versions,
+  data-file sizes and the recent log.
 - **Backup & restore** — export all your data (applications, chat threads,
   drafts, profile, settings, API config) to a single JSON file and import it
   back. API keys are never included in a backup.
@@ -73,6 +74,15 @@ Changes are auto-saved (debounced) and flushed when you close the app. Writes
 are atomic and keep a `.bak` copy of the previous version; if a file is
 damaged, the app restores it from the backup and shows a warning instead of
 silently starting empty. Exported backups never include your API key.
+
+Only one copy of the app can run at a time; launching it again brings the
+existing window forward instead of letting two instances overwrite the same
+files.
+
+Logs stay on your machine in the app log directory
+(`ai-application-support.log`, rotated at 2 MB). They are only read when you
+click **Copy diagnostics** in Settings, which also includes app/OS versions and
+data-file names and sizes — never API keys or chat contents.
 
 ## Development
 
@@ -129,5 +139,9 @@ repository secrets to be set before tagging (generate a key pair with
 - All network requests (model lists, chat completions, web search, page
   fetch) run through the Rust backend, so the webview never hits CORS
   restrictions and the frontend CSP stays locked down.
+- The `fetch_page` tool only reaches public `http`/`https` hosts on ports
+  80/443. Loopback, private, link-local and cloud-metadata addresses are
+  rejected, including on every redirect hop, and the resolved address is
+  pinned for the connection to prevent DNS rebinding.
 - Settings and theme are applied after load to avoid a light/dark flash on
   startup.

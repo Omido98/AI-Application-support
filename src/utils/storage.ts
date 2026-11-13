@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "@/utils/runtime";
+import { logToFileInBackground } from "@/utils/diagnostics";
 
 /**
  * JSON persistence for the app's data directory.
@@ -54,6 +55,12 @@ function reportIssue(
   };
   issues = [...issues.slice(-(MAX_VISIBLE_ISSUES - 1)), issue];
   notifyIssueListeners();
+  // Keep a durable trail in the log file so "Copy diagnostics" can explain a
+  // failure that the user dismissed long ago.
+  logToFileInBackground(
+    `[storage:${kind}] ${file}: ${message}`,
+    kind === "recovery" ? "warn" : "error",
+  );
 }
 
 function errorMessage(err: unknown): string {

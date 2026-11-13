@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { Check, Moon, Plus, Sun, Download, Upload } from "lucide-react";
+import {
+  Check,
+  ClipboardCopy,
+  Moon,
+  Plus,
+  Sun,
+  Download,
+  Upload,
+} from "lucide-react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -15,6 +23,10 @@ import {
 import { saveJson, deleteFile } from "@/utils/storage";
 import { exportBackupFile, importBackupFile } from "@/utils/backupFiles";
 import { flushAllSaves } from "@/utils/flushSaves";
+import {
+  copyDiagnostics,
+  logToFileInBackground,
+} from "@/utils/diagnostics";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
@@ -69,6 +81,9 @@ export default function SettingsDialog({
   const [showPalette, setShowPalette] = useState(false);
 
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [diagnosticsStatus, setDiagnosticsStatus] = useState<string | null>(
+    null,
+  );
   // Bumped after an import so the API form remounts from the restored config
   // instead of writing its pre-import local state back over it.
   const [configFormKey, setConfigFormKey] = useState(0);
@@ -108,9 +123,9 @@ export default function SettingsDialog({
         `Backup exported to ${fileName} (${Object.keys(bundle.files).length} files). Your API key is not included.`,
       );
     } catch (err) {
-      setBackupStatus(
-        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      const message = err instanceof Error ? err.message : String(err);
+      setBackupStatus(`Export failed: ${message}`);
+      logToFileInBackground(`[backup] Export failed: ${message}`);
     }
   };
 
@@ -169,9 +184,9 @@ export default function SettingsDialog({
         `Import complete — ${count} files restored. A safety copy of the previous data was kept as backup-before-import.json.`,
       );
     } catch (err) {
-      setBackupStatus(
-        `Import failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      const message = err instanceof Error ? err.message : String(err);
+      setBackupStatus(`Import failed: ${message}`);
+      logToFileInBackground(`[backup] Import failed: ${message}`);
     }
   };
 
@@ -193,6 +208,9 @@ export default function SettingsDialog({
       setUpdateMessage(
         err instanceof Error ? err.message : "Could not check for updates.",
       );
+      logToFileInBackground(
+        `[update] Check failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -209,6 +227,23 @@ export default function SettingsDialog({
         err instanceof Error
           ? err.message
           : "The update failed to install. Try again later.",
+      );
+      logToFileInBackground(
+        `[update] Install failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  // ── Diagnostics ──
+
+  const handleCopyDiagnostics = async () => {
+    setDiagnosticsStatus(null);
+    try {
+      await copyDiagnostics();
+      setDiagnosticsStatus("Diagnostics copied to the clipboard.");
+    } catch (err) {
+      setDiagnosticsStatus(
+        err instanceof Error ? err.message : "Could not copy diagnostics.",
       );
     }
   };
@@ -395,6 +430,26 @@ export default function SettingsDialog({
               updateMessage && (
                 <p className="text-xs text-destructive">{updateMessage}</p>
               )}
+          </div>
+
+          {/* Diagnostics */}
+          <div className="space-y-2">
+            <Label className="text-text-secondary text-xs">Diagnostics</Label>
+            <Button
+              variant="outline"
+              onClick={() => void handleCopyDiagnostics()}
+              className="justify-center w-full"
+            >
+              <ClipboardCopy className="size-4 mr-1.5" />
+              Copy diagnostics
+            </Button>
+            <p className="text-xs text-text-muted">
+              Copies app and OS versions, data-file names and sizes, and the
+              recent log. API keys and chat contents are never included.
+            </p>
+            {diagnosticsStatus && (
+              <p className="text-xs text-text-muted">{diagnosticsStatus}</p>
+            )}
           </div>
         </div>
       </DialogContent>
