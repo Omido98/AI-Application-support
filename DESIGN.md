@@ -12,7 +12,7 @@ colors:
   primary-hover: "#3bd9a8"
   on-primary: "#0d2b22"
   secondary: "#a8a094"
-  muted: "#8a8376"
+  muted: "#948c7e"
   error: "#f87171"
   on-error: "#330b0b"
   ring: "#34d399"
@@ -257,7 +257,9 @@ same system (mapping at the end of this section).
   list items, focus rings, and the active tab pill. Text on it is deep
   tea-green (`on-primary` #0d2b22).
 - **Secondary (#a8a094):** Warm stone for metadata, inactive pills, captions.
-- **Muted (#8a8376):** Placeholders and helper text only.
+- **Muted (#948c7e):** Placeholders and helper text only. Both themes keep
+  muted text at WCAG AA (4.5:1) against `background`, `surface` and `field`; the
+  light-theme value is deeper (`#6f675a`) to stay above that threshold on paper.
 - **Error (#f87171):** Soft vermilion for destructive actions and failures.
 - **Status chips:** Five tinted chips carry the application pipeline. Each is a
   dark tinted well with a light label: Wishlist (neutral stone), Applied (dusty
@@ -275,7 +277,7 @@ readable foreground automatically.
 |---|---|---|---|
 | background | `#f7f4ef` | foreground | `#1f1b15` |
 | surface | `#ffffff` | secondary | `#6b6357` |
-| surface-alt | `#f1ede6` | muted | `#948c7e` |
+| surface-alt | `#f1ede6` | muted | `#6f675a` |
 | border | `#e3ddd2` | error | `#b91c1c` |
 | primary | `#0f6e5c` | on-primary | `#ffffff` |
 
@@ -396,6 +398,6 @@ navigation moves between tabs.
 - Don't use more than two UI weights (400/600, plus 500 for labels) per view
 - Don't mix corner radii within a single element; pills are only for chips,
   the tab pill, and small jump buttons
-- Do maintain WCAG AA contrast (4.5:1 for normal text) against `background`
-  and `surface` at all times
+- Do maintain WCAG AA contrast (4.5:1 for normal text) against `background`,
+  `surface` and `field` at all times
 - Don't place the accent on large surfaces — it is an instrument, not a wall

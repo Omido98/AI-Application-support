@@ -1,13 +1,28 @@
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { useChatStore, messageKey } from "@/stores/chatStore";
+import {
+  isConversationMessage,
+  messageKey,
+  useChatStore,
+} from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
-import { deepImproveDraft, deslopText, improveDraft, reviewDraft } from "@/utils/api";
-import type { ImproveStep } from "@/utils/api";
+import {
+  deepImproveDraft,
+  deslopText,
+  improveDraft,
+  reviewDraft,
+} from "@/utils/api";
+import type { ImproveStep, ToolActivity } from "@/utils/api";
 import { cn } from "@/lib/utils";
+import Markdown from "@/components/chat/Markdown";
+import ReviewCard from "@/components/chat/ReviewCard";
+import StreamingBubble from "@/components/chat/StreamingBubble";
+import SuggestionCard from "@/components/chat/SuggestionCard";
 import { Button } from "@/components/ui/button";
+import { formatTokenCount } from "@/utils/tokens";
+import { openExternalUrl } from "@/utils/links";
+import { formatUsageCost } from "@/utils/zenPricing";
+import { applicationContextFrom } from "@/utils/systemPrompt";
 import {
   Copy,
   Check,
@@ -20,16 +35,67 @@ import {
   Zap,
   RotateCcw,
   RefreshCw,
+  Link2,
+  FileDown,
+  X,
+  type LucideIcon,
 } from "lucide-react";
-import type { ProfileData } from "@/types";
+import type { ProfileData, WebSource } from "@/types";
+import { exportCoverLetter, type ExportFormat } from "@/utils/documentExport";
 
-function LoadingDots() {
+function sourceLabel(title: string, url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "") || title;
+  } catch {
+    return title;
+  }
+}
+
+/** Short local clock time plus a full, hoverable/AT-friendly label. */
+function formatMessageTime(timestamp: string): { label: string; full: string } {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return { label: "", full: "" };
+  return {
+    label: date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    full: date.toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }),
+  };
+}
+
+/** One item in the assistant message's "Refine" menu. */
+function RefineItem({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  pending,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  pending?: boolean;
+}) {
   return (
-    <div className="flex items-center gap-1.5 px-4 py-3">
-      <span className="size-2 rounded-full bg-text-muted animate-bounce [animation-delay:0ms]" />
-      <span className="size-2 rounded-full bg-text-muted animate-bounce [animation-delay:150ms]" />
-      <span className="size-2 rounded-full bg-text-muted animate-bounce [animation-delay:300ms]" />
-    </div>
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-secondary transition-colors hover:bg-field hover:text-text-primary disabled:pointer-events-none disabled:opacity-50"
+    >
+      {pending ? (
+        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+      ) : (
+        <Icon className="size-3.5" aria-hidden="true" />
+      )}
+      {label}
+    </button>
   );
 }
 
@@ -46,20 +112,24 @@ export default function MessageList({
 }) {
   const messages = useChatStore((s) => s.messages);
   const isSending = useChatStore((s) => s.isSending);
-  const streamingText = useChatStore((s) => s.streamingText);
   const error = useChatStore((s) => s.error);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const lastMessageRef = useRef<{ role: "user" | "assistant"; timestamp: string } | null>(
-    null,
-  );
+  const lastMessageRef = useRef<{
+    role: "user" | "assistant";
+    timestamp: string;
+  } | null>(null);
   const [stickyToBottom, setStickyToBottom] = useState(true);
+  const stickyRef = useRef(true);
+  const scrollRafRef = useRef<number | null>(null);
 
   const applications = useApplicationStore((s) => s.applications);
   const selectedId = useApplicationStore((s) => s.selectedApplicationId);
   const addCoverLetter = useProfileStore((s) => s.addCoverLetter);
   const config = useChatStore((s) => s.config);
-  const addMessage = useChatStore((s) => s.addMessage);
+  const appendMessageToThread = useChatStore((s) => s.appendMessageToThread);
+  const removeMessageInThread = useChatStore((s) => s.removeMessageInThread);
+  const acceptSuggestion = useChatStore((s) => s.acceptSuggestion);
   const setError = useChatStore((s) => s.setError);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -67,14 +137,51 @@ export default function MessageList({
   const [deslopPendingId, setDeslopPendingId] = useState<string | null>(null);
   const [reviewPendingId, setReviewPendingId] = useState<string | null>(null);
   const [improvePendingId, setImprovePendingId] = useState<string | null>(null);
-  const [deepImprovePendingId, setDeepImprovePendingId] = useState<string | null>(null);
+  const [deepImprovePendingId, setDeepImprovePendingId] = useState<
+    string | null
+  >(null);
+  const [openRefineKey, setOpenRefineKey] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<{
+    key: string;
+    format: ExportFormat;
+  } | null>(null);
   const [improveStep, setImproveStep] = useState<ImproveStep | null>(null);
   const [improvePreview, setImprovePreview] = useState("");
+  const [actionActivity, setActionActivity] = useState<ToolActivity | null>(
+    null,
+  );
+  const actionControllerRef = useRef<AbortController | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const anyActionPending = !!(
-    deslopPendingId || reviewPendingId || improvePendingId || deepImprovePendingId
+    deslopPendingId ||
+    reviewPendingId ||
+    improvePendingId ||
+    deepImprovePendingId
   );
+
+  /** Refine actions must not overlap a chat generation or another action. */
+  const actionsBlocked = isSending || anyActionPending;
+
+  /** Refuse to write a result into an application that was deleted meanwhile. */
+  const threadStillExists = (threadId: string) =>
+    useApplicationStore
+      .getState()
+      .applications.some((app) => app.id === threadId);
+
+  /**
+   * Errors belong to the thread the action started in. If the user has moved
+   * on, keep the current thread calm and leave a breadcrumb for debugging.
+   */
+  const reportActionError = (threadId: string, message: string) => {
+    if (useChatStore.getState().activeThreadId === threadId) {
+      setError(message);
+    } else {
+      console.warn(
+        `[chat] Action failed in inactive thread ${threadId}: ${message}`,
+      );
+    }
+  };
 
   const STEP_LABELS: Record<ImproveStep, string> = {
     review: "Reviewing draft…",
@@ -83,8 +190,49 @@ export default function MessageList({
     verify: "Verifying…",
   };
 
-  const application =
-    applications.find((a) => a.id === selectedId) ?? null;
+  const actionLabel = improveStep
+    ? STEP_LABELS[improveStep]
+    : reviewPendingId
+      ? "Reviewing draft…"
+      : deslopPendingId
+        ? "Polishing draft…"
+        : "Working…";
+
+  const stopAction = () => actionControllerRef.current?.abort();
+
+  useEffect(() => {
+    if (!anyActionPending) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      actionControllerRef.current?.abort();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [anyActionPending]);
+
+  useEffect(() => {
+    if (!openRefineKey) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenRefineKey(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [openRefineKey]);
+
+  const handleAcceptSuggestion = async (msg: (typeof messages)[number]) => {
+    const threadId = useChatStore.getState().activeThreadId;
+    if (!threadId || !msg.sourceKey) return;
+    await acceptSuggestion(threadId, messageKey(msg), msg.sourceKey);
+  };
+
+  const handleDiscardMessage = async (msg: (typeof messages)[number]) => {
+    const threadId = useChatStore.getState().activeThreadId;
+    if (!threadId) return;
+    await removeMessageInThread(threadId, messageKey(msg));
+  };
+
+  const application = applications.find((a) => a.id === selectedId) ?? null;
 
   const company = application?.companyName ?? "";
 
@@ -94,7 +242,8 @@ export default function MessageList({
   useEffect(() => {
     const last = messages[messages.length - 1] ?? null;
     const isNewUserMessage =
-      last?.role === "user" && lastMessageRef.current?.timestamp !== last.timestamp;
+      last?.role === "user" &&
+      lastMessageRef.current?.timestamp !== last.timestamp;
     lastMessageRef.current = last;
 
     if (isNewUserMessage || stickyToBottom) {
@@ -102,7 +251,31 @@ export default function MessageList({
         behavior: isSending ? "auto" : "smooth",
       });
     }
-  }, [messages, isSending, streamingText, stickyToBottom]);
+  }, [messages, isSending, stickyToBottom]);
+
+  useEffect(() => {
+    stickyRef.current = stickyToBottom;
+  }, [stickyToBottom]);
+
+  // Follow the streamed text without re-rendering the whole list: subscribe
+  // to the store directly and coalesce scroll work into one animation frame.
+  useEffect(() => {
+    const unsubscribe = useChatStore.subscribe((state, previous) => {
+      if (state.streamingText === previous.streamingText) return;
+      if (!stickyRef.current || scrollRafRef.current !== null) return;
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        bottomRef.current?.scrollIntoView({ behavior: "auto" });
+      });
+    });
+    return () => {
+      unsubscribe();
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, []);
 
   const handleScroll = () => {
     const el = containerRef.current;
@@ -149,57 +322,127 @@ export default function MessageList({
     addCoverLetter({
       id: crypto.randomUUID(),
       company: company || undefined,
+      applicationId: application?.id,
       content,
       addedAt: new Date().toISOString(),
     });
     flashFeedback(msgId, setSavedId);
   };
 
+  const handleExport = async (
+    key: string,
+    content: string,
+    format: ExportFormat,
+  ) => {
+    setOpenRefineKey(null);
+    setExporting({ key, format });
+    try {
+      await exportCoverLetter(content, company, format);
+    } catch (err) {
+      setError(
+        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setExporting(null);
+    }
+  };
+
   const handleDeslop = async (msgId: string, content: string) => {
-    if (!content.trim() || deslopPendingId) return;
-    setDeslopPendingId(msgId);
-    setError(null);
-    const result = await deslopText(content, config);
-    setDeslopPendingId(null);
-    if (result.error) {
-      setError(result.error);
+    const threadId = useChatStore.getState().activeThreadId;
+    if (
+      !content.trim() ||
+      deslopPendingId ||
+      anyActionPending ||
+      !threadId ||
+      useChatStore.getState().isSending
+    ) {
       return;
     }
-    if (result.content.trim()) {
-      addMessage({
+    const controller = new AbortController();
+    actionControllerRef.current = controller;
+    setDeslopPendingId(msgId);
+    setActionActivity(null);
+    setError(null);
+    const sources: WebSource[] = [];
+    const result = await deslopText(content, config, {
+      signal: controller.signal,
+      onSource: (source) => {
+        if (!sources.some((entry) => entry.url === source.url)) {
+          sources.push(source);
+        }
+      },
+    });
+    setDeslopPendingId(null);
+    setActionActivity(null);
+    if (actionControllerRef.current === controller) {
+      actionControllerRef.current = null;
+    }
+    if (controller.signal.aborted || result.stopped) return;
+    if (result.error) {
+      reportActionError(threadId, result.error);
+      return;
+    }
+    if (result.content.trim() && threadStillExists(threadId)) {
+      await appendMessageToThread(threadId, {
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
+        kind: "deslop",
+        sourceKey: msgId,
+        ...(sources.length > 0 ? { sources } : {}),
       });
     }
   };
 
   const handleReview = async (msgId: string, content: string) => {
-    if (!content.trim() || reviewPendingId || !application) return;
-    setReviewPendingId(msgId);
-    setError(null);
-
-    const appCtx = {
-      company: application.companyName,
-      jobDescription: application.jobDescription,
-      language: application.applicationLanguage,
-      requirements: application.requirements,
-      companyResearch: application.companyResearch,
-    };
-
-    const profileData = await loadProfileData();
-
-    const result = await reviewDraft(content, appCtx, profileData, config);
-    setReviewPendingId(null);
-    if (result.error) {
-      setError(result.error);
+    const threadId = useChatStore.getState().activeThreadId;
+    if (
+      !content.trim() ||
+      reviewPendingId ||
+      anyActionPending ||
+      !application ||
+      !threadId ||
+      useChatStore.getState().isSending
+    ) {
       return;
     }
-    if (result.content.trim()) {
-      addMessage({
+    const controller = new AbortController();
+    actionControllerRef.current = controller;
+    setReviewPendingId(msgId);
+    setActionActivity(null);
+    setError(null);
+
+    const appCtx = applicationContextFrom(application);
+
+    const profileData = await loadProfileData();
+    const sources: WebSource[] = [];
+    const result = await reviewDraft(content, appCtx, profileData, config, {
+      signal: controller.signal,
+      onToolActivity: setActionActivity,
+      onSource: (source) => {
+        if (!sources.some((entry) => entry.url === source.url)) {
+          sources.push(source);
+        }
+      },
+    });
+    setReviewPendingId(null);
+    setActionActivity(null);
+    if (actionControllerRef.current === controller) {
+      actionControllerRef.current = null;
+    }
+    if (controller.signal.aborted || result.stopped) return;
+    if (result.error) {
+      reportActionError(threadId, result.error);
+      return;
+    }
+    if (result.content.trim() && threadStillExists(threadId)) {
+      await appendMessageToThread(threadId, {
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
+        kind: "review",
+        sourceKey: msgId,
+        ...(sources.length > 0 ? { sources } : {}),
       });
     }
   };
@@ -239,31 +482,46 @@ export default function MessageList({
     content: string,
     depth: "quick" | "deep",
   ) => {
+    const threadId = useChatStore.getState().activeThreadId;
     const pending = depth === "deep" ? deepImprovePendingId : improvePendingId;
-    if (!content.trim() || pending || !application) return;
+    if (
+      !content.trim() ||
+      pending ||
+      anyActionPending ||
+      !application ||
+      !threadId ||
+      useChatStore.getState().isSending
+    ) {
+      return;
+    }
     if (depth === "deep") setDeepImprovePendingId(msgId);
     else setImprovePendingId(msgId);
+    const controller = new AbortController();
+    actionControllerRef.current = controller;
     setImproveStep("review");
     setImprovePreview("");
+    setActionActivity(null);
     setError(null);
 
-    const appCtx = {
-      company: application.companyName,
-      jobDescription: application.jobDescription,
-      language: application.applicationLanguage,
-      requirements: application.requirements,
-      companyResearch: application.companyResearch,
-    };
+    const appCtx = applicationContextFrom(application);
 
     const profileData = await loadProfileData();
+    const sources: WebSource[] = [];
 
     const options = {
+      signal: controller.signal,
       onStep: (step: ImproveStep) => {
         setImproveStep(step);
         // The revise pass streams live; the other steps replace the preview.
         if (step !== "revise") setImprovePreview("");
       },
       onDelta: (text: string) => setImprovePreview((prev) => prev + text),
+      onToolActivity: setActionActivity,
+      onSource: (source: WebSource) => {
+        if (!sources.some((entry) => entry.url === source.url)) {
+          sources.push(source);
+        }
+      },
     };
 
     const result =
@@ -275,20 +533,41 @@ export default function MessageList({
     setDeepImprovePendingId(null);
     setImproveStep(null);
     setImprovePreview("");
+    setActionActivity(null);
+    if (actionControllerRef.current === controller) {
+      actionControllerRef.current = null;
+    }
+    if (controller.signal.aborted || result.stopped) return;
     if (result.error) {
-      setError(result.error);
+      reportActionError(threadId, result.error);
       return;
     }
-    if (result.content.trim()) {
-      addMessage({
+    if (result.content.trim() && threadStillExists(threadId)) {
+      await appendMessageToThread(threadId, {
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
+        kind: "improve",
+        sourceKey: msgId,
+        ...(sources.length > 0 ? { sources } : {}),
       });
     }
   };
 
-  if (messages.length === 0 && !isSending) {
+  const lastConversationKey = (() => {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (isConversationMessage(messages[index])) {
+        return messageKey(messages[index]);
+      }
+    }
+    return null;
+  })();
+
+  const hasVisibleMessages = messages.some(
+    (message) => message.kind !== "summary",
+  );
+
+  if (!hasVisibleMessages && !isSending) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center max-w-md space-y-4">
@@ -315,21 +594,52 @@ export default function MessageList({
       className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
     >
       {messages.map((msg) => {
+        if (msg.kind === "summary") return null;
         const isUser = msg.role === "user";
         const key = messageKey(msg);
+        const time = formatMessageTime(msg.timestamp);
         const feedback =
-          copiedId === key
-            ? "copied"
-            : savedId === key
-              ? "saved"
-              : null;
+          copiedId === key ? "copied" : savedId === key ? "saved" : null;
+
+        if (!isUser && (msg.kind === "improve" || msg.kind === "deslop")) {
+          const source = msg.sourceKey
+            ? (messages.find(
+                (candidate) => messageKey(candidate) === msg.sourceKey,
+              ) ?? null)
+            : null;
+          return (
+            <div key={key} className="flex justify-start">
+              <SuggestionCard
+                message={msg}
+                source={source}
+                onAccept={() => void handleAcceptSuggestion(msg)}
+                onDiscard={() => void handleDiscardMessage(msg)}
+              />
+            </div>
+          );
+        }
+
+        if (!isUser && msg.kind === "review") {
+          const source = msg.sourceKey
+            ? (messages.find(
+                (candidate) => messageKey(candidate) === msg.sourceKey,
+              ) ?? null)
+            : null;
+          return (
+            <div key={key} className="flex justify-start">
+              <ReviewCard
+                message={msg}
+                source={source}
+                onDiscard={() => void handleDiscardMessage(msg)}
+              />
+            </div>
+          );
+        }
+
         return (
           <div
             key={key}
-            className={cn(
-              "flex",
-              isUser ? "justify-end" : "justify-start",
-            )}
+            className={cn("flex", isUser ? "justify-end" : "justify-start")}
           >
             {isUser && msg.failed && (
               <div className="flex flex-col gap-1 pr-2 justify-start">
@@ -348,54 +658,105 @@ export default function MessageList({
 
             <div
               className={cn(
-                "whitespace-pre-wrap break-words",
-                isUser
-                  ? "max-w-[80%] rounded-lg px-4 py-3 text-sm leading-relaxed bg-primary text-primary-foreground"
-                  : "max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3",
+                "flex flex-col",
+                isUser ? "items-end max-w-[80%]" : "items-start max-w-[75ch]",
               )}
             >
-              {isUser ? (
-                <p>{msg.content}</p>
-              ) : (
-                <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.content}
-                  </ReactMarkdown>
-                </div>
+              <div
+                className={cn(
+                  "whitespace-pre-wrap break-words",
+                  isUser
+                    ? "rounded-lg px-4 py-3 text-sm leading-relaxed bg-primary text-primary-foreground"
+                    : "rounded-lg bg-surface text-text-primary border border-border px-4 py-3",
+                )}
+              >
+                {isUser ? (
+                  <p>{msg.content}</p>
+                ) : (
+                  <Markdown>{msg.content}</Markdown>
+                )}
+
+                {!isUser && msg.sources && msg.sources.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/60 pt-2">
+                    {msg.sources.map((source) => (
+                      <button
+                        key={source.url}
+                        type="button"
+                        onClick={() => openExternalUrl(source.url)}
+                        title={`${source.title} — ${source.url}`}
+                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-field px-2 py-0.5 text-[10px] text-text-secondary transition-colors hover:border-primary/40 hover:text-primary"
+                      >
+                        <Link2 className="size-3 shrink-0" aria-hidden="true" />
+                        <span className="truncate">
+                          {sourceLabel(source.title, source.url)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {!isUser && msg.usage && (
+                  <p className="mt-1.5 font-mono text-[10px] leading-none text-text-muted">
+                    {[
+                      msg.usage.inputTokens !== undefined
+                        ? `${formatTokenCount(msg.usage.inputTokens)} in`
+                        : null,
+                      msg.usage.outputTokens !== undefined
+                        ? `${formatTokenCount(msg.usage.outputTokens)} out`
+                        : null,
+                      msg.costUsd !== undefined
+                        ? formatUsageCost(msg.costUsd)
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
+              </div>
+
+              {time.label && (
+                <time
+                  dateTime={msg.timestamp}
+                  title={time.full}
+                  aria-label={`Sent ${time.full}`}
+                  className="mt-1 select-text px-0.5 font-mono text-[10px] leading-none text-text-muted"
+                >
+                  {time.label}
+                </time>
               )}
             </div>
 
             {!isUser && (
-              <div className="flex flex-col gap-1 pl-2 justify-start">
-                {messages[messages.length - 1] === msg && (
+              <div className="relative flex flex-col gap-0.5 pl-1">
+                {lastConversationKey === key && (
                   <button
                     type="button"
                     onClick={() => onRegenerate?.(key)}
                     disabled={isSending || anyActionPending}
-                    className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
+                    className="rounded p-1 text-text-muted transition-colors hover:text-text-primary disabled:opacity-50"
                     title="Regenerate answer"
                     aria-label="Regenerate answer"
                   >
-                    <RefreshCw className="size-3.5" />
+                    <RefreshCw className="size-4" />
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => handleCopy(key, msg.content)}
-                  className="text-text-muted hover:text-text-primary transition-colors"
+                  className="rounded p-1 text-text-muted transition-colors hover:text-text-primary"
                   title={feedback === "copied" ? "Copied!" : "Copy"}
                   aria-label="Copy message"
                 >
                   {feedback === "copied" ? (
-                    <Check className="size-3.5 text-green-400" />
+                    <Check className="size-4 text-green-400" />
                   ) : (
-                    <Copy className="size-3.5" />
+                    <Copy className="size-4" />
                   )}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSaveAsCoverLetter(key, msg.content)}
-                  className="text-text-muted hover:text-text-primary transition-colors"
+                  className="rounded p-1 text-text-muted transition-colors hover:text-text-primary"
                   title={
                     feedback === "saved"
                       ? "Saved to Profile"
@@ -404,120 +765,123 @@ export default function MessageList({
                   aria-label="Save as cover letter"
                 >
                   {feedback === "saved" ? (
-                    <Check className="size-3.5 text-green-400" />
+                    <Check className="size-4 text-green-400" />
                   ) : (
-                    <BookmarkPlus className="size-3.5" />
+                    <BookmarkPlus className="size-4" />
                   )}
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDeslop(key, msg.content)}
-                  disabled={anyActionPending}
-                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-                  title={
-                    deslopPendingId === key
-                      ? "Removing AI slop…"
-                      : "Remove AI slop"
+                  onClick={() =>
+                    setOpenRefineKey(openRefineKey === key ? null : key)
                   }
-                  aria-label="Remove AI slop"
+                  disabled={actionsBlocked}
+                  className={
+                    openRefineKey === key
+                      ? "rounded bg-field p-1 text-text-primary transition-colors disabled:opacity-50"
+                      : "rounded p-1 text-text-muted transition-colors hover:text-text-primary disabled:opacity-50"
+                  }
+                  title="Draft actions"
+                  aria-label="Draft actions"
+                  aria-haspopup="menu"
+                  aria-expanded={openRefineKey === key}
                 >
-                  {deslopPendingId === key ? (
-                    <Loader2 className="size-3.5 animate-spin" />
+                  {reviewPendingId === key ||
+                  improvePendingId === key ||
+                  deepImprovePendingId === key ||
+                  deslopPendingId === key ||
+                  exporting?.key === key ? (
+                    <Loader2 className="size-4 animate-spin" />
                   ) : (
-                    <Sparkles className="size-3.5" />
+                    <Sparkles className="size-4" />
                   )}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleReview(key, msg.content)}
-                  disabled={anyActionPending}
-                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-                  title={
-                    reviewPendingId === key
-                      ? "Reviewing draft…"
-                      : "Review draft"
-                  }
-                  aria-label="Review draft"
-                >
-                  {reviewPendingId === key ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <ShieldCheck className="size-3.5" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runImprove(key, msg.content, "quick")}
-                  disabled={anyActionPending}
-                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-                  title={
-                    improvePendingId === key
-                      ? (improveStep ? STEP_LABELS[improveStep] : "Improving draft…")
-                      : "Improve draft"
-                  }
-                  aria-label="Improve draft"
-                >
-                  {improvePendingId === key ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Wand2 className="size-3.5" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runImprove(key, msg.content, "deep")}
-                  disabled={anyActionPending}
-                  className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-                  title={
-                    deepImprovePendingId === key
-                      ? (improveStep ? STEP_LABELS[improveStep] : "Deep improving draft…")
-                      : "Deep improve draft"
-                  }
-                  aria-label="Deep improve draft"
-                >
-                  {deepImprovePendingId === key ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Zap className="size-3.5" />
-                  )}
-                </button>
+
+                {openRefineKey === key && (
+                  <div
+                    role="menu"
+                    aria-label="Draft actions"
+                    className="absolute right-full top-0 z-20 mr-1 w-48 rounded-md border border-border bg-popover p-1 shadow-lg"
+                  >
+                    <RefineItem
+                      icon={ShieldCheck}
+                      label="Review draft"
+                      pending={reviewPendingId === key}
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        void handleReview(key, msg.content);
+                      }}
+                    />
+                    <RefineItem
+                      icon={Wand2}
+                      label="Improve draft"
+                      pending={improvePendingId === key}
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        void runImprove(key, msg.content, "quick");
+                      }}
+                    />
+                    <RefineItem
+                      icon={Zap}
+                      label="Deep improve"
+                      pending={deepImprovePendingId === key}
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        void runImprove(key, msg.content, "deep");
+                      }}
+                    />
+                    <RefineItem
+                      icon={Sparkles}
+                      label="Remove AI slop"
+                      pending={deslopPendingId === key}
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        void handleDeslop(key, msg.content);
+                      }}
+                    />
+                    <div
+                      role="separator"
+                      className="my-1 border-t border-border"
+                    />
+                    <RefineItem
+                      icon={FileDown}
+                      label="Export as PDF"
+                      pending={
+                        exporting?.key === key && exporting.format === "pdf"
+                      }
+                      disabled={actionsBlocked || exporting !== null}
+                      onClick={() => void handleExport(key, msg.content, "pdf")}
+                    />
+                    <RefineItem
+                      icon={FileDown}
+                      label="Export as DOCX"
+                      pending={
+                        exporting?.key === key && exporting.format === "docx"
+                      }
+                      disabled={actionsBlocked || exporting !== null}
+                      onClick={() =>
+                        void handleExport(key, msg.content, "docx")
+                      }
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
         );
       })}
 
-      {isSending && streamingText ? (
-        <div className="flex justify-start">
-          <div className="max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3 break-words">
-            <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {streamingText}
-              </ReactMarkdown>
-            </div>
-            <span
-              className="inline-block w-2 h-4 align-middle bg-primary/70 animate-pulse ml-0.5"
-              aria-hidden="true"
-            />
-          </div>
-        </div>
-      ) : isSending ? (
-        <div className="flex justify-start">
-          <div className="max-w-[80%] rounded-lg bg-surface text-text-primary border border-border">
-            <LoadingDots />
-          </div>
-        </div>
-      ) : null}
+      <StreamingBubble />
 
       {(improvePendingId || deepImprovePendingId) && improveStep ? (
         <div className="flex justify-start">
           {improvePreview ? (
             <div className="max-w-[75ch] rounded-lg bg-surface text-text-primary border border-border px-4 py-3 break-words">
-              <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {improvePreview}
-                </ReactMarkdown>
-              </div>
+              <Markdown>{improvePreview}</Markdown>
               <span
                 className="inline-block w-2 h-4 align-middle bg-primary/70 animate-pulse ml-0.5"
                 aria-hidden="true"
@@ -536,10 +900,45 @@ export default function MessageList({
         </div>
       ) : null}
 
+      {anyActionPending && (
+        <div
+          role="status"
+          className="flex items-center justify-center gap-2 text-xs text-text-muted"
+        >
+          <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+          <span>
+            {actionActivity
+              ? actionActivity.tool === "web_search"
+                ? `Searching the web: ${actionActivity.detail}`
+                : `Reading: ${actionActivity.detail}`
+              : actionLabel}
+          </span>
+          <button
+            type="button"
+            onClick={stopAction}
+            className="text-primary hover:text-primary/80"
+          >
+            Stop
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="flex justify-center">
-          <div className="bg-destructive/10 text-destructive text-sm rounded-lg px-4 py-2 border border-destructive/20 max-w-lg text-center">
+          <div
+            role="alert"
+            className="relative max-w-lg rounded-lg border border-destructive/20 bg-destructive/10 py-2 pl-4 pr-9 text-center text-sm text-destructive"
+          >
             {error}
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              title="Dismiss"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-destructive/70 transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"
+            >
+              <X className="size-3.5" />
+            </button>
           </div>
         </div>
       )}

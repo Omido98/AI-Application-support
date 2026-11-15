@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   estimateTokens,
+  formatTokenCount,
   formatTokenEstimate,
   TOKEN_WARN_THRESHOLD,
 } from "@/utils/tokens";
@@ -20,6 +21,14 @@ describe("formatTokenEstimate", () => {
     expect(formatTokenEstimate(900)).toBe("~900 tokens");
     expect(formatTokenEstimate(1234)).toBe("~1.2k tokens");
     expect(formatTokenEstimate(123456)).toBe("~123k tokens");
+  });
+});
+
+describe("formatTokenCount", () => {
+  it("formats a limit without the estimate tilde", () => {
+    expect(formatTokenCount(900)).toBe("900");
+    expect(formatTokenCount(1_234)).toBe("1.2k");
+    expect(formatTokenCount(118_000)).toBe("118k");
   });
 });
 

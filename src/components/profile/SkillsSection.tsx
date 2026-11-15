@@ -64,9 +64,7 @@ export default function SkillsSection() {
             <Input
               className={inputClass + " flex-1"}
               value={skill.name}
-              onChange={(e) =>
-                updateSkill(skill.id, { name: e.target.value })
-              }
+              onChange={(e) => updateSkill(skill.id, { name: e.target.value })}
               placeholder="e.g. Python, Project Management, Data Analysis"
             />
             <button

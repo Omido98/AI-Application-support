@@ -24,25 +24,64 @@ const STATIC_FILE_NAMES = [
   "profile.json",
   "config.json",
   "settings.json",
+  "drafts.json",
   "zen-prices.json",
 ] as const;
 
 /** Only these safe file names are accepted when restoring a backup. */
 const SAFE_NAME_RE = /^[a-zA-Z0-9._-]+\.json$/;
 
+/** Application ids become part of a chat file name; only UUID-shaped ids are
+ * ever accepted, so malformed data cannot traverse out of the data directory. */
+const SAFE_APPLICATION_ID_RE = /^[a-zA-Z0-9-]+$/;
+
+/** Credential fields that must never leave the machine in a backup file. */
+const CONFIG_SECRET_FIELDS = [
+  "apiKey",
+  "keychainAccount",
+  "sessionKeyOnly",
+] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Strip credential material from a config object. Used on export so a backup
+ * never carries an API key, and on import so an older backup cannot put one
+ * back into config.json.
+ */
+function redactConfig(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const redacted = { ...value };
+  for (const field of CONFIG_SECRET_FIELDS) delete redacted[field];
+  return redacted;
+}
+
+function fileForBackup(name: string, data: unknown): unknown {
+  return name === "config.json" ? redactConfig(data) : data;
+}
+
 export async function buildBackupBundle(): Promise<BackupBundle> {
   const files: Record<string, unknown> = {};
 
   for (const name of STATIC_FILE_NAMES) {
     const data = await loadJson<unknown>(name);
-    if (data != null) files[name] = data;
+    if (data != null) {
+      const safe = fileForBackup(name, data);
+      if (safe != null) files[name] = safe;
+    }
   }
 
   // One chat thread per application
-  const applications = files["applications.json"] as
-    | { applications?: Array<{ id: string }> }
-    | undefined;
-  for (const app of applications?.applications ?? []) {
+  const applications = files["applications.json"];
+  const appList =
+    isRecord(applications) && Array.isArray(applications.applications)
+      ? applications.applications
+      : [];
+  for (const app of appList) {
+    if (!isRecord(app) || typeof app.id !== "string") continue;
+    if (!SAFE_APPLICATION_ID_RE.test(app.id)) continue;
     const name = `chat_${app.id}.json`;
     const data = await loadJson<unknown>(name);
     if (data != null) files[name] = data;
@@ -62,6 +101,13 @@ export function parseBackupBundle(raw: string): BackupBundle | null {
     const parsed = JSON.parse(raw) as BackupBundle;
     if (!parsed || parsed.format !== BACKUP_FORMAT) return null;
     if (typeof parsed.files !== "object" || parsed.files === null) return null;
+    if (
+      typeof parsed.version !== "number" ||
+      parsed.version < 1 ||
+      parsed.version > BACKUP_VERSION
+    ) {
+      return null;
+    }
     return parsed;
   } catch {
     return null;
@@ -75,7 +121,9 @@ export async function restoreBackupBundle(
   const restored: string[] = [];
   for (const [name, data] of Object.entries(bundle.files)) {
     if (!SAFE_NAME_RE.test(name)) continue;
-    await saveJson(name, data);
+    const safe = fileForBackup(name, data);
+    if (safe == null) continue;
+    await saveJson(name, safe);
     restored.push(name);
   }
   return restored;

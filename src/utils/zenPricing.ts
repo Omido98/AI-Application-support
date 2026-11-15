@@ -163,6 +163,29 @@ export function formatModelPrice(
 }
 
 /**
+ * Estimated USD cost of one request from provider-reported token usage.
+ * Returns null when the model has no known price. Free models return 0.
+ */
+export function estimateUsageCost(
+  model: string,
+  usage: { inputTokens?: number; outputTokens?: number },
+): number | null {
+  if (isFreeModel(model)) return 0;
+  const price = ZEN_MODEL_PRICES[model];
+  if (!price) return null;
+  const input = ((usage.inputTokens ?? 0) / 1_000_000) * price.input;
+  const output = ((usage.outputTokens ?? 0) / 1_000_000) * price.output;
+  return input + output;
+}
+
+/** Compact USD label for a per-message cost estimate. */
+export function formatUsageCost(amount: number): string {
+  if (amount === 0) return "free";
+  if (amount < 0.0001) return "<$0.0001";
+  return `$${amount < 0.01 ? amount.toFixed(4) : amount.toFixed(2)}`;
+}
+
+/**
  * Models the Zen /models endpoint still advertises but the Zen docs no
  * longer list (endpoints + pricing tables): they were removed or
  * deprecated upstream and likely no longer work.

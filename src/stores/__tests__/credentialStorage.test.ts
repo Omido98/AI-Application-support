@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Mock } from "vitest";
 
-// storage.ts falls back to localStorage when a read misses; the app-data
-// fake below makes misses throw, so the fallback needs a stub too.
+// storage.ts uses the Tauri-backed command path; the fake below implements
+// those commands in memory. The localStorage stub remains for safety.
+vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
 const storage: Record<string, string> = {};
 vi.stubGlobal("localStorage", {
   getItem: (key: string) => storage[key] ?? null,
@@ -21,28 +23,14 @@ vi.stubGlobal("localStorage", {
   },
 });
 
-vi.mock("@tauri-apps/plugin-fs", () => ({
-  readTextFile: vi.fn(),
-  writeTextFile: vi.fn(),
-  remove: vi.fn(),
-  mkdir: vi.fn(),
-  BaseDirectory: { AppData: 22 },
-}));
-
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
-  Channel: class {
-    onmessage: ((msg: unknown) => void) | null = null;
-  },
 }));
 
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { useChatStore, flushChatSave } from "@/stores/chatStore";
 import { API_KEY_ACCOUNT } from "@/utils/keychain";
 
-const readTextFileMock = readTextFile as Mock;
-const writeTextFileMock = writeTextFile as Mock;
 const invokeMock = invoke as Mock;
 
 /** Fake OS keychain and app data directory behind the mocked transport. */
@@ -54,8 +42,6 @@ let keychainReadBroken = false;
 /** A write that lands but reads back as something else. */
 let keychainCorruptsWrite = false;
 
-const MISSING = new Error("fs: No such file or directory (os error 2)");
-
 /** The persisted config.json, parsed. */
 const persisted = () => {
   const raw = files.get("config.json");
@@ -65,8 +51,6 @@ const persisted = () => {
 beforeEach(async () => {
   await flushChatSave();
   invokeMock.mockReset();
-  readTextFileMock.mockReset();
-  writeTextFileMock.mockReset();
   keychain.clear();
   files.clear();
   for (const key of Object.keys(storage)) delete storage[key];
@@ -74,33 +58,39 @@ beforeEach(async () => {
   keychainReadBroken = false;
   keychainCorruptsWrite = false;
 
-  invokeMock.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
-    switch (cmd) {
-      case "keyring_get":
-        if (keychainReadBroken) throw new Error("Keychain error: locked");
-        return keychain.get(String(args.key)) ?? null;
-      case "keyring_set":
-        if (keychainSetBroken) throw new Error("Keychain error: locked");
-        keychain.set(
-          String(args.key),
-          keychainCorruptsWrite ? "SOMETHING-ELSE" : String(args.value),
-        );
-        return null;
-      case "keyring_delete":
-        keychain.delete(String(args.key));
-        return null;
-      default:
-        return null;
-    }
-  });
-  readTextFileMock.mockImplementation(async (path: string) => {
-    const value = files.get(path);
-    if (value == null) throw MISSING;
-    return value;
-  });
-  writeTextFileMock.mockImplementation(async (path: string, content: string) => {
-    files.set(path, content);
-  });
+  invokeMock.mockImplementation(
+    async (cmd: string, args: Record<string, unknown>) => {
+      switch (cmd) {
+        case "keyring_get":
+          if (keychainReadBroken) throw new Error("Keychain error: locked");
+          return keychain.get(String(args.key)) ?? null;
+        case "keyring_set":
+          if (keychainSetBroken) throw new Error("Keychain error: locked");
+          keychain.set(
+            String(args.key),
+            keychainCorruptsWrite ? "SOMETHING-ELSE" : String(args.value),
+          );
+          return null;
+        case "keyring_delete":
+          keychain.delete(String(args.key));
+          return null;
+        case "save_data_file":
+          files.set(String(args.name), JSON.stringify(args.data));
+          return null;
+        case "load_data_file": {
+          const raw = files.get(String(args.name));
+          return raw == null
+            ? { data: null, recovered: false, error: null }
+            : { data: JSON.parse(raw), recovered: false, error: null };
+        }
+        case "delete_data_file":
+          files.delete(String(args.name));
+          return null;
+        default:
+          return null;
+      }
+    },
+  );
 
   useChatStore.setState({
     configLoaded: false,
@@ -135,7 +125,9 @@ describe("credential storage", () => {
     useChatStore.setState({ configLoaded: false });
     await useChatStore.getState().loadConfig();
     expect(useChatStore.getState().config.apiKey).toBe("K1");
-    expect(useChatStore.getState().config.keychainAccount).toBe(API_KEY_ACCOUNT);
+    expect(useChatStore.getState().config.keychainAccount).toBe(
+      API_KEY_ACCOUNT,
+    );
   });
 
   it("migrates a pre-upgrade plaintext key into the keychain and strips the file", async () => {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { Trash2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import type { OtherEngagement } from "@/types";
+import { YEARS, rangeWarning } from "@/utils/yearOptions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,11 +15,19 @@ import ConfirmDeleteDialog, {
 } from "@/components/profile/ConfirmDeleteDialog";
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
-
-const YEARS = Array.from({ length: 31 }, (_, i) => String(2000 + i));
 
 function createEmptyOtherEngagement(): OtherEngagement {
   return {
@@ -79,7 +88,9 @@ export default function OtherEngagementsSection() {
     }
     const title = [oe.role, oe.organization].filter(Boolean).join(" @ ");
     setDeleteTarget({
-      label: title ? `the engagement entry "${title}"` : "this engagement entry",
+      label: title
+        ? `the engagement entry "${title}"`
+        : "this engagement entry",
       onConfirm: () => removeOtherEngagement(oe.id),
     });
   };
@@ -106,7 +117,9 @@ export default function OtherEngagementsSection() {
   return (
     <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <CardTitle className="text-text-primary text-lg">Other Engagements</CardTitle>
+        <CardTitle className="text-text-primary text-lg">
+          Other Engagements
+        </CardTitle>
         <Button
           variant="outline"
           size="sm"
@@ -120,15 +133,18 @@ export default function OtherEngagementsSection() {
       <CardContent className="space-y-3">
         {otherEngagements.length === 0 && (
           <p className="text-text-muted text-sm text-center py-4">
-            No other engagements yet. Click "Add Other Engagement" to get started.
+            No other engagements yet. Click "Add Other Engagement" to get
+            started.
           </p>
         )}
 
-        {otherEngagements.map((oe) => {
+        {otherEngagements.map((oe, index) => {
           const isExpanded = expanded[oe.id] ?? false;
           const title = [oe.role, oe.organization].filter(Boolean).join(" @ ");
           const dateRange = `${oe.startMonth} ${oe.startYear} – ${
-            oe.isCurrent ? "Present" : `${oe.endMonth ?? ""} ${oe.endYear ?? ""}`
+            oe.isCurrent
+              ? "Present"
+              : `${oe.endMonth ?? ""} ${oe.endYear ?? ""}`
           }`;
 
           return (
@@ -194,23 +210,39 @@ export default function OtherEngagementsSection() {
                     {/* Organization + Role side by side */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">Organization</Label>
+                        <Label
+                          htmlFor={`engagement-${index}-organization`}
+                          className="text-text-secondary text-xs"
+                        >
+                          Organization
+                        </Label>
                         <Input
+                          id={`engagement-${index}-organization`}
                           className={inputClass}
                           value={oe.organization}
                           onChange={(e) =>
-                            updateOtherEngagement(oe.id, { organization: e.target.value })
+                            updateOtherEngagement(oe.id, {
+                              organization: e.target.value,
+                            })
                           }
                           placeholder="e.g. Red Cross"
                         />
                       </div>
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">Role</Label>
+                        <Label
+                          htmlFor={`engagement-${index}-role`}
+                          className="text-text-secondary text-xs"
+                        >
+                          Role
+                        </Label>
                         <Input
+                          id={`engagement-${index}-role`}
                           className={inputClass}
                           value={oe.role}
                           onChange={(e) =>
-                            updateOtherEngagement(oe.id, { role: e.target.value })
+                            updateOtherEngagement(oe.id, {
+                              role: e.target.value,
+                            })
                           }
                           placeholder="e.g. Volunteer Coordinator"
                         />
@@ -219,28 +251,44 @@ export default function OtherEngagementsSection() {
 
                     {/* Start Date */}
                     <div className="grid gap-1.5">
-                      <Label className="text-text-secondary text-xs">Start Date</Label>
+                      <Label
+                        htmlFor={`engagement-${index}-start-month`}
+                        className="text-text-secondary text-xs"
+                      >
+                        Start Date
+                      </Label>
                       <div className="flex gap-2">
                         <select
+                          id={`engagement-${index}-start-month`}
                           className={selectClass}
                           value={oe.startMonth}
                           onChange={(e) =>
-                            updateOtherEngagement(oe.id, { startMonth: e.target.value })
+                            updateOtherEngagement(oe.id, {
+                              startMonth: e.target.value,
+                            })
                           }
                         >
                           {MONTHS.map((m) => (
-                            <option key={m} value={m}>{m}</option>
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
                           ))}
                         </select>
                         <select
+                          id={`engagement-${index}-start-year`}
+                          aria-label="Start year"
                           className={selectClass}
                           value={oe.startYear}
                           onChange={(e) =>
-                            updateOtherEngagement(oe.id, { startYear: e.target.value })
+                            updateOtherEngagement(oe.id, {
+                              startYear: e.target.value,
+                            })
                           }
                         >
                           {YEARS.map((y) => (
-                            <option key={y} value={y}>{y}</option>
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -249,18 +297,19 @@ export default function OtherEngagementsSection() {
                     {/* Current engagement checkbox */}
                     <div className="flex items-center gap-2">
                       <Checkbox
-                        id={`current-${oe.id}`}
+                        id={`engagement-${index}-current`}
                         checked={oe.isCurrent}
                         onCheckedChange={(checked) =>
                           updateOtherEngagement(oe.id, {
                             isCurrent: checked === true,
-                            endMonth: checked === true ? undefined : oe.endMonth,
+                            endMonth:
+                              checked === true ? undefined : oe.endMonth,
                             endYear: checked === true ? undefined : oe.endYear,
                           })
                         }
                       />
                       <Label
-                        htmlFor={`current-${oe.id}`}
+                        htmlFor={`engagement-${index}-current`}
                         className="text-text-secondary text-sm cursor-pointer"
                       >
                         This is my current engagement
@@ -270,38 +319,71 @@ export default function OtherEngagementsSection() {
                     {/* End Date — hidden when current */}
                     {!oe.isCurrent && (
                       <div className="grid gap-1.5">
-                        <Label className="text-text-secondary text-xs">End Date</Label>
+                        <Label
+                          htmlFor={`engagement-${index}-end-month`}
+                          className="text-text-secondary text-xs"
+                        >
+                          End Date
+                        </Label>
                         <div className="flex gap-2">
                           <select
+                            id={`engagement-${index}-end-month`}
                             className={selectClass}
                             value={oe.endMonth ?? "June"}
                             onChange={(e) =>
-                              updateOtherEngagement(oe.id, { endMonth: e.target.value })
+                              updateOtherEngagement(oe.id, {
+                                endMonth: e.target.value,
+                              })
                             }
                           >
                             {MONTHS.map((m) => (
-                              <option key={m} value={m}>{m}</option>
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
                             ))}
                           </select>
                           <select
+                            id={`engagement-${index}-end-year`}
+                            aria-label="End year"
                             className={selectClass}
                             value={oe.endYear ?? "2024"}
                             onChange={(e) =>
-                              updateOtherEngagement(oe.id, { endYear: e.target.value })
+                              updateOtherEngagement(oe.id, {
+                                endYear: e.target.value,
+                              })
                             }
                           >
                             {YEARS.map((y) => (
-                              <option key={y} value={y}>{y}</option>
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
                             ))}
                           </select>
                         </div>
                       </div>
                     )}
+                    {rangeWarning(
+                      oe.startYear,
+                      oe.startMonth,
+                      oe.endYear,
+                      oe.endMonth,
+                      oe.isCurrent,
+                    ) !== null && (
+                      <p className="text-xs text-destructive">
+                        End date is before the start date.
+                      </p>
+                    )}
 
                     {/* Description */}
                     <div className="grid gap-1.5">
-                      <Label className="text-text-secondary text-xs">Description</Label>
+                      <Label
+                        htmlFor={`engagement-${index}-description`}
+                        className="text-text-secondary text-xs"
+                      >
+                        Description
+                      </Label>
                       <Textarea
+                        id={`engagement-${index}-description`}
                         className={textareaClass}
                         value={oe.description}
                         onChange={(e) =>
@@ -341,7 +423,9 @@ export default function OtherEngagementsSection() {
                             onChange={(e) => {
                               const next = [...oe.achievements];
                               next[ai] = e.target.value;
-                              updateOtherEngagement(oe.id, { achievements: next });
+                              updateOtherEngagement(oe.id, {
+                                achievements: next,
+                              });
                             }}
                             placeholder="Describe the achievement / merit — add as much detail as you like…"
                           />

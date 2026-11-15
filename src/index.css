@@ -60,7 +60,7 @@
   --secondary: #6b6357;
   --secondary-foreground: #ffffff;
   --muted: #f1ede6;
-  --muted-foreground: #948c7e;
+  --muted-foreground: #6f675a;
   --accent: #0f6e5c;
   --accent-foreground: #ffffff;
   --destructive: #b91c1c;
@@ -72,7 +72,7 @@
   --field: #f1ede6;
   --text-primary: #1f1b15;
   --text-secondary: #6b6357;
-  --text-muted: #948c7e;
+  --text-muted: #6f675a;
   --chart-1: #0f6e5c;
   --chart-2: #2563eb;
   --chart-3: #d97706;
@@ -103,7 +103,7 @@
   --secondary: #a8a094;
   --secondary-foreground: #14120f;
   --muted: #262219;
-  --muted-foreground: #8a8376;
+  --muted-foreground: #948c7e;
   --accent: #34d399;
   --accent-foreground: #0d2b22;
   --destructive: #f87171;
@@ -115,7 +115,7 @@
   --field: #262219;
   --text-primary: #f2ede4;
   --text-secondary: #a8a094;
-  --text-muted: #8a8376;
+  --text-muted: #948c7e;
   --chart-1: #34d399;
   --chart-2: #93c5fd;
   --chart-3: #fbbf24;
@@ -199,4 +199,19 @@
 }
 .chat-markdown tbody tr:nth-child(even) td {
   background: var(--field);
+}
+
+/* ============================================================
+   Reduced motion — the app animates dialogs, tab colours and
+   scroll position; honour the OS setting instead of overriding it.
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

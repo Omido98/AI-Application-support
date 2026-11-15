@@ -1,10 +1,14 @@
 import { create } from "zustand";
-import { saveJson, loadJson } from "@/utils/storage";
+import { saveJson, loadJson, reportDataIssue } from "@/utils/storage";
+import { normalizeProfileData } from "@/utils/dataValidation";
+import {
+  applyImportedProfile as mergeProfile,
+  type ImportMode,
+} from "@/utils/profileMerge";
 import type {
   Education,
   CoverLetter,
   WorkExperience,
-  Project,
   OtherEngagement,
   Certification,
   Skill,
@@ -48,36 +52,14 @@ function debouncedSave() {
   }, 500);
 }
 
-function normalizeProject(p: Project | string): Project {
-  if (typeof p === "string") {
-    return {
-      id: crypto.randomUUID(),
-      name: p,
-      startMonth: "",
-      startYear: "",
-      isCurrent: false,
-      endMonth: undefined,
-      endYear: undefined,
-    };
-  }
-  return {
-    id: p.id ?? crypto.randomUUID(),
-    name: p.name ?? "",
-    startMonth: p.startMonth ?? "",
-    startYear: p.startYear ?? "",
-    isCurrent: p.isCurrent ?? false,
-    endMonth: p.endMonth ?? undefined,
-    endYear: p.endYear ?? undefined,
-  };
-}
-
 /** Flush any pending debounced save immediately (called on window close). */
-export async function flushProfileSave(): Promise<void> {
+export async function flushProfileSave(): Promise<boolean> {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    await writeSnapshot();
+    return writeSnapshot();
   }
+  return true;
 }
 
 // ──────────────────────────────────────────────
@@ -93,12 +75,18 @@ interface ProfileState extends ProfileData {
   /** Set the personal details (name, contact, location, linkedin URL) */
   setPersonalDetails: (
     patch: Partial<
-      Pick<ProfileData, "fullName" | "email" | "city" | "country" | "linkedinUrl">
+      Pick<
+        ProfileData,
+        "fullName" | "email" | "city" | "country" | "linkedinUrl"
+      >
     >,
   ) => void;
 
   /** Set the AI-extracted cover letter summary text */
   setCoverLetterSummary: (value: string) => void;
+
+  /** Apply a CV import, either merging into or replacing the CV sections. */
+  applyImportedProfile: (profile: ProfileData, mode: ImportMode) => void;
 
   // Education actions
   setEducation: (items: Education[]) => void;
@@ -153,7 +141,7 @@ interface ProfileState extends ProfileData {
 // Store implementation
 // ──────────────────────────────────────────────
 
-export const useProfileStore = create<ProfileState>((set) => ({
+export const useProfileStore = create<ProfileState>((set, get) => ({
   // ── Data ──
   fullName: "",
   email: "",
@@ -173,28 +161,18 @@ export const useProfileStore = create<ProfileState>((set) => ({
 
   // ── Load ──
   loadProfile: async () => {
-    const data = await loadJson<ProfileData>("profile.json");
+    const data = await loadJson<unknown>("profile.json");
     if (data) {
-      set({
-        fullName: data.fullName ?? "",
-        email: data.email ?? "",
-        city: data.city ?? "",
-        country: data.country ?? "",
-        linkedinUrl: data.linkedinUrl ?? "",
-        coverLetterSummary: data.coverLetterSummary ?? "",
-        interests: data.interests ?? [],
-        education: data.education ?? [],
-        coverLetters: data.coverLetters ?? [],
-        workExperience: (data.workExperience ?? []).map((w) => ({
-          ...w,
-          projects: (w.projects ?? []).map(normalizeProject),
-        })),
-        otherEngagements: data.otherEngagements ?? [],
-        certifications: data.certifications ?? [],
-        skills: data.skills ?? [],
-        languages: data.languages ?? [],
-        isLoaded: true,
-      });
+      const normalized = normalizeProfileData(data);
+      if (!normalized) {
+        reportDataIssue(
+          "profile.json",
+          "The file has an unexpected structure. The profile was left empty and the file was not modified.",
+        );
+        set({ isLoaded: true });
+        return;
+      }
+      set({ ...normalized, isLoaded: true });
     } else {
       set({ isLoaded: true });
     }
@@ -212,6 +190,12 @@ export const useProfileStore = create<ProfileState>((set) => ({
     debouncedSave();
   },
 
+  applyImportedProfile: (profile, mode) => {
+    const merged = mergeProfile(get(), profile, mode);
+    set({ ...merged });
+    debouncedSave();
+  },
+
   // ── Education ──
   setEducation: (items) => {
     set({ education: items });
@@ -223,9 +207,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
   },
   updateEducation: (id, patch) => {
     set((s) => ({
-      education: s.education.map((e) =>
-        e.id === id ? { ...e, ...patch } : e,
-      ),
+      education: s.education.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     }));
     debouncedSave();
   },
@@ -343,9 +325,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
   },
   updateSkill: (id, patch) => {
     set((s) => ({
-      skills: s.skills.map((sk) =>
-        sk.id === id ? { ...sk, ...patch } : sk,
-      ),
+      skills: s.skills.map((sk) => (sk.id === id ? { ...sk, ...patch } : sk)),
     }));
     debouncedSave();
   },
@@ -391,9 +371,7 @@ export const useProfileStore = create<ProfileState>((set) => ({
   },
   updateLanguage: (id, patch) => {
     set((s) => ({
-      languages: s.languages.map((l) =>
-        l.id === id ? { ...l, ...patch } : l,
-      ),
+      languages: s.languages.map((l) => (l.id === id ? { ...l, ...patch } : l)),
     }));
     debouncedSave();
   },

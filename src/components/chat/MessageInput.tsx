@@ -2,7 +2,7 @@ import { useRef, useCallback, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatTokenEstimate, TOKEN_WARN_THRESHOLD } from "@/utils/tokens";
+import { formatTokenCount, formatTokenEstimate } from "@/utils/tokens";
 
 interface MessageInputProps {
   value: string;
@@ -12,6 +12,10 @@ interface MessageInputProps {
   disabled?: boolean;
   /** Estimated input tokens the next send would consume (0 = unknown). */
   tokenEstimate?: number;
+  /** Input budget in tokens; shown next to the estimate when provided. */
+  contextLimit?: number;
+  /** Number of older messages omitted from the next request. */
+  droppedMessages?: number;
 }
 
 export default function MessageInput({
@@ -21,12 +25,22 @@ export default function MessageInput({
   onStop,
   disabled = false,
   tokenEstimate = 0,
+  contextLimit = 0,
+  droppedMessages = 0,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // While the AI is generating, the input is disabled and the send button
   // turns into a stop button.
   const isGenerating = !!onStop && disabled;
+
+  const usageRatio = contextLimit > 0 ? tokenEstimate / contextLimit : 0;
+  const usageTone =
+    usageRatio >= 1
+      ? "text-destructive"
+      : usageRatio >= 0.8
+        ? "text-amber-500"
+        : "text-text-muted";
 
   const handleSend = useCallback(() => {
     if (!value.trim() || disabled) return;
@@ -87,13 +101,20 @@ export default function MessageInput({
           <span
             className={cn(
               "text-[10px] leading-none select-none font-mono",
-              tokenEstimate > TOKEN_WARN_THRESHOLD
-                ? "text-amber-500"
-                : "text-text-muted",
+              usageTone,
             )}
-            title="Estimated input tokens for this request"
+            title={`Estimated input tokens for this request${
+              contextLimit > 0
+                ? ` (input budget ${contextLimit.toLocaleString()} tokens)`
+                : ""
+            }${
+              droppedMessages > 0
+                ? `; ${droppedMessages} older message(s) omitted`
+                : ""
+            }`}
           >
             {formatTokenEstimate(tokenEstimate)}
+            {contextLimit > 0 ? ` / ${formatTokenCount(contextLimit)}` : ""}
           </span>
         )}
       </div>
