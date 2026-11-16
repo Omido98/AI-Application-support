@@ -59,7 +59,7 @@ Budgets are counts and generous ceilings, not dev-server wall-clock targets:
 
 | Check                                      | 2026-11-16 result | Budget                    |
 | ------------------------------------------ | ----------------- | ------------------------- |
-| Initial render DOM nodes                   | 222               | < 3,000                   |
+| Initial render DOM nodes                   | 223               | < 3,000                   |
 | Startup long tasks                         | 2                 | ≤ 20                      |
 | Longest startup task                       | 257 ms            | < 1,500 ms (freeze guard) |
 | Cumulative layout shift                    | 0.00013           | < 0.1                     |

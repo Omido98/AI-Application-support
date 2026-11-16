@@ -4,27 +4,6 @@ import { isTauriRuntime } from "@/utils/runtime";
 export type NotificationPermissionState = "granted" | "denied" | "unsupported";
 
 /**
- * Check the current permission without prompting. Used by the periodic
- * deadline sweep so a revoked permission quietly falls back to in-app badges.
- */
-export async function getNotificationPermission(): Promise<NotificationPermissionState> {
-  if (!isTauriRuntime()) return "unsupported";
-  try {
-    const { isPermissionGranted } =
-      await import("@tauri-apps/plugin-notification");
-    return (await isPermissionGranted()) ? "granted" : "denied";
-  } catch (err) {
-    logToFileInBackground(
-      `[notifications] Could not read permission: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-      "warn",
-    );
-    return "unsupported";
-  }
-}
-
-/**
  * Ask the OS for notification permission. Only called when the user enables
  * the setting or presses the test button, never silently on startup.
  */
