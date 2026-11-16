@@ -41,7 +41,7 @@ function capitalize(value: string): string {
 }
 
 /** RFC 4180 escaping: quote cells containing a comma, quote or newline. */
-function escapeCsv(value: string): string {
+export function escapeCsv(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 

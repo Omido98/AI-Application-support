@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
+  SOURCE_EFFECTIVENESS_MIN_SAMPLE,
   UPCOMING_WINDOW_DAYS,
   computePipelineStats,
   getMonthlyApplications,
   getPipelineRates,
   getPipelineTotals,
   getRecentStatusChanges,
+  getSourceEffectiveness,
   getStatusCounts,
+  getTimeToResponse,
   getUpcomingItems,
 } from "@/utils/pipelineStats";
 import type {
@@ -374,6 +377,151 @@ describe("getRecentStatusChanges", () => {
   });
 });
 
+describe("getTimeToResponse", () => {
+  it("uses median and average days to the first response", () => {
+    const applications = [
+      makeApp({
+        id: "a",
+        status: "interview",
+        appliedAt: "2026-03-01",
+        statusHistory: [
+          at("applied", "2026-03-01T09:00:00"),
+          at("interview", "2026-03-06T09:00:00"),
+        ],
+      }),
+      makeApp({
+        id: "b",
+        status: "rejected",
+        appliedAt: "2026-03-02",
+        statusHistory: [
+          at("applied", "2026-03-02T09:00:00"),
+          at("rejected", "2026-03-12T09:00:00"),
+        ],
+      }),
+    ];
+
+    expect(getTimeToResponse(applications)).toEqual({
+      medianDays: 7.5,
+      averageDays: 7.5,
+      sampleCount: 2,
+    });
+  });
+
+  it("falls back to the applied history entry and ignores unusable rows", () => {
+    const applications = [
+      makeApp({
+        id: "fallback",
+        status: "offer",
+        appliedAt: "",
+        statusHistory: [
+          at("applied", "2026-03-01T09:00:00"),
+          at("offer", "2026-03-04T09:00:00"),
+        ],
+      }),
+      makeApp({
+        id: "same-day",
+        status: "rejected",
+        appliedAt: "2026-03-05",
+        statusHistory: [at("rejected", "2026-03-05T15:00:00")],
+      }),
+      makeApp({
+        id: "wishlist",
+        status: "wishlist",
+        appliedAt: "",
+        statusHistory: [],
+      }),
+      makeApp({
+        id: "no-response",
+        status: "applied",
+        appliedAt: "2026-03-03",
+        statusHistory: [at("applied", "2026-03-03T09:00:00")],
+      }),
+      makeApp({
+        id: "before-applied",
+        status: "interview",
+        appliedAt: "2026-03-10",
+        statusHistory: [
+          at("interview", "2026-03-09T09:00:00"),
+          at("applied", "2026-03-10T09:00:00"),
+        ],
+      }),
+      makeApp({
+        id: "invalid",
+        status: "interview",
+        appliedAt: "",
+        statusHistory: [
+          at("applied", "not-a-date"),
+          at("interview", "also-not-a-date"),
+        ],
+      }),
+    ];
+
+    expect(getTimeToResponse(applications)).toEqual({
+      medianDays: 1.5,
+      averageDays: 1.5,
+      sampleCount: 2,
+    });
+  });
+
+  it("returns null statistics when no response has both dates", () => {
+    expect(getTimeToResponse([makeApp({ status: "wishlist" })])).toEqual({
+      medianDays: null,
+      averageDays: null,
+      sampleCount: 0,
+    });
+  });
+});
+
+describe("getSourceEffectiveness", () => {
+  it("groups sources case-insensitively and hides small samples", () => {
+    const applications = [
+      makeApp({ id: "1", status: "interview", source: "LinkedIn" }),
+      makeApp({ id: "2", status: "rejected", source: "linkedin" }),
+      makeApp({ id: "3", status: "applied", source: "LinkedIn" }),
+      makeApp({ id: "4", status: "offer", source: "Referral" }),
+      makeApp({ id: "5", status: "rejected", source: "" }),
+      makeApp({ id: "6", status: "wishlist", source: "LinkedIn" }),
+    ];
+
+    const rows = getSourceEffectiveness(applications);
+
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({
+      source: "LinkedIn",
+      applied: 3,
+      responses: 2,
+      interviews: 1,
+      offers: 0,
+      hasEnoughData: true,
+    });
+    expect(rows[0].responseRate).toBeCloseTo(2 / 3);
+    expect(rows[0].interviewRate).toBeCloseTo(1 / 3);
+    expect(rows[0].offerRate).toBe(0);
+    expect(rows.find((row) => row.source === "Referral")).toMatchObject({
+      applied: 1,
+      responses: 1,
+      interviews: 1,
+      offers: 1,
+      hasEnoughData: false,
+    });
+    expect(rows.find((row) => row.source === "Not set")).toMatchObject({
+      applied: 1,
+      responses: 1,
+      hasEnoughData: false,
+    });
+    expect(
+      rows.some((row) => row.source === "LinkedIn" && row.applied === 4),
+    ).toBe(false);
+  });
+
+  it("returns nothing when only wishlist applications exist", () => {
+    expect(getSourceEffectiveness([makeApp({ source: "LinkedIn" })])).toEqual(
+      [],
+    );
+    expect(SOURCE_EFFECTIVENESS_MIN_SAMPLE).toBe(3);
+  });
+});
+
 describe("computePipelineStats", () => {
   it("returns totals, rates, status counts and timeline sections together", () => {
     const applications = [
@@ -418,5 +566,17 @@ describe("computePipelineStats", () => {
       applicationId: "a",
       status: "interview",
     });
+    expect(stats.timeToResponse.sampleCount).toBe(1);
+    expect(stats.timeToResponse.medianDays).toBe(4);
+    expect(stats.sourceEffectiveness).toMatchObject([
+      {
+        source: "Not set",
+        applied: 1,
+        responses: 1,
+        interviews: 1,
+        offers: 0,
+        hasEnoughData: false,
+      },
+    ]);
   });
 });

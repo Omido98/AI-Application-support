@@ -10,8 +10,9 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
 
 - **Pipeline overview** — an Overview tab with totals, response/interview/offer
   rates, status distribution, upcoming deadlines/follow-ups, six-month
-  activity and recent status changes. Click any item to jump to its
-  application.
+  activity, recent status changes, median time to first response and source
+  effectiveness. Click any item to jump to its application; export future
+  deadlines and follow-ups as an `.ics` calendar file.
 - **Application tracking** — manage multiple job applications with company,
   job description, requirements, company research, notes, and a status
   (Wishlist / Applied / Interview / Offer / Rejected). Track applied,
@@ -19,9 +20,9 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   details, priority and tags; status changes are recorded as history.
   Deadlines and follow-ups due within a week (or overdue) are flagged in the
   list. Search covers postings, notes and tags, sort by status, recency,
-  company or deadline, export everything to CSV, and undo a deletion for
-  eight seconds. A fit matrix matches requirement lines against your profile
-  evidence and highlights gaps.
+  company or deadline, export everything to CSV, export a per-application
+  status timeline, and undo a deletion for eight seconds. A fit matrix matches
+  requirement lines against your profile evidence and highlights gaps.
 - **First-run walkthrough** — a three-step introduction to tracking,
   chatting and the profile, shown once.
 - **AI chat assistant** — one chat thread per application. The agent knows the
@@ -52,6 +53,9 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   due-today and due-tomorrow deadlines and follow-ups, deduplicated per item
   per day. See [docs/deadline-notifications.md](docs/deadline-notifications.md)
   for per-OS behaviour and troubleshooting.
+- **Exports & analytics** — per-application timeline CSV, calendar `.ics`
+  export, time-to-first-response and source-effectiveness analytics. See
+  [docs/exports-and-analytics.md](docs/exports-and-analytics.md).
 - **Settings** — light, dark or follow-system theme, accent colour, AI
   provider/model/context window, backup and restore, update checks, a
   **Copy diagnostics** report with versions, data-file sizes and the recent

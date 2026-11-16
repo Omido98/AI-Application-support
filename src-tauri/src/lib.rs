@@ -1965,6 +1965,80 @@ async fn export_csv_file(
     .map(Some)
 }
 
+/// Calendar exports are small text files; 1 MB is plenty.
+const MAX_ICS_FILE_BYTES: usize = 1024 * 1024;
+
+fn sanitize_ics_name(name: &str) -> String {
+    let file = name.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let stem = match file.rsplit_once('.') {
+        Some((stem, extension))
+            if extension.eq_ignore_ascii_case("ics") && !stem.trim().is_empty() =>
+        {
+            stem.trim()
+        }
+        _ => file,
+    };
+    let stem = if stem.is_empty() {
+        "applications-calendar"
+    } else {
+        stem
+    };
+    format!("{stem}.ics")
+}
+
+fn ensure_ics_extension(path: &Path) -> Result<(), String> {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some(extension) if extension.eq_ignore_ascii_case("ics") => Ok(()),
+        _ => Err("The export file must be a .ics file.".to_string()),
+    }
+}
+
+/// Save an iCalendar export chosen through the native save dialog. The
+/// webview supplies the document and a suggested name, never a path.
+#[tauri::command]
+async fn export_ics_file(
+    app: tauri::AppHandle,
+    default_name: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    if contents.len() > MAX_ICS_FILE_BYTES {
+        return Err("The calendar export is larger than the 1 MB limit.".to_string());
+    }
+    let file_name = sanitize_ics_name(&default_name);
+    let parent = app.get_webview_window("main");
+    let app_for_dialog = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app_for_dialog
+            .dialog()
+            .file()
+            .add_filter("Calendar", &["ics"])
+            .set_file_name(file_name);
+        let dialog = match parent {
+            Some(window) => dialog.set_parent(&window),
+            None => dialog,
+        };
+        dialog.blocking_save_file()
+    })
+    .await
+    .map_err(|err| format!("Calendar dialog failed: {err}"))?;
+
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|err| format!("Invalid calendar path: {err}"))?;
+    ensure_ics_extension(&path)?;
+    let display_path = path.display().to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        write_text_file_atomic(&path, &contents)?;
+        Ok::<String, String>(display_path)
+    })
+    .await
+    .map_err(|err| format!("Calendar write task failed: {err}"))?
+    .map(Some)
+}
+
 /// Upper bound for generated PDF/DOCX exports and imported CV documents.
 const MAX_EXPORT_FILE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_IMPORT_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
@@ -2343,6 +2417,7 @@ pub fn run() {
             prune_orphan_chat_files,
             export_backup_file,
             export_csv_file,
+            export_ics_file,
             save_export_file,
             read_import_file,
             import_backup_file,
@@ -2735,6 +2810,23 @@ mod tests {
         assert!(ensure_csv_extension(Path::new("applications.CSV")).is_ok());
         assert!(ensure_csv_extension(Path::new("applications.json")).is_err());
         assert!(ensure_csv_extension(Path::new("applications")).is_err());
+    }
+
+    #[test]
+    fn calendar_export_names_and_extensions_are_safe() {
+        assert_eq!(
+            sanitize_ics_name("applications-calendar.ics"),
+            "applications-calendar.ics"
+        );
+        assert_eq!(sanitize_ics_name("My Calendar.ICS"), "My Calendar.ics");
+        assert_eq!(sanitize_ics_name("../../evil"), "evil.ics");
+        assert_eq!(sanitize_ics_name("   "), "applications-calendar.ics");
+        assert_eq!(sanitize_ics_name("C:\\temp\\calendar.ics"), "calendar.ics");
+
+        assert!(ensure_ics_extension(Path::new("calendar.ics")).is_ok());
+        assert!(ensure_ics_extension(Path::new("calendar.ICS")).is_ok());
+        assert!(ensure_ics_extension(Path::new("calendar.csv")).is_err());
+        assert!(ensure_ics_extension(Path::new("calendar")).is_err());
     }
 
     #[test]

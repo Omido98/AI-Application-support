@@ -7,9 +7,11 @@ import {
   ExternalLink,
   Archive,
   Download,
+  History,
 } from "lucide-react";
 import { openExternalUrl } from "@/utils/links";
 import { exportApplicationsCsv } from "@/utils/csv";
+import { exportApplicationTimeline } from "@/utils/timeline";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useAppStore, type ApplicationSortMode } from "@/stores/useAppStore";
@@ -289,6 +291,22 @@ export default function ApplicationTab() {
     setExportStatus(null);
     try {
       const path = await exportApplicationsCsv(applications);
+      if (path) {
+        const fileName = path.split(/[\\/]/).pop() ?? path;
+        setExportStatus(`Exported ${fileName}.`);
+      }
+    } catch (err) {
+      setExportStatus(
+        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  const handleExportTimeline = async () => {
+    if (!selected) return;
+    setExportStatus(null);
+    try {
+      const path = await exportApplicationTimeline(selected);
       if (path) {
         const fileName = path.split(/[\\/]/).pop() ?? path;
         setExportStatus(`Exported ${fileName}.`);
@@ -684,6 +702,15 @@ export default function ApplicationTab() {
               >
                 <Download className="size-4 mr-1.5" />
                 Export CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleExportTimeline()}
+                title="Export this application's status timeline as CSV"
+              >
+                <History className="size-4 mr-1.5" />
+                Export timeline
               </Button>
               <Button
                 variant="outline"
