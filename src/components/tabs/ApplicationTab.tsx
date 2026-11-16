@@ -49,6 +49,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import FitMatrixCard from "@/components/tracker/FitMatrixCard";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 
 function StatusBadge({ status }: { status: ApplicationStatus }) {
   return (
@@ -196,6 +197,11 @@ const ACTIVE_STATUSES = STATUS_ORDER.filter(
 );
 
 export default function ApplicationTab() {
+  const sidebarScrollRef = useScrollRestoration<HTMLDivElement>(
+    "application-sidebar",
+  );
+  const detailScrollRef =
+    useScrollRestoration<HTMLDivElement>("application-detail");
   const isLoaded = useApplicationStore((s) => s.isLoaded);
   const loadApplications = useApplicationStore((s) => s.loadApplications);
 
@@ -566,7 +572,10 @@ export default function ApplicationTab() {
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        <div
+          ref={sidebarScrollRef}
+          className="flex-1 overflow-y-auto p-2 space-y-1"
+        >
           {filtered.length === 0 && (
             <p className="text-xs text-text-muted text-center py-4">
               {viewMode === "active"
@@ -646,7 +655,7 @@ export default function ApplicationTab() {
       </aside>
 
       {/* ── Detail pane ── */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div ref={detailScrollRef} className="flex-1 overflow-y-auto p-6">
         {!selected ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-text-muted">

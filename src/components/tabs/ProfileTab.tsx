@@ -14,6 +14,7 @@ import SkillsSection from "@/components/profile/SkillsSection";
 import InterestsSection from "@/components/profile/InterestsSection";
 import LanguagesSection from "@/components/profile/LanguagesSection";
 import ImportCvDialog from "@/components/profile/ImportCvDialog";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import {
   DEFAULT_PROFILE_SECTION_ORDER,
   PROFILE_SECTION_LABELS,
@@ -21,6 +22,7 @@ import {
 } from "@/utils/profileSections";
 
 export default function ProfileTab() {
+  const scrollRef = useScrollRestoration<HTMLDivElement>("profile");
   const isLoaded = useProfileStore((s) => s.isLoaded);
   const loadProfile = useProfileStore((s) => s.loadProfile);
   const sectionOrder = useSettingsStore((s) => s.profileSectionOrder);
@@ -64,7 +66,7 @@ export default function ProfileTab() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-8">
+    <div ref={scrollRef} className="h-full overflow-y-auto p-6 space-y-8">
       <div className="max-w-4xl mx-auto space-y-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold text-text-primary">Profile</h1>

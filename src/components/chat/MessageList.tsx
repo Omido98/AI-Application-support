@@ -42,6 +42,10 @@ import {
 } from "lucide-react";
 import type { ProfileData, WebSource } from "@/types";
 import { exportCoverLetter, type ExportFormat } from "@/utils/documentExport";
+import { readScrollMemory, writeScrollMemory } from "@/utils/scrollMemory";
+
+/** Chat scroll memory is kept per thread, so each application keeps its own. */
+const CHAT_SCROLL_PREFIX = "chat:";
 
 function sourceLabel(title: string, url: string): string {
   try {
@@ -111,16 +115,29 @@ export default function MessageList({
   onRegenerate?: (key: string) => void;
 }) {
   const messages = useChatStore((s) => s.messages);
+  const activeThreadId = useChatStore((s) => s.activeThreadId);
   const isSending = useChatStore((s) => s.isSending);
   const error = useChatStore((s) => s.error);
+  const scrollKey = activeThreadId
+    ? `${CHAT_SCROLL_PREFIX}${activeThreadId}`
+    : "chat";
+  // The key at mount identifies the thread a restored offset belongs to; a
+  // mid-session thread switch must never replay another thread's position.
+  const initialScrollKeyRef = useRef(scrollKey);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastMessageRef = useRef<{
     role: "user" | "assistant";
     timestamp: string;
-  } | null>(null);
-  const [stickyToBottom, setStickyToBottom] = useState(true);
-  const stickyRef = useRef(true);
+  } | null>(messages[messages.length - 1] ?? null);
+  // The chat tab may unmount when the user visits another section. Remember
+  // whether the view was pinned to the newest message, so coming back does not
+  // yank a user who had scrolled up down to the bottom.
+  const [stickyToBottom, setStickyToBottom] = useState(
+    () => readScrollMemory(scrollKey)?.atBottom ?? true,
+  );
+  const stickyRef = useRef(stickyToBottom);
+  const initializedThreadRef = useRef(activeThreadId);
   const scrollRafRef = useRef<number | null>(null);
 
   const applications = useApplicationStore((s) => s.applications);
@@ -280,8 +297,33 @@ export default function MessageList({
   const handleScroll = () => {
     const el = containerRef.current;
     if (!el) return;
-    setStickyToBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    stickyRef.current = atBottom;
+    setStickyToBottom(atBottom);
+    writeScrollMemory(scrollKey, { top: el.scrollTop, atBottom });
   };
+
+  // A different thread always starts at its newest message, even when the
+  // previous thread was left scrolled up.
+  useEffect(() => {
+    if (initializedThreadRef.current === activeThreadId) return;
+    initializedThreadRef.current = activeThreadId;
+    stickyRef.current = true;
+    setStickyToBottom(true);
+  }, [activeThreadId]);
+
+  // Restore a scrolled-up position after the tab remounts. When the user was
+  // pinned to the bottom, the auto-scroll effect above already shows the
+  // newest message, so there is nothing to restore.
+  useEffect(() => {
+    const el = containerRef.current;
+    const saved = readScrollMemory(initialScrollKeyRef.current);
+    if (!el || !saved || saved.atBottom) return;
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = saved.top;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   const jumpToBottom = () => {
     setStickyToBottom(true);
