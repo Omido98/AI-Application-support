@@ -1,4 +1,4 @@
-# Releasing and code signing
+# Releasing and signing
 
 The release rules live in [`AGENTS.md`](../AGENTS.md): always release from a
 branch cut from `main`, never from `main` itself, and never publish from the
@@ -46,32 +46,30 @@ workflow; that is separate from operating-system code signing. Each updater
 artifact gets a `.sig` file and the release gets a `latest.json` manifest, both
 required for signed auto-updates.
 
+Neither macOS nor Windows installers are operating-system signed. No Apple
+Developer ID/notarization credentials and no Windows Authenticode certificate
+are purchased or configured, and the release workflow has no OS-signing step.
+Both platforms are **unsigned by design**, so Gatekeeper and SmartScreen can
+warn on first launch; that is expected, not a damaged download.
+
 ### macOS
 
-The release workflow exports signing/notarization credentials when the following
-repository secrets exist (all are optional; without them the build is
-unsigned):
-
-- `APPLE_CERTIFICATE` — base64-encoded Developer ID Application `.p12`
-- `APPLE_CERTIFICATE_PASSWORD`
-- `APPLE_SIGNING_IDENTITY` — e.g. `Developer ID Application: Name (TEAMID)`
-- `APPLE_ID` — Apple ID used for notarization
-- `APPLE_PASSWORD` — app-specific password for that Apple ID
-- `APPLE_TEAM_ID`
-
-Tauri signs the `.app` and submits it for notarization/staple during bundling.
+macOS builds are **unsigned and not notarized by design**. The repository has
+no Apple signing credentials, and the release workflow does no signing or
+notarization. Gatekeeper may block the first launch; see
+[installing-on-work-laptops.md](installing-on-work-laptops.md) for the
+one-time `xattr` fix for the "damaged" dialog.
 
 ### Windows
 
 Windows installers are **unsigned by design**. No Authenticode certificate is
 purchased or configured, and the release workflow has no Windows signing step.
 SmartScreen can therefore warn on first launch (_"Windows protected your PC"_);
-choose **More info → Run anyway**. This is expected and is not a sign of a
-damaged download.
+choose **More info → Run anyway**.
 
 The `.sig` files attached to a release are **Tauri updater signatures**, not
-Windows Authenticode signatures. The auto-updater uses them to verify a
-downloaded update, so they (and `latest.json`) must stay.
+operating-system code signatures. The auto-updater uses them to verify a
+downloaded update, so they (and `latest.json`) must stay on both platforms.
 
 ## Data storage
 

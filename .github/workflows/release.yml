@@ -49,7 +49,7 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install Rust stable
@@ -66,23 +66,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
-
-      - name: Export Apple signing credentials
-        if: matrix.platform == 'macos-latest'
-        shell: bash
-        run: |
-          if [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
-            {
-              echo "APPLE_CERTIFICATE<<EOF"
-              echo "${{ secrets.APPLE_CERTIFICATE }}"
-              echo "EOF"
-              echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
-              echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}"
-              echo "APPLE_ID=${{ secrets.APPLE_ID }}"
-              echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}"
-              echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
-            } >> "$GITHUB_ENV"
-          fi
 
       - name: Export updater signing key
         shell: bash
