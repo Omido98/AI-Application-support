@@ -30,6 +30,7 @@ import {
   deleteFile,
   getStorageIssues,
   loadJson,
+  pruneOrphanChatFiles,
   saveJson,
 } from "@/utils/storage";
 
@@ -201,5 +202,49 @@ describe("browser fallback", () => {
       kind: "load",
       file: "profile.json",
     });
+  });
+
+  it("prunes orphan chat threads from localStorage", async () => {
+    vi.stubGlobal("window", {});
+    localStorage.setItem("aas:chat_keep.json", "[]");
+    localStorage.setItem("aas:chat_orphan.json", "[]");
+    localStorage.setItem("aas:chat_not a thread.json", "[]");
+    localStorage.setItem("aas:applications.json", "{}");
+
+    await expect(pruneOrphanChatFiles(["keep"])).resolves.toEqual([
+      "chat_orphan.json",
+    ]);
+    expect(localStorage.getItem("aas:chat_keep.json")).toBe("[]");
+    expect(localStorage.getItem("aas:chat_orphan.json")).toBeNull();
+    expect(localStorage.getItem("aas:chat_not a thread.json")).toBe("[]");
+    expect(localStorage.getItem("aas:applications.json")).toBe("{}");
+  });
+});
+
+describe("pruneOrphanChatFiles (Tauri)", () => {
+  it("asks Rust to delete threads for absent applications", async () => {
+    enterTauri();
+    invokeMock.mockResolvedValue(["chat_gone.json"]);
+
+    await expect(pruneOrphanChatFiles(["keep"])).resolves.toEqual([
+      "chat_gone.json",
+    ]);
+    expect(invokeMock).toHaveBeenCalledWith("prune_orphan_chat_files", {
+      validIds: ["keep"],
+    });
+  });
+
+  it("reports a cleanup failure without failing the import", async () => {
+    enterTauri();
+    invokeMock.mockRejectedValue("permission denied");
+
+    await expect(pruneOrphanChatFiles(["keep"])).resolves.toEqual([]);
+    expect(getStorageIssues()).toEqual([
+      expect.objectContaining({
+        kind: "delete",
+        file: "chat threads",
+        message: "permission denied",
+      }),
+    ]);
   });
 });

@@ -56,8 +56,9 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
 - **Backup & restore** — export all your data (applications, chat threads,
   drafts, profile, settings, API config) to a single JSON file and import it
   back. API keys are never included in a backup.
-- **Update checks** — Settings can check GitHub for a newer release and offer
-  to download and install it.
+- **Update checks** — a silent check runs a few seconds after startup and
+  offers newer releases in a dialog. Settings can check manually and turn the
+  startup check off.
 
 ## AI providers
 
@@ -132,6 +133,11 @@ Useful commands:
 Installers and the macOS `.app.tar.gz` (no-install app bundle) are
 available on the [GitHub Releases
 page](https://github.com/Omido98/AI-Application-support/releases/latest).
+Windows installers are intentionally unsigned (there is no Authenticode
+certificate), so SmartScreen may show *"Windows protected your PC"* on first
+launch — choose **More info → Run anyway**. The `.sig` files on a release are
+**Tauri updater signatures**, not Windows code signatures; the built-in
+updater needs them to verify downloads.
 If you are installing on a managed/work laptop, see
 [docs/installing-on-work-laptops.md](docs/installing-on-work-laptops.md).
 
@@ -152,11 +158,14 @@ pushed. Never release directly from `main` — the release flow is:
    release on GitHub. Only published releases are offered by the auto-updater,
    so updates always come from code that is on `main`.
 
-CI builds and publishes Windows x64 (.exe + .msi), Windows ARM64 (.exe) and
-macOS ARM64 (.dmg) installers. The auto-updater requires the
+CI builds and publishes Windows x64 (.exe + .msi), Windows ARM64 (.exe),
+macOS ARM64 (.dmg) and Linux x64 (AppImage) installers. Windows installers are
+intentionally unsigned. The auto-updater requires the
 `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 repository secrets to be set before tagging (generate a key pair with
-`npm run tauri signer generate`).
+`npm run tauri signer generate`). Every updater artifact is published with its
+`.sig` signature plus a `latest.json` manifest; those are what the updater
+verifies, and removing them would break signed auto-updates.
 
 ## Tech notes
 

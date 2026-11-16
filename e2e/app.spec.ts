@@ -202,3 +202,73 @@ test("application filters survive a tab switch", async ({ page }) => {
   // the absence check to the sidebar list.
   await expect(page.locator("aside").getByText("Acme Corp")).toHaveCount(0);
 });
+
+test("cover-letter summary can be edited, saved, and cancelled", async ({
+  page,
+}) => {
+  await seed(page, { lastTab: "profile" });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+
+  const summary = page.getByPlaceholder(
+    "Add cover letters first, then summarize.",
+  );
+  await expect(summary).toBeEditable();
+
+  await summary.fill("Manual summary of my cover letters.");
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+  await page.getByRole("button", { name: "Save summary" }).click();
+  await expect(page.getByText("All changes saved")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (key) =>
+          JSON.parse(localStorage.getItem(key) ?? "{}").coverLetterSummary,
+        PROFILE_KEY,
+      ),
+    )
+    .toBe("Manual summary of my cover letters.");
+
+  await summary.fill("This edit will be cancelled.");
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(summary).toHaveValue("Manual summary of my cover letters.");
+  await expect(page.getByText("All changes saved")).toBeVisible();
+});
+
+test("application detail scroll position survives a tab switch", async ({
+  page,
+}) => {
+  const longText = Array.from(
+    { length: 80 },
+    (_, index) => `Requirement line ${index + 1}: a long, detailed sentence.`,
+  ).join("\n");
+  const application = makeApplication("scroll", "Scroll Corp", "applied", {
+    jobDescription: longText,
+    requirements: longText,
+    notes: longText,
+  });
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  const detail = page.locator("#tabpanel-main .overflow-y-auto").nth(1);
+  await expect(detail).toBeVisible();
+  const scrollable = await detail.evaluate(
+    (element) => element.scrollHeight - element.clientHeight,
+  );
+  expect(scrollable).toBeGreaterThan(200);
+
+  await detail.evaluate((element) => {
+    element.scrollTop = 150;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  const saved = await detail.evaluate((element) => element.scrollTop);
+  expect(saved).toBeGreaterThan(0);
+
+  await page.getByRole("tab", { name: "Overview" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.getByRole("tab", { name: "Application" }).click();
+  await expect
+    .poll(() => detail.evaluate((element) => element.scrollTop))
+    .toBe(saved);
+});

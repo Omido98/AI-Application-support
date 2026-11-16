@@ -10,9 +10,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import ConfirmDeleteDialog, {
-  truncateLabel,
   type DeleteTarget,
 } from "@/components/profile/ConfirmDeleteDialog";
+import { truncateLabel } from "@/components/profile/truncateLabel";
 
 const MONTHS = [
   "January",

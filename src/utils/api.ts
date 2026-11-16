@@ -775,6 +775,11 @@ async function sendOpenAICompatMessage(
   // streaming (the answer then appears all at once instead of live).
   let useStream = true;
 
+  // Ask for token usage in the final streaming chunk. Some OpenAI-compatible
+  // providers reject the field; the first request that says so is retried
+  // once without it, keeping streaming enabled.
+  let includeStreamUsage = true;
+
   // Text the model drafted alongside tool calls; returned if the loop
   // cannot finish (round cap or a repeated call).
   let partialContent: string | null = null;
@@ -827,6 +832,11 @@ async function sendOpenAICompatMessage(
 
     if (stream) {
       payload["stream"] = true;
+      if (includeStreamUsage) {
+        // OpenAI sends usage in a final chunk with an empty choices array;
+        // some compatible providers only do so when explicitly asked.
+        payload["stream_options"] = { include_usage: true };
+      }
     }
     return payload;
   };
@@ -907,9 +917,38 @@ async function sendOpenAICompatMessage(
     }
 
     if (result.error) {
+      // A provider that rejects `stream_options` still streams fine without
+      // it: retry the same round once with the field removed instead of
+      // dropping streaming (which would lose live text rendering).
+      if (
+        useStream &&
+        includeStreamUsage &&
+        /stream_options/i.test(result.error)
+      ) {
+        includeStreamUsage = false;
+        result = await streamChat(
+          baseUrl,
+          apiKey,
+          config.provider,
+          buildPayload(useTools, true),
+          options,
+          (text) => {
+            streamedContent += text;
+            options.onDelta?.(text);
+          },
+        );
+        if (result.stopped) {
+          return { content: streamedContent, stopped: true };
+        }
+      }
+
       // Some providers don't support SSE streaming; retry the round without
       // it (the answer then appears all at once instead of live).
-      if (useStream && /stream|sse|chunk|event/i.test(result.error)) {
+      if (
+        useStream &&
+        result.error &&
+        /stream|sse|chunk|event/i.test(result.error)
+      ) {
         useStream = false;
         result = await runNonStreamingRound(useTools);
       }

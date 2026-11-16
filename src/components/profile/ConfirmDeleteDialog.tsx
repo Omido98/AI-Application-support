@@ -22,13 +22,6 @@ interface ConfirmDeleteDialogProps {
   onClose: () => void;
 }
 
-/** Shorten long sub-item text (courses, projects, achievements) for labels. */
-export function truncateLabel(text: string, max = 60): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= max) return trimmed;
-  return trimmed.slice(0, max).trimEnd() + "…";
-}
-
 /**
  * Confirmation dialog for deleting profile items. Non-empty items only
  * reach this dialog — empty items are deleted instantly by the sections.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
@@ -50,6 +50,21 @@ export default function CoverLettersSection() {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
+  // The summary is edited locally and only committed with "Save summary", so
+  // half-typed text never reaches the chat prompt or profile.json.
+  const [summaryDraft, setSummaryDraft] = useState(coverLetterSummary);
+  const lastStoredSummaryRef = useRef(coverLetterSummary);
+  const summaryDirty = summaryDraft !== coverLetterSummary;
+
+  // Adopt external changes (profile load, AI summary, backup import) unless
+  // the user has edits that are not saved yet.
+  useEffect(() => {
+    if (summaryDraft === lastStoredSummaryRef.current) {
+      setSummaryDraft(coverLetterSummary);
+    }
+    lastStoredSummaryRef.current = coverLetterSummary;
+  }, [coverLetterSummary, summaryDraft]);
+
   useEffect(() => {
     if (!configLoaded) loadConfig();
   }, [configLoaded, loadConfig]);
@@ -79,14 +94,30 @@ export default function CoverLettersSection() {
     });
   };
 
+  const handleSaveSummary = () => {
+    if (!summaryDirty) return;
+    setCoverLetterSummary(summaryDraft);
+    setSummaryError(null);
+  };
+
+  const handleCancelSummary = () => {
+    setSummaryDraft(coverLetterSummary);
+    setSummaryError(null);
+  };
+
   // Extract the highlights from all cover letters via the summarizer agent.
-  // The result is stored as a read-only digest the chat agent reads instead
-  // of the full letters (see buildSystemPrompt).
+  // The result is stored as a digest the chat agent reads instead of the full
+  // letters (see buildSystemPrompt).
   const handleSummarize = async () => {
     if (summarizing) return;
     if (useProfileStore.getState().coverLetters.length === 0) {
       setSummaryError("No cover letters to summarize yet. Add one first.");
       return;
+    }
+    // A manual edit must not be lost when the AI digest replaces the summary:
+    // save it first, so a failed summarize still leaves the user's text.
+    if (summaryDirty) {
+      setCoverLetterSummary(summaryDraft);
     }
     setSummarizing(true);
     setSummaryError(null);
@@ -144,9 +175,9 @@ export default function CoverLettersSection() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-text-muted max-w-md">
               The chat assistant only ever reads the summary in the text box
-              below, never the full letters. After adding or editing a cover
-              letter, press "Summarize cover letters" again to keep the summary
-              current.
+              below, never the full letters. You can edit the summary directly,
+              or press "Summarize cover letters" to replace it with an AI digest
+              of your letters.
             </p>
             <Button
               variant="outline"
@@ -160,15 +191,38 @@ export default function CoverLettersSection() {
             </Button>
           </div>
           <Textarea
-            readOnly
-            value={coverLetterSummary}
+            value={summaryDraft}
+            onChange={(e) => setSummaryDraft(e.target.value)}
+            disabled={summarizing}
             className="bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 min-h-[100px] transition-[border-color,box-shadow] hover:border-primary/30 resize-y"
             placeholder={
               coverLetters.length === 0
                 ? "Add cover letters first, then summarize."
-                : 'No summary yet. Press "Summarize cover letters" to extract the main points.'
+                : 'No summary yet. Press "Summarize cover letters" to extract the main points, or write one yourself.'
             }
           />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-text-muted" aria-live="polite">
+              {summaryDirty ? "Unsaved changes" : "All changes saved"}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCancelSummary}
+                disabled={!summaryDirty || summarizing}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveSummary}
+                disabled={!summaryDirty || summarizing}
+              >
+                Save summary
+              </Button>
+            </div>
+          </div>
           {summaryError && (
             <p className="text-xs text-destructive">{summaryError}</p>
           )}

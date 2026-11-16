@@ -4,9 +4,10 @@ import type { Mock } from "vitest";
 vi.mock("@/utils/storage", () => ({
   saveJson: vi.fn(),
   loadJson: vi.fn(),
+  pruneOrphanChatFiles: vi.fn(),
 }));
 
-import { saveJson, loadJson } from "@/utils/storage";
+import { saveJson, loadJson, pruneOrphanChatFiles } from "@/utils/storage";
 import {
   BACKUP_FORMAT,
   BACKUP_VERSION,
@@ -18,6 +19,7 @@ import {
 
 const saveJsonMock = saveJson as Mock;
 const loadJsonMock = loadJson as Mock;
+const pruneChatMock = pruneOrphanChatFiles as Mock;
 
 const app = {
   id: "6f1d2d0e-aaaa-4bbb-8ccc-1234567890ab",
@@ -36,7 +38,9 @@ const configWithSecret = {
 beforeEach(() => {
   saveJsonMock.mockReset();
   loadJsonMock.mockReset();
+  pruneChatMock.mockReset();
   saveJsonMock.mockResolvedValue(true);
+  pruneChatMock.mockResolvedValue([]);
   loadJsonMock.mockImplementation(async (name: string) => {
     switch (name) {
       case "applications.json":
@@ -205,5 +209,75 @@ describe("restoreBackupBundle", () => {
     const restored = await restoreBackupBundle(bundle);
 
     expect(restored).toEqual(["settings.json"]);
+  });
+
+  it("prunes chat threads for applications missing from the bundle", async () => {
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "applications.json": { applications: [app] },
+        "settings.json": { theme: "dark", accent: "#fff" },
+      },
+    };
+
+    await restoreBackupBundle(bundle);
+
+    expect(pruneChatMock).toHaveBeenCalledWith([app.id]);
+  });
+
+  it("keeps the current application ids when the bundle omits them", async () => {
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: { "settings.json": { theme: "dark", accent: "#fff" } },
+    };
+
+    await restoreBackupBundle(bundle);
+
+    expect(loadJsonMock).toHaveBeenCalledWith("applications.json");
+    expect(pruneChatMock).toHaveBeenCalledWith([app.id]);
+  });
+
+  it("drops drafts for applications that are not in the restored data", async () => {
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "applications.json": { applications: [app] },
+        "drafts.json": {
+          [app.id]: "keep this",
+          "deleted-application": "drop this",
+          "not a valid id": "drop this too",
+        },
+      },
+    };
+
+    await restoreBackupBundle(bundle);
+
+    const draftsCall = saveJsonMock.mock.calls.find(
+      ([name]) => name === "drafts.json",
+    );
+    expect(draftsCall?.[1]).toEqual({ [app.id]: "keep this" });
+  });
+
+  it("only passes safe application ids to the cleanup", async () => {
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "applications.json": {
+          applications: [app, { id: "../../profile" }, { id: "not a uuid" }],
+        },
+      },
+    };
+
+    await restoreBackupBundle(bundle);
+
+    expect(pruneChatMock).toHaveBeenCalledWith([app.id]);
   });
 });
