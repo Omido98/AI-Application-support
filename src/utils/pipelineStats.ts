@@ -55,6 +55,33 @@ export interface PipelineRates {
   offerRate: number;
 }
 
+/** Numeric summary of the time from applying to the first response. */
+export interface TimeToResponseStats {
+  /** Median days, or null when no application has a usable response date. */
+  medianDays: number | null;
+  averageDays: number | null;
+  /** Number of applications with both an applied and a response date. */
+  sampleCount: number;
+}
+
+/** Response/interview/offer performance for one normalized source value. */
+export interface SourceEffectiveness {
+  /** Original casing of the first non-empty value, or "Not set". */
+  source: string;
+  applied: number;
+  responses: number;
+  interviews: number;
+  offers: number;
+  responseRate: number;
+  interviewRate: number;
+  offerRate: number;
+  /** False below SOURCE_EFFECTIVENESS_MIN_SAMPLE; the UI hides percentages. */
+  hasEnoughData: boolean;
+}
+
+/** Hide source percentages below this many applications to avoid noise. */
+export const SOURCE_EFFECTIVENESS_MIN_SAMPLE = 3;
+
 export type StatusCounts = Record<ApplicationStatus, number>;
 
 export interface UpcomingItem {
@@ -88,6 +115,8 @@ export interface PipelineStats {
   upcoming: UpcomingItem[];
   monthlyApplications: MonthlyApplicationCount[];
   recentStatusChanges: RecentStatusChange[];
+  timeToResponse: TimeToResponseStats;
+  sourceEffectiveness: SourceEffectiveness[];
 }
 
 /**
@@ -158,6 +187,135 @@ export function getPipelineRates(totals: PipelineTotals): PipelineRates {
     interviewRate: totals.interviews / denominator,
     offerRate: totals.offers / denominator,
   };
+}
+
+const RESPONSE_STATUSES: ApplicationStatus[] = [
+  "interview",
+  "offer",
+  "rejected",
+];
+
+/** The local day an application was submitted, from the field or history. */
+function appliedDate(application: JobApplication): Date | null {
+  const fromField = parseDateOnly(application.appliedAt);
+  if (fromField) return fromField;
+
+  let earliest: Date | null = null;
+  for (const entry of application.statusHistory) {
+    if (entry.status !== "applied") continue;
+    const at = new Date(entry.at);
+    if (Number.isNaN(at.getTime())) continue;
+    const day = startOfDay(at);
+    if (!earliest || day.getTime() < earliest.getTime()) earliest = day;
+  }
+  return earliest;
+}
+
+/**
+ * Days from the applied date to the first interview, offer or rejection.
+ * Applications without a usable applied date or response event are excluded;
+ * only recorded dates are used, never `updatedAt`, to avoid inventing speed.
+ */
+export function getTimeToResponse(
+  applications: JobApplication[],
+): TimeToResponseStats {
+  const durations: number[] = [];
+
+  for (const application of applications) {
+    const start = appliedDate(application);
+    if (!start) continue;
+
+    let response: Date | null = null;
+    for (const entry of application.statusHistory) {
+      if (!RESPONSE_STATUSES.includes(entry.status)) continue;
+      const at = new Date(entry.at);
+      if (Number.isNaN(at.getTime())) continue;
+      const day = startOfDay(at);
+      if (day.getTime() < start.getTime()) continue;
+      if (!response || day.getTime() < response.getTime()) response = day;
+    }
+    if (!response) continue;
+    durations.push(Math.max(0, daysBetween(start, response)));
+  }
+
+  if (durations.length === 0) {
+    return { medianDays: null, averageDays: null, sampleCount: 0 };
+  }
+
+  const sorted = [...durations].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2 === 0
+      ? (sorted[middle - 1] + sorted[middle]) / 2
+      : sorted[middle];
+  const average =
+    durations.reduce((sum, duration) => sum + duration, 0) / durations.length;
+
+  return {
+    medianDays: median,
+    averageDays: average,
+    sampleCount: durations.length,
+  };
+}
+
+/**
+ * Group applied-or-later applications by source and compute response,
+ * interview and offer rates. Source matching is case-insensitive; blank
+ * sources form a visible "Not set" group.
+ */
+export function getSourceEffectiveness(
+  applications: JobApplication[],
+): SourceEffectiveness[] {
+  const groups = new Map<
+    string,
+    {
+      source: string;
+      applied: number;
+      responses: number;
+      interviews: number;
+      offers: number;
+    }
+  >();
+
+  for (const application of applications) {
+    if (application.status === "wishlist") continue;
+    const raw = application.source.trim();
+    const key = raw ? raw.toLocaleLowerCase() : "__not_set__";
+    const group = groups.get(key) ?? {
+      source: raw || "Not set",
+      applied: 0,
+      responses: 0,
+      interviews: 0,
+      offers: 0,
+    };
+    group.applied += 1;
+    if (application.status !== "applied") group.responses += 1;
+    if (application.status === "interview" || application.status === "offer") {
+      group.interviews += 1;
+    }
+    if (application.status === "offer") group.offers += 1;
+    groups.set(key, group);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      source: group.source,
+      applied: group.applied,
+      responses: group.responses,
+      interviews: group.interviews,
+      offers: group.offers,
+      responseRate: group.applied ? group.responses / group.applied : 0,
+      interviewRate: group.applied ? group.interviews / group.applied : 0,
+      offerRate: group.applied ? group.offers / group.applied : 0,
+      hasEnoughData: group.applied >= SOURCE_EFFECTIVENESS_MIN_SAMPLE,
+    }))
+    .sort(
+      (a, b) =>
+        b.applied - a.applied ||
+        a.source.localeCompare(b.source, undefined, {
+          sensitivity: "base",
+        }),
+    );
 }
 
 /**
@@ -282,5 +440,7 @@ export function computePipelineStats(
     upcoming: getUpcomingItems(applications, now),
     monthlyApplications: getMonthlyApplications(applications, now),
     recentStatusChanges: getRecentStatusChanges(applications),
+    timeToResponse: getTimeToResponse(applications),
+    sourceEffectiveness: getSourceEffectiveness(applications),
   };
 }

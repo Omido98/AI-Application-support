@@ -184,3 +184,40 @@ test("application detail scroll position survives a tab switch", async ({
     .poll(() => detail.evaluate((element) => element.scrollTop))
     .toBe(saved);
 });
+
+test("exports a per-application timeline CSV", async ({ page }) => {
+  const application = makeApplication("timeline", "Timeline Corp", "interview");
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export timeline" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /-timeline-\d{4}-\d{2}-\d{2}\.csv$/,
+  );
+});
+
+test("exports future deadlines and follow-ups as an ICS calendar", async ({
+  page,
+}) => {
+  const application = makeApplication("calendar", "Calendar Corp", "applied", {
+    deadline: dateFromNow(3),
+    followUpAt: dateFromNow(5),
+  });
+  await seed(page, { applications: [application], lastTab: "overview" });
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { name: "Source effectiveness" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Time to first response" }),
+  ).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export calendar (.ics)" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /^applications-calendar-\d{4}-\d{2}-\d{2}\.ics$/,
+  );
+});

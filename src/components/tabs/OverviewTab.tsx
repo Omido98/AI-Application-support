@@ -1,5 +1,13 @@
-import { useEffect, useMemo } from "react";
-import { Bell, CalendarClock, Clock, Inbox, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Bell,
+  CalendarClock,
+  CalendarPlus,
+  Clock,
+  Inbox,
+  Timer,
+  TrendingUp,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useAppStore } from "@/stores/useAppStore";
@@ -10,9 +18,11 @@ import {
   STATUS_ORDER,
 } from "@/utils/applicationStatus";
 import {
+  SOURCE_EFFECTIVENESS_MIN_SAMPLE,
   UPCOMING_WINDOW_DAYS,
   computePipelineStats,
 } from "@/utils/pipelineStats";
+import { countCalendarEvents, exportCalendarIcs } from "@/utils/calendarExport";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
@@ -41,6 +51,11 @@ function StatusBadge({ status }: { status: ApplicationStatus }) {
 
 function formatRate(rate: number): string {
   return `${Math.round(rate * 100)}%`;
+}
+
+function formatDays(value: number | null): string {
+  if (value === null) return "—";
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function formatShortDate(value: string): string {
@@ -85,6 +100,34 @@ export default function OverviewTab() {
     () => computePipelineStats(applications),
     [applications],
   );
+  const calendarEventCount = useMemo(
+    () => countCalendarEvents(applications),
+    [applications],
+  );
+  const [calendarStatus, setCalendarStatus] = useState<string | null>(null);
+  const [exportingCalendar, setExportingCalendar] = useState(false);
+
+  const handleExportCalendar = async () => {
+    setCalendarStatus(null);
+    setExportingCalendar(true);
+    try {
+      const path = await exportCalendarIcs(applications);
+      if (path) {
+        const fileName = path.split(/[\\/]/).pop() ?? path;
+        setCalendarStatus(`Exported ${fileName}.`);
+      } else {
+        setCalendarStatus(
+          "No future deadlines or follow-ups to add to a calendar.",
+        );
+      }
+    } catch (err) {
+      setCalendarStatus(
+        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setExportingCalendar(false);
+    }
+  };
 
   const openApplication = (applicationId: string) => {
     selectApplication(applicationId);
@@ -124,6 +167,8 @@ export default function OverviewTab() {
     upcoming,
     monthlyApplications,
     recentStatusChanges,
+    timeToResponse,
+    sourceEffectiveness,
   } = stats;
 
   const summaryCards = [
@@ -341,6 +386,33 @@ export default function OverviewTab() {
                   })}
                 </ul>
               )}
+              <div className="space-y-1 border-t border-border pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => void handleExportCalendar()}
+                  disabled={calendarEventCount === 0 || exportingCalendar}
+                  title="Download an .ics file with all future deadlines and follow-ups for active applications"
+                >
+                  <CalendarPlus className="size-4" aria-hidden="true" />
+                  {exportingCalendar
+                    ? "Preparing calendar…"
+                    : "Export calendar (.ics)"}
+                </Button>
+                <p className="text-[10px] text-text-muted">
+                  All future deadlines and follow-ups for active applications.
+                </p>
+                {calendarStatus && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="text-[10px] text-text-secondary"
+                  >
+                    {calendarStatus}
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -391,6 +463,161 @@ export default function OverviewTab() {
                   );
                 })}
               </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Time to first response */}
+          <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Timer className="size-4 text-primary" aria-hidden="true" />
+                <h2 className="text-sm font-semibold text-text-primary">
+                  Time to first response
+                </h2>
+              </div>
+              {timeToResponse.sampleCount === 0 ? (
+                <p className="py-6 text-center text-xs text-text-muted">
+                  No response dates recorded yet. Add an applied date and a
+                  later interview, offer or rejection status.
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-mono text-3xl font-semibold text-text-primary">
+                      {formatDays(timeToResponse.medianDays)}
+                    </span>
+                    <span className="text-xs text-text-muted">days median</span>
+                  </div>
+                  <p className="text-[11px] text-text-secondary">
+                    Average {formatDays(timeToResponse.averageDays)} days across{" "}
+                    {timeToResponse.sampleCount} response
+                    {timeToResponse.sampleCount === 1 ? "" : "s"}.
+                  </p>
+                  <p className="border-t border-border pt-2 text-[10px] text-text-muted">
+                    From the applied date to the first interview, offer or
+                    rejection.
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Source effectiveness */}
+          <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+            <CardContent className="space-y-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold text-text-primary">
+                  Source effectiveness
+                </h2>
+                <span className="text-[10px] uppercase tracking-wide text-text-muted">
+                  Applied or later
+                </span>
+              </div>
+              {sourceEffectiveness.length === 0 ? (
+                <p className="py-6 text-center text-xs text-text-muted">
+                  No applications have moved past the wishlist yet.
+                </p>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[330px] text-left text-[11px]">
+                      <caption className="sr-only">
+                        Response, interview and offer rates by application
+                        source
+                      </caption>
+                      <thead>
+                        <tr className="border-b border-border text-[9px] uppercase tracking-wide text-text-muted">
+                          <th scope="col" className="py-1.5 pr-2 font-medium">
+                            Source
+                          </th>
+                          <th
+                            scope="col"
+                            className="px-1.5 py-1.5 text-right font-medium"
+                          >
+                            Apps
+                          </th>
+                          <th
+                            scope="col"
+                            className="px-1.5 py-1.5 text-right font-medium"
+                          >
+                            Response
+                          </th>
+                          <th
+                            scope="col"
+                            className="px-1.5 py-1.5 text-right font-medium"
+                          >
+                            Interview
+                          </th>
+                          <th
+                            scope="col"
+                            className="py-1.5 pl-1.5 text-right font-medium"
+                          >
+                            Offer
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {sourceEffectiveness.map((row) => (
+                          <tr key={row.source}>
+                            <th
+                              scope="row"
+                              className="max-w-[8rem] truncate py-1.5 pr-2 font-normal text-text-secondary"
+                              title={row.source}
+                            >
+                              {row.source}
+                            </th>
+                            <td className="px-1.5 py-1.5 text-right font-mono text-text-primary">
+                              {row.applied}
+                            </td>
+                            <td className="px-1.5 py-1.5 text-right font-mono text-text-primary">
+                              {row.hasEnoughData ? (
+                                formatRate(row.responseRate)
+                              ) : (
+                                <span
+                                  className="text-text-muted"
+                                  title={`At least ${SOURCE_EFFECTIVENESS_MIN_SAMPLE} applications are needed for percentages`}
+                                >
+                                  —
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-1.5 py-1.5 text-right font-mono text-text-primary">
+                              {row.hasEnoughData ? (
+                                formatRate(row.interviewRate)
+                              ) : (
+                                <span
+                                  className="text-text-muted"
+                                  title={`At least ${SOURCE_EFFECTIVENESS_MIN_SAMPLE} applications are needed for percentages`}
+                                >
+                                  —
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-1.5 pl-1.5 text-right font-mono text-text-primary">
+                              {row.hasEnoughData ? (
+                                formatRate(row.offerRate)
+                              ) : (
+                                <span
+                                  className="text-text-muted"
+                                  title={`At least ${SOURCE_EFFECTIVENESS_MIN_SAMPLE} applications are needed for percentages`}
+                                >
+                                  —
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="border-t border-border pt-2 text-[10px] text-text-muted">
+                    Percentages appear at {SOURCE_EFFECTIVENESS_MIN_SAMPLE}+
+                    applications per source; rejections count as responses.
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
