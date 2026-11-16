@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "ai-application-support"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "ego-tree",
  "futures-util",
