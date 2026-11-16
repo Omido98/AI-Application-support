@@ -244,7 +244,6 @@ test("CV sub-view starts from the profile and exports a Word file", async ({
   await expect(page.getByLabel("CV preview")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Jane Doe" })).toBeVisible();
   await page.getByRole("button", { name: "Edit" }).click();
-
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export Word" }).click();
   const download = await downloadPromise;
@@ -253,4 +252,28 @@ test("CV sub-view starts from the profile and exports a Word file", async ({
   await page.reload();
   await page.getByRole("button", { name: "Tailored CV" }).click();
   await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
+});
+
+test("CV section rewrite dialog opens with guidance", async ({ page }) => {
+  const application = makeApplication("cv-rewrite", "Rewrite Corp", "applied");
+  await seed(page, { applications: [application], withChat: true });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await expect(page.getByText("Saved locally")).toBeVisible();
+
+  const rewrite = page.getByRole("button", { name: "AI rewrite" });
+  await expect(rewrite).toBeEnabled();
+  await rewrite.click();
+  await expect(
+    page.getByRole("heading", { name: "Rewrite summary and headline" }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Guidance for the rewrite (optional)")
+    .fill("Make it more concise.");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Rewrite summary and headline" }),
+  ).toHaveCount(0);
 });

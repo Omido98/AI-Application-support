@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowDown,
@@ -27,6 +27,7 @@ import type {
   CvOtherEngagement,
   CvPageSize,
   CvProject,
+  CvRewriteTarget,
   CvSectionId,
 } from "@/types/cv";
 import { useCvStore } from "@/stores/cvStore";
@@ -41,6 +42,8 @@ import { analyzeCvAts } from "@/utils/cvAts";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import CvPreview from "@/components/cv/CvPreview";
+import CvRewriteDialog from "@/components/cv/CvRewriteDialog";
+import { rewriteCvSection } from "@/utils/cvRewrite";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -86,6 +89,7 @@ function SectionCard({
   onMove,
   canMoveUp,
   canMoveDown,
+  action,
   children,
 }: {
   section: CvSectionId;
@@ -93,16 +97,18 @@ function SectionCard({
   onMove: (direction: -1 | 1) => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <Card className="bg-surface border-border">
       <CardContent className="space-y-3 pt-4">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-text-primary">
             {CV_SECTION_LABELS[language][section]}
           </h3>
           <div className="flex items-center gap-1">
+            {action}
             <Button
               variant="ghost"
               size="icon-sm"
@@ -228,6 +234,13 @@ export default function CvBuilder({
   const [previousDocument, setPreviousDocument] = useState<CvDocument | null>(
     null,
   );
+  const [rewriteTarget, setRewriteTarget] = useState<CvRewriteTarget | null>(
+    null,
+  );
+  const [rewriteLabel, setRewriteLabel] = useState("");
+  const [rewriteBusy, setRewriteBusy] = useState(false);
+  const [rewriteError, setRewriteError] = useState<string | null>(null);
+  const rewriteController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!profile.isLoaded) void profile.loadProfile();
@@ -374,6 +387,101 @@ export default function CvBuilder({
     setCv(application.id, previousDocument);
     setPreviousDocument(null);
     setExportStatus("Restored the previous CV.");
+  };
+
+  const closeRewrite = () => {
+    rewriteController.current?.abort();
+    rewriteController.current = null;
+    setRewriteTarget(null);
+    setRewriteBusy(false);
+    setRewriteError(null);
+  };
+
+  const requestRewrite = (target: CvRewriteTarget, label: string) => {
+    if (!document || !hasApiKey) return;
+    rewriteController.current?.abort();
+    setRewriteTarget(target);
+    setRewriteLabel(label);
+    setRewriteError(null);
+  };
+
+  const handleRewrite = async (instruction: string) => {
+    if (!document || !rewriteTarget) return;
+    const before = document;
+    const controller = new AbortController();
+    rewriteController.current?.abort();
+    rewriteController.current = controller;
+    setRewriteBusy(true);
+    setRewriteError(null);
+    try {
+      const result = await rewriteCvSection({
+        application,
+        profile,
+        document,
+        target: rewriteTarget,
+        instruction,
+        config: apiConfig,
+        signal: controller.signal,
+      });
+      updateCv(application.id, (current) => {
+        if (result.kind === "summary") {
+          return {
+            ...current,
+            headline: result.headline || current.headline,
+            summary: result.summary || current.summary,
+          };
+        }
+        if (result.kind === "experience") {
+          return {
+            ...current,
+            experience: current.experience.map((item) =>
+              item.id === rewriteTarget.id
+                ? { ...item, bullets: result.bullets }
+                : item,
+            ),
+          };
+        }
+        if (result.kind === "project") {
+          return {
+            ...current,
+            projects: current.projects.map((item) =>
+              item.id === rewriteTarget.id
+                ? {
+                    ...item,
+                    title: result.title || item.title,
+                    description: result.description || item.description,
+                    bullets: result.bullets,
+                  }
+                : item,
+            ),
+          };
+        }
+        return {
+          ...current,
+          otherEngagements: current.otherEngagements.map((item) =>
+            item.id === rewriteTarget.id
+              ? { ...item, bullets: result.bullets }
+              : item,
+          ),
+        };
+      });
+      setPreviousDocument(before);
+      setExportStatus(`Rewrote ${rewriteLabel}.`);
+      setRewriteTarget(null);
+    } catch (error) {
+      if (
+        controller.signal.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        return;
+      }
+      setRewriteError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (rewriteController.current === controller) {
+        rewriteController.current = null;
+        setRewriteBusy(false);
+      }
+    }
   };
 
   const handleExport = async () => {
@@ -547,9 +655,25 @@ export default function CvBuilder({
   const sectionIndex = (section: CvSectionId) =>
     document.sectionOrder.indexOf(section);
 
+  const rewriteAction = (target: CvRewriteTarget, label: string) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={!hasApiKey || rewriteBusy}
+      title={
+        hasApiKey
+          ? `Rewrite ${label} with AI`
+          : "Configure an AI provider in Settings to use rewriting"
+      }
+      onClick={() => requestRewrite(target, label)}
+    >
+      <Sparkles className="size-3.5" /> AI rewrite
+    </Button>
+  );
+
   const renderSection = (section: CvSectionId) => {
     const index = sectionIndex(section);
-    const card = (children: ReactNode) => (
+    const card = (children: ReactNode, action?: ReactNode) => (
       <SectionCard
         key={section}
         section={section}
@@ -557,6 +681,7 @@ export default function CvBuilder({
         onMove={(direction) => moveSection(section, direction)}
         canMoveUp={index > 0}
         canMoveDown={index < document.sectionOrder.length - 1}
+        action={action}
       >
         {children}
       </SectionCard>
@@ -572,6 +697,7 @@ export default function CvBuilder({
             className={textareaClass}
             aria-label="Professional summary"
           />,
+          rewriteAction({ kind: "summary" }, "summary and headline"),
         );
       case "skills":
         return card(
@@ -627,6 +753,10 @@ export default function CvBuilder({
                     item.company || "company"
                   }`}
                 />
+                {rewriteAction(
+                  { kind: "experience", id: item.id },
+                  `${item.role || "role"} bullets`,
+                )}
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Input
                     value={item.role}
@@ -892,6 +1022,10 @@ export default function CvBuilder({
                   }
                   label={item.title || item.description || "project"}
                 />
+                {rewriteAction(
+                  { kind: "project", id: item.id },
+                  `${item.title || "project"} text`,
+                )}
                 <Input
                   value={item.title}
                   onChange={(event) =>
@@ -1156,6 +1290,10 @@ export default function CvBuilder({
                   }
                   label={item.organization || "other experience"}
                 />
+                {rewriteAction(
+                  { kind: "other", id: item.id },
+                  `${item.organization || "other experience"} bullets`,
+                )}
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Input
                     value={item.organization}
@@ -1675,6 +1813,14 @@ export default function CvBuilder({
           </aside>
         </div>
       )}
+      <CvRewriteDialog
+        open={rewriteTarget !== null}
+        label={rewriteLabel}
+        busy={rewriteBusy}
+        error={rewriteError}
+        onClose={closeRewrite}
+        onRewrite={(instruction) => void handleRewrite(instruction)}
+      />
     </div>
   );
 }

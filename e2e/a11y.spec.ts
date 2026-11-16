@@ -31,7 +31,7 @@ test.describe("WCAG 2.2 AA", () => {
   });
 
   test("Tailored CV sub-view", async ({ page }, testInfo) => {
-    await openApp(page, { applications: [application] });
+    await openApp(page, { applications: [application], withChat: true });
     await page.getByRole("button", { name: "Tailored CV" }).click();
     await page.getByRole("button", { name: "Start from profile" }).click();
     await expect(
@@ -39,6 +39,13 @@ test.describe("WCAG 2.2 AA", () => {
     ).toBeVisible();
 
     await scan(page, testInfo, { label: "cv-sub-view" });
+
+    await page.getByRole("button", { name: "AI rewrite" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Rewrite summary and headline" }),
+    ).toBeVisible();
+    await scan(page, testInfo, { label: "cv-rewrite-dialog" });
+    await page.getByRole("button", { name: "Cancel" }).click();
 
     await page.getByRole("button", { name: "Preview" }).click();
     await expect(page.getByLabel("CV preview")).toBeVisible();

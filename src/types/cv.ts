@@ -122,3 +122,12 @@ export interface CvDocument {
   otherEngagements: CvOtherEngagement[];
   sectionOrder: CvSectionId[];
 }
+
+/** One textual section the AI can rewrite in place. */
+export type CvRewriteKind = "summary" | "experience" | "project" | "other";
+
+export interface CvRewriteTarget {
+  kind: CvRewriteKind;
+  /** Experience/project/other entry id for non-summary targets. */
+  id?: string;
+}

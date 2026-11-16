@@ -40,14 +40,17 @@ no AI call.
    - section order and entry order.
 6. Switch to **Preview** for a formatted page view that matches the Word
    layout, then back to **Edit**.
-7. **Export Word** saves a `.docx` through the native save dialog.
+7. Use **AI rewrite** on the summary, a role, a project or other experience to
+   rewrite only that section. Add optional guidance such as “make it shorter”
+   or “lead with the accessibility work”; the rest of the CV stays untouched.
+8. **Export Word** saves a `.docx` through the native save dialog.
 
 Edits autosave to `cv_<applicationId>.json` in the app data folder. The
 document stores structured content, not the DOCX bytes.
 
-Regenerating or replacing a draft keeps the previous version available for
-**Undo replacement** during the current session. The undo is not persisted
-after restarting the app.
+Regenerating, replacing a draft or rewriting a section keeps the previous
+version available for **Undo replacement** during the current session. The
+undo is not persisted after restarting the app.
 
 ## Truthfulness and grounding
 
