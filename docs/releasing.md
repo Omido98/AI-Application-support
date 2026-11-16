@@ -33,7 +33,11 @@ The `PR verification` workflow runs:
   system libraries first);
 - Playwright browser-mode e2e tests for onboarding, creating and filtering
   applications, theme switching, keyboard shortcuts, the Overview tab, and
-  filter persistence.
+  filter persistence;
+- axe accessibility checks (WCAG 2.1/2.2 AA, serious/critical gate) and
+  lightweight performance checks (the latter non-blocking while stabilising);
+- native tauri-driver smoke tests on Windows and Linux (real Tauri window, IPC
+  and JSON writes); macOS UI stays covered by browser Playwright.
 
 ## Signing
 

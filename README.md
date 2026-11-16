@@ -127,6 +127,8 @@ Useful commands:
 - `npm run lint` — ESLint
 - `npm run format:check` / `npm run format` — Prettier check / rewrite
 - `npm run test:e2e` — Playwright browser-mode end-to-end tests
+- `npm run build:e2e` / `npm run test:e2e:native` — native tauri-driver smoke tests
+  (see [docs/native-e2e.md](docs/native-e2e.md))
 - `npm run test:a11y` — axe WCAG 2.1/2.2 AA checks (see [docs/quality.md](docs/quality.md))
 - `npm run test:perf` — render and streaming-update performance checks
 - `npm run version:check` / `npm run version:bump -- X.Y.Z` — release version
