@@ -180,6 +180,51 @@ describe("sendMessage (OpenAI-compatible)", () => {
     });
   });
 
+  it("asks streaming providers to include usage in the final chunk", async () => {
+    mockChatSequence([
+      { kind: "stream", data: openaiMessage({ content: "Hello!" }) },
+    ]);
+
+    await sendMessage([], baseConfig, "system");
+
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "zen_chat_stream",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
+      }),
+    );
+  });
+
+  it("retries once without stream_options when a provider rejects it", async () => {
+    mockChatSequence([
+      {
+        kind: "streamError",
+        message: "400 Bad Request: Unsupported parameter: stream_options",
+      },
+      { kind: "stream", data: openaiMessage({ content: "Still streaming." }) },
+    ]);
+
+    const result = await sendMessage([], baseConfig, "system");
+
+    expect(result).toEqual({ content: "Still streaming." });
+    const payloads = mockedInvoke.mock.calls
+      .filter(([cmd]) => cmd === "zen_chat_stream")
+      .map(
+        ([, args]) => (args as { payload: Record<string, unknown> }).payload,
+      );
+    expect(payloads).toHaveLength(2);
+    expect(payloads[0]["stream_options"]).toEqual({ include_usage: true });
+    expect(payloads[1]["stream_options"]).toBeUndefined();
+    expect(payloads[1]["stream"]).toBe(true);
+    // The retry keeps streaming instead of falling back to a one-shot call.
+    expect(mockedInvoke.mock.calls.some(([cmd]) => cmd === "zen_chat")).toBe(
+      false,
+    );
+  });
+
   it("reports tool activity and the sources that were consulted", async () => {
     mockChatSequence([
       {
@@ -551,6 +596,29 @@ describe("sendMessage (Anthropic)", () => {
     for (const call of chatCalls) {
       expect(call[1]).not.toHaveProperty("payload.tools");
     }
+  });
+
+  it("never sends OpenAI stream_options to Anthropic", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "zen_chat_stream_cancel") return null;
+      if (cmd === "zen_chat_stream") {
+        setTimeout(() => {
+          streamOnEvent(args)?.onmessage({
+            type: "done",
+            data: { content: [anthropicText("Plain answer.")] },
+          });
+        });
+        return "req-1";
+      }
+      return null;
+    });
+
+    await sendMessage([], anthropicConfig, "system");
+
+    const streamCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "zen_chat_stream",
+    );
+    expect(streamCall?.[1]).not.toHaveProperty("payload.stream_options");
   });
 });
 
