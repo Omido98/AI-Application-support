@@ -1,4 +1,4 @@
-import { saveJson, loadJson } from "@/utils/storage";
+import { saveJson, loadJson, pruneOrphanChatFiles } from "@/utils/storage";
 
 /**
  * Backup & restore of all app data as a single JSON bundle.
@@ -114,17 +114,59 @@ export function parseBackupBundle(raw: string): BackupBundle | null {
   }
 }
 
+/** Application ids that will exist after this restore. When the bundle omits
+ * applications.json the current file is kept, so its ids still count. */
+async function restoredApplicationIds(bundle: BackupBundle): Promise<string[]> {
+  const source =
+    "applications.json" in bundle.files
+      ? bundle.files["applications.json"]
+      : await loadJson<unknown>("applications.json");
+  const ids = new Set<string>();
+  if (isRecord(source) && Array.isArray(source.applications)) {
+    for (const app of source.applications) {
+      if (
+        isRecord(app) &&
+        typeof app.id === "string" &&
+        SAFE_APPLICATION_ID_RE.test(app.id)
+      ) {
+        ids.add(app.id);
+      }
+    }
+  }
+  return [...ids];
+}
+
+/** Drop draft entries whose application is no longer in the restored data. */
+function draftsForApplications(
+  data: unknown,
+  applicationIds: string[],
+): unknown {
+  if (!isRecord(data)) return data;
+  const valid = new Set(applicationIds);
+  return Object.fromEntries(
+    Object.entries(data).filter(([threadId]) => valid.has(threadId)),
+  );
+}
+
 /** Write every file of the bundle back to the data directory. */
 export async function restoreBackupBundle(
   bundle: BackupBundle,
 ): Promise<string[]> {
+  const applicationIds = await restoredApplicationIds(bundle);
   const restored: string[] = [];
   for (const [name, data] of Object.entries(bundle.files)) {
     if (!SAFE_NAME_RE.test(name)) continue;
-    const safe = fileForBackup(name, data);
+    const safe =
+      name === "drafts.json"
+        ? draftsForApplications(fileForBackup(name, data), applicationIds)
+        : fileForBackup(name, data);
     if (safe == null) continue;
     await saveJson(name, safe);
     restored.push(name);
   }
+
+  // Thread files for applications that no longer exist would otherwise stay
+  // on disk forever (and are not part of any backup either).
+  await pruneOrphanChatFiles(applicationIds);
   return restored;
 }

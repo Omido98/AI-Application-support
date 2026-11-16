@@ -197,3 +197,42 @@ export async function deleteFile(path: string): Promise<boolean> {
     return false;
   }
 }
+
+/** Application ids are the only variable part of a `chat_<id>.json` name. */
+const CHAT_FILE_RE = /^chat_([a-zA-Z0-9-]+)\.json(\.bak)?$/;
+
+/**
+ * Delete chat thread files whose application is not in `validIds` (used after
+ * a backup import). Only app-created `chat_<id>.json` files (and their `.bak`
+ * copies) are touched; unrelated JSON files are left alone. Returns the
+ * removed names. A failure is reported through the storage-issue channel but
+ * does not fail the import that triggered the cleanup.
+ */
+export async function pruneOrphanChatFiles(
+  validIds: string[],
+): Promise<string[]> {
+  if (!isTauriRuntime()) {
+    const valid = new Set(validIds);
+    const removed: string[] = [];
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith("aas:chat_")) continue;
+      const name = key.slice("aas:".length);
+      const id = CHAT_FILE_RE.exec(name)?.[1];
+      if (!id || valid.has(id)) continue;
+      localStorage.removeItem(key);
+      removed.push(name);
+    }
+    return removed.sort();
+  }
+
+  try {
+    // The Rust command resolves the app-data directory itself, so the webview
+    // never supplies a path.
+    return await invoke<string[]>("prune_orphan_chat_files", { validIds });
+  } catch (err) {
+    reportIssue("delete", "chat threads", errorMessage(err));
+    console.error("[storage] Could not remove orphan chat threads:", err);
+    return [];
+  }
+}

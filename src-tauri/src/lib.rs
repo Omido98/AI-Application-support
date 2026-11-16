@@ -3,7 +3,7 @@ use futures_util::StreamExt;
 use keyring::Entry;
 use scraper::{ElementRef, Node, Selector};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -1698,6 +1698,72 @@ async fn delete_data_file(app: tauri::AppHandle, name: String) -> Result<(), Str
 }
 
 // ──────────────────────────────────────────────
+// Orphan chat-thread cleanup (after a backup import)
+// ──────────────────────────────────────────────
+
+/// The application id in a `chat_<id>.json` (or `.json.bak`) thread file.
+/// Anything else — backups, config, unrelated user notes — is ignored, so the
+/// cleanup can never touch a file the app did not create.
+fn chat_thread_id(file_name: &str) -> Option<&str> {
+    let stem = file_name
+        .strip_suffix(".json.bak")
+        .or_else(|| file_name.strip_suffix(".json"))?;
+    let id = stem.strip_prefix("chat_")?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some(id)
+}
+
+/// Delete thread files whose application is no longer in the restored data.
+/// Runs against a directory handed in by the caller, never a webview path.
+/// Returns the names it removed, sorted for a stable result.
+fn prune_orphan_chat_files_at(dir: &Path, valid_ids: &[String]) -> Result<Vec<String>, String> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // No data directory means there is nothing to clean up.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(format!("Could not read {}: {err}", dir.display())),
+    };
+    let valid: HashSet<&str> = valid_ids.iter().map(String::as_str).collect();
+    let mut removed = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(id) = chat_thread_id(&name) else {
+            continue;
+        };
+        if valid.contains(id) {
+            continue;
+        }
+        fs::remove_file(entry.path())
+            .map_err(|err| format!("Could not delete orphan chat file {name}: {err}"))?;
+        removed.push(name);
+    }
+    removed.sort();
+    Ok(removed)
+}
+
+#[tauri::command]
+async fn prune_orphan_chat_files(
+    app: tauri::AppHandle,
+    valid_ids: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Could not resolve the app data directory: {err}"))?;
+    tauri::async_runtime::spawn_blocking(move || prune_orphan_chat_files_at(&dir, &valid_ids))
+        .await
+        .map_err(|err| format!("Orphan chat cleanup task failed: {err}"))?
+}
+
+// ──────────────────────────────────────────────
 // Backup file dialogs
 // ──────────────────────────────────────────────
 
@@ -2273,6 +2339,7 @@ pub fn run() {
             load_data_file,
             save_data_file,
             delete_data_file,
+            prune_orphan_chat_files,
             export_backup_file,
             export_csv_file,
             save_export_file,
@@ -2705,6 +2772,74 @@ mod tests {
         assert!(dir.join("nested.json").is_dir());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn orphan_chat_cleanup_keeps_known_threads_and_ignores_unrelated_files() {
+        let dir = test_data_dir("prune-chat");
+        for name in [
+            "chat_keep.json",
+            "chat_keep.json.bak",
+            "chat_keep-2.json",
+            "chat_orphan.json",
+            "chat_orphan.json.bak",
+            "applications.json",
+            "notes.json",
+            "chat_not a thread.json",
+        ] {
+            fs::write(dir.join(name), b"[]").unwrap();
+        }
+
+        let removed =
+            prune_orphan_chat_files_at(&dir, &["keep".to_string(), "keep-2".to_string()]).unwrap();
+
+        assert_eq!(removed, vec!["chat_orphan.json", "chat_orphan.json.bak"]);
+        assert!(dir.join("chat_keep.json").exists());
+        assert!(dir.join("chat_keep.json.bak").exists());
+        assert!(dir.join("chat_keep-2.json").exists());
+        assert!(dir.join("applications.json").exists());
+        assert!(dir.join("notes.json").exists());
+        assert!(dir.join("chat_not a thread.json").exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn orphan_chat_cleanup_with_no_applications_removes_every_thread() {
+        let dir = test_data_dir("prune-all-chat");
+        fs::write(dir.join("chat_one.json"), b"[]").unwrap();
+        fs::write(dir.join("chat_two.json"), b"[]").unwrap();
+        fs::write(dir.join("profile.json"), b"{}").unwrap();
+
+        let removed = prune_orphan_chat_files_at(&dir, &[]).unwrap();
+
+        assert_eq!(removed, vec!["chat_one.json", "chat_two.json"]);
+        assert!(dir.join("profile.json").exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn orphan_chat_cleanup_handles_a_missing_directory() {
+        let dir = test_data_dir("prune-missing");
+        let missing = dir.join("does-not-exist");
+
+        assert!(prune_orphan_chat_files_at(&missing, &[])
+            .unwrap()
+            .is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chat_thread_id_only_accepts_thread_file_names() {
+        assert_eq!(chat_thread_id("chat_abc-1.json"), Some("abc-1"));
+        assert_eq!(chat_thread_id("chat_abc-1.json.bak"), Some("abc-1"));
+        assert_eq!(chat_thread_id("applications.json"), None);
+        assert_eq!(chat_thread_id("chat_.json"), None);
+        assert_eq!(chat_thread_id("chat_../x.json"), None);
+        assert_eq!(chat_thread_id("chat_a b.json"), None);
+        assert_eq!(chat_thread_id("chat_a.json.corrupt-1.json"), None);
     }
 
     #[test]
