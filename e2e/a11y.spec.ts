@@ -39,6 +39,10 @@ test.describe("WCAG 2.2 AA", () => {
     ).toBeVisible();
 
     await scan(page, testInfo, { label: "cv-sub-view" });
+
+    await page.getByRole("button", { name: "Preview" }).click();
+    await expect(page.getByLabel("CV preview")).toBeVisible();
+    await scan(page, testInfo, { label: "cv-preview" });
   });
 
   test("Cover Letter Developer tab", async ({ page }, testInfo) => {

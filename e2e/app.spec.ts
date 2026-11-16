@@ -240,6 +240,11 @@ test("CV sub-view starts from the profile and exports a Word file", async ({
   await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
   await expect(page.getByText("Saved locally")).toBeVisible();
 
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByLabel("CV preview")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jane Doe" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit" }).click();
+
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export Word" }).click();
   const download = await downloadPromise;

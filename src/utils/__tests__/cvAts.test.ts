@@ -54,7 +54,10 @@ const profile: ProfileData = {
       isCurrent: true,
       jobDescription:
         "Build TypeScript interfaces and accessible React components.",
-      achievements: ["Reduced reporting time by 30%"],
+      achievements: [
+        "Reduced reporting time by 30%",
+        "Supported 1,800 technicians",
+      ],
       projects: [],
     },
   ],
@@ -97,7 +100,7 @@ describe("extractJobKeywords", () => {
 describe("analyzeCvAts", () => {
   it("reports exact matches and missing terms without claiming them", () => {
     const doc = document();
-    const report = analyzeCvAts(doc, application);
+    const report = analyzeCvAts(doc, application, profile);
 
     expect(report.matchedKeywords).toEqual(
       expect.arrayContaining(["typescript", "react", "accessibility"]),
@@ -114,11 +117,24 @@ describe("analyzeCvAts", () => {
     expect(cvPlainText(doc)).toContain("Reduced reporting time");
   });
 
+  it("flags numbers that do not appear in the profile or extra context", () => {
+    const doc = document();
+    expect(analyzeCvAts(doc, application, profile).unverifiedNumbers).toEqual(
+      [],
+    );
+
+    doc.experience[0].bullets.push("Increased revenue by 47%.");
+    const warnings = analyzeCvAts(doc, application, profile).unverifiedNumbers;
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("47%");
+    expect(warnings[0]).toContain("bullet");
+  });
+
   it("flags missing contact details and short skills", () => {
     const doc = document();
     doc.contact.email = "";
     doc.skills = ["TypeScript"];
-    const report = analyzeCvAts(doc, application);
+    const report = analyzeCvAts(doc, application, profile);
 
     expect(report.checks.find((check) => check.id === "contact")?.ok).toBe(
       false,

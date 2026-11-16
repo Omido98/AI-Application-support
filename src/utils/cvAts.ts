@@ -1,4 +1,4 @@
-import type { JobApplication } from "@/types";
+import type { JobApplication, ProfileData } from "@/types";
 import type { CvDocument } from "@/types/cv";
 
 export interface CvAtsCheck {
@@ -14,6 +14,7 @@ export interface CvAtsReport {
   keywordCoverage: number;
   wordCount: number;
   checks: CvAtsCheck[];
+  unverifiedNumbers: string[];
 }
 
 const STOPWORDS = new Set(
@@ -278,9 +279,77 @@ function normalizeForMatch(value: string): string {
     .trim();
 }
 
+const NUMBER_RE = /\b\d[\d,]*(?:\.\d+)?(?:%|k|m|bn)?/gi;
+
+function numericTokens(value: string): string[] {
+  return (value.match(NUMBER_RE) ?? []).map((token) =>
+    token.toLowerCase().replace(/,/g, ""),
+  );
+}
+
+function isYear(token: string): boolean {
+  return /^(19|20)\d{2}$/.test(token);
+}
+
+/**
+ * Heuristic check for numbers in the CV prose that do not occur anywhere in
+ * the profile or the extra context. It deliberately does not block export;
+ * it surfaces claims the user should verify.
+ */
+export function findUnverifiedNumbers(
+  document: CvDocument,
+  profile: ProfileData,
+): string[] {
+  const source = `${JSON.stringify(profile)}\n${document.extraContext}`;
+  const sourceNumbers = new Set(numericTokens(source));
+  const fields: { label: string; text: string }[] = [
+    { label: "Summary", text: document.summary },
+    ...document.experience
+      .filter((item) => item.included)
+      .flatMap((item) =>
+        item.bullets.map((bullet, index) => ({
+          label: `${item.role || "Role"} bullet ${index + 1}`,
+          text: bullet,
+        })),
+      ),
+    ...document.projects
+      .filter((item) => item.included)
+      .flatMap((item) =>
+        item.bullets.map((bullet, index) => ({
+          label: `${item.title || "Project"} bullet ${index + 1}`,
+          text: bullet,
+        })),
+      ),
+    ...document.otherEngagements
+      .filter((item) => item.included)
+      .flatMap((item) =>
+        item.bullets.map((bullet, index) => ({
+          label: `${item.organization || "Other experience"} bullet ${
+            index + 1
+          }`,
+          text: bullet,
+        })),
+      ),
+  ];
+
+  const warnings = new Map<string, string>();
+  for (const field of fields) {
+    for (const token of numericTokens(field.text)) {
+      if (isYear(token) || sourceNumbers.has(token)) continue;
+      if (warnings.has(token)) continue;
+      warnings.set(
+        token,
+        `${field.label} mentions “${token}”, which is not in your profile or extra context.`,
+      );
+    }
+  }
+  return [...warnings.values()].slice(0, 8);
+}
+
 export function analyzeCvAts(
   document: CvDocument,
   application: JobApplication,
+  profile: ProfileData,
 ): CvAtsReport {
   const jobText = [
     application.jobTitle,
@@ -359,5 +428,6 @@ export function analyzeCvAts(
       keywords.length === 0 ? 0 : matchedKeywords.length / keywords.length,
     wordCount,
     checks,
+    unverifiedNumbers: findUnverifiedNumbers(document, profile),
   };
 }

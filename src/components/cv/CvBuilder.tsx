@@ -5,13 +5,16 @@ import {
   ArrowUp,
   CheckCircle2,
   Download,
+  Eye,
   FileText,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
   Sparkles,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import type { JobApplication } from "@/types";
 import type {
@@ -37,6 +40,7 @@ import {
 import { analyzeCvAts } from "@/utils/cvAts";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
+import CvPreview from "@/components/cv/CvPreview";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -220,6 +224,10 @@ export default function CvBuilder({
   const [extraContext, setExtraContext] = useState("");
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [view, setView] = useState<"edit" | "preview">("edit");
+  const [previousDocument, setPreviousDocument] = useState<CvDocument | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!profile.isLoaded) void profile.loadProfile();
@@ -242,6 +250,11 @@ export default function CvBuilder({
     setExtraContext(document.extraContext);
   }, [document]);
 
+  useEffect(() => {
+    setPreviousDocument(null);
+    setView("edit");
+  }, [application.id]);
+
   const profileHasContent = Boolean(
     profile.fullName.trim() ||
     profile.email.trim() ||
@@ -261,8 +274,8 @@ export default function CvBuilder({
   );
 
   const ats = useMemo(
-    () => (document ? analyzeCvAts(document, application) : null),
-    [document, application],
+    () => (document ? analyzeCvAts(document, application, profile) : null),
+    [document, application, profile],
   );
 
   const patch = (updater: (current: CvDocument) => CvDocument) => {
@@ -346,12 +359,21 @@ export default function CvBuilder({
 
   const handleGenerate = async () => {
     setExportStatus(null);
-    await generateCv({
+    const before = document;
+    const ok = await generateCv({
       application,
       profile,
       config: apiConfig,
       options: { language, pageSize, extraContext },
     });
+    if (ok && before) setPreviousDocument(before);
+  };
+
+  const handleUndo = () => {
+    if (!previousDocument) return;
+    setCv(application.id, previousDocument);
+    setPreviousDocument(null);
+    setExportStatus("Restored the previous CV.");
   };
 
   const handleExport = async () => {
@@ -1246,6 +1268,29 @@ export default function CvBuilder({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-md border border-border bg-field p-0.5">
+            <Button
+              variant={view === "edit" ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={view === "edit"}
+              onClick={() => setView("edit")}
+            >
+              <Pencil className="size-3.5" /> Edit
+            </Button>
+            <Button
+              variant={view === "preview" ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={view === "preview"}
+              onClick={() => setView("preview")}
+            >
+              <Eye className="size-3.5" /> Preview
+            </Button>
+          </div>
+          {previousDocument && (
+            <Button variant="ghost" size="sm" onClick={handleUndo}>
+              <Undo2 className="size-3.5" /> Undo replacement
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -1324,287 +1369,312 @@ export default function CvBuilder({
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-4">
-          <Card className="bg-surface border-border">
-            <CardContent className="space-y-3 pt-4">
-              <h3 className="text-sm font-semibold text-text-primary">
-                Contact
-              </h3>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="cv-contact-full-name">Full name</Label>
-                  <Input
-                    id="cv-contact-full-name"
-                    value={document.contact.fullName}
-                    onChange={(event) =>
-                      setField("contact", {
-                        ...document.contact,
-                        fullName: event.target.value,
-                      })
-                    }
-                    placeholder="Full name"
-                    className={fieldClass}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cv-contact-email">Email</Label>
-                  <Input
-                    id="cv-contact-email"
-                    value={document.contact.email}
-                    onChange={(event) =>
-                      setField("contact", {
-                        ...document.contact,
-                        email: event.target.value,
-                      })
-                    }
-                    placeholder="Email"
-                    className={fieldClass}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cv-contact-phone">Phone</Label>
-                  <Input
-                    id="cv-contact-phone"
-                    value={document.contact.phone}
-                    onChange={(event) =>
-                      setField("contact", {
-                        ...document.contact,
-                        phone: event.target.value,
-                      })
-                    }
-                    placeholder="Phone"
-                    className={fieldClass}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cv-contact-location">Location</Label>
-                  <Input
-                    id="cv-contact-location"
-                    value={document.contact.location}
-                    onChange={(event) =>
-                      setField("contact", {
-                        ...document.contact,
-                        location: event.target.value,
-                      })
-                    }
-                    placeholder="Location"
-                    className={fieldClass}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cv-contact-linkedin">LinkedIn URL</Label>
-                  <Input
-                    id="cv-contact-linkedin"
-                    value={document.contact.linkedinUrl}
-                    onChange={(event) =>
-                      setField("contact", {
-                        ...document.contact,
-                        linkedinUrl: event.target.value,
-                      })
-                    }
-                    placeholder="LinkedIn URL"
-                    className={fieldClass}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cv-contact-portfolio">
-                    Portfolio / website
-                  </Label>
-                  <Input
-                    id="cv-contact-portfolio"
-                    value={document.contact.portfolioUrl}
-                    onChange={(event) =>
-                      setField("contact", {
-                        ...document.contact,
-                        portfolioUrl: event.target.value,
-                      })
-                    }
-                    placeholder="Portfolio / website"
-                    className={fieldClass}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cv-contact-github">GitHub URL</Label>
-                  <Input
-                    id="cv-contact-github"
-                    value={document.contact.githubUrl}
-                    onChange={(event) =>
-                      setField("contact", {
-                        ...document.contact,
-                        githubUrl: event.target.value,
-                      })
-                    }
-                    placeholder="GitHub URL"
-                    className={fieldClass}
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-surface border-border">
-            <CardContent className="space-y-3 pt-4">
-              <h3 className="text-sm font-semibold text-text-primary">
-                Headline
-              </h3>
-              <Input
-                value={document.headline}
-                onChange={(event) => setField("headline", event.target.value)}
-                placeholder="Headline, e.g. Frontend Engineer focused on accessible design systems"
-                className={fieldClass}
-              />
-            </CardContent>
-          </Card>
-
-          {document.sectionOrder.map(renderSection)}
-        </div>
-
-        <aside className="space-y-4 lg:sticky lg:top-0 lg:self-start">
-          <Card className="bg-surface border-border">
-            <CardContent className="space-y-3 pt-4">
-              <div className="flex items-center justify-between gap-2">
+      {view === "preview" ? (
+        <CvPreview document={document} />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-4">
+            <Card className="bg-surface border-border">
+              <CardContent className="space-y-3 pt-4">
                 <h3 className="text-sm font-semibold text-text-primary">
-                  ATS readiness
+                  Contact
                 </h3>
-                <span className="font-mono text-[11px] text-text-secondary">
-                  {ats ? `${Math.round(ats.keywordCoverage * 100)}%` : "—"}
-                </span>
-              </div>
-              {ats && (
-                <>
-                  <p className="text-[11px] text-text-muted">
-                    Exact keyword matches from the job title, description and
-                    requirements. Use missing terms only if they are true.
-                  </p>
-                  <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
-                      Missing ({ats.missingKeywords.length})
-                    </p>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {ats.missingKeywords.slice(0, 10).map((keyword) => (
-                        <span
-                          key={keyword}
-                          className="rounded border border-amber-600/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-800 dark:text-amber-300"
-                        >
-                          {keyword}
-                        </span>
-                      ))}
-                      {ats.missingKeywords.length === 0 && (
-                        <span className="text-[11px] text-text-muted">
-                          None detected.
-                        </span>
-                      )}
-                    </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="cv-contact-full-name">Full name</Label>
+                    <Input
+                      id="cv-contact-full-name"
+                      value={document.contact.fullName}
+                      onChange={(event) =>
+                        setField("contact", {
+                          ...document.contact,
+                          fullName: event.target.value,
+                        })
+                      }
+                      placeholder="Full name"
+                      className={fieldClass}
+                    />
                   </div>
-                  <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
-                      Matched ({ats.matchedKeywords.length})
-                    </p>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {ats.matchedKeywords.slice(0, 10).map((keyword) => (
-                        <span
-                          key={keyword}
-                          className="rounded border border-green-700/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-800 dark:text-green-300"
-                        >
-                          {keyword}
-                        </span>
-                      ))}
-                    </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="cv-contact-email">Email</Label>
+                    <Input
+                      id="cv-contact-email"
+                      value={document.contact.email}
+                      onChange={(event) =>
+                        setField("contact", {
+                          ...document.contact,
+                          email: event.target.value,
+                        })
+                      }
+                      placeholder="Email"
+                      className={fieldClass}
+                    />
                   </div>
-                  <ul className="space-y-1 border-t border-border pt-2">
-                    {ats.checks.map((check) => (
-                      <li
-                        key={check.id}
-                        className="flex items-start gap-1.5 text-[11px]"
-                      >
-                        {check.ok ? (
-                          <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-green-700 dark:text-green-400" />
-                        ) : (
-                          <AlertTriangle className="mt-0.5 size-3 shrink-0 text-amber-700 dark:text-amber-400" />
-                        )}
-                        <span>
-                          <span className="text-text-primary">
-                            {check.label}
-                          </span>
-                          {!check.ok && (
-                            <span className="block text-text-muted">
-                              {check.detail}
-                            </span>
-                          )}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="border-t border-border pt-2 text-[10px] text-text-muted">
-                    {ats.wordCount} words. ATS guidance is not a guarantee;
-                    always check the exported file.
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                  <div className="space-y-1">
+                    <Label htmlFor="cv-contact-phone">Phone</Label>
+                    <Input
+                      id="cv-contact-phone"
+                      value={document.contact.phone}
+                      onChange={(event) =>
+                        setField("contact", {
+                          ...document.contact,
+                          phone: event.target.value,
+                        })
+                      }
+                      placeholder="Phone"
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="cv-contact-location">Location</Label>
+                    <Input
+                      id="cv-contact-location"
+                      value={document.contact.location}
+                      onChange={(event) =>
+                        setField("contact", {
+                          ...document.contact,
+                          location: event.target.value,
+                        })
+                      }
+                      placeholder="Location"
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="cv-contact-linkedin">LinkedIn URL</Label>
+                    <Input
+                      id="cv-contact-linkedin"
+                      value={document.contact.linkedinUrl}
+                      onChange={(event) =>
+                        setField("contact", {
+                          ...document.contact,
+                          linkedinUrl: event.target.value,
+                        })
+                      }
+                      placeholder="LinkedIn URL"
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="cv-contact-portfolio">
+                      Portfolio / website
+                    </Label>
+                    <Input
+                      id="cv-contact-portfolio"
+                      value={document.contact.portfolioUrl}
+                      onChange={(event) =>
+                        setField("contact", {
+                          ...document.contact,
+                          portfolioUrl: event.target.value,
+                        })
+                      }
+                      placeholder="Portfolio / website"
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="cv-contact-github">GitHub URL</Label>
+                    <Input
+                      id="cv-contact-github"
+                      value={document.contact.githubUrl}
+                      onChange={(event) =>
+                        setField("contact", {
+                          ...document.contact,
+                          githubUrl: event.target.value,
+                        })
+                      }
+                      placeholder="GitHub URL"
+                      className={fieldClass}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-          <Card className="bg-surface border-border">
-            <CardContent className="space-y-2 pt-4">
-              <h3 className="text-sm font-semibold text-text-primary">
-                CV settings
-              </h3>
-              <div className="space-y-1.5">
-                <Label htmlFor="cv-language-edit">Language</Label>
-                <Select
-                  value={document.language}
-                  onValueChange={(value) =>
-                    value && changeLanguage(value as CvLanguage)
-                  }
-                >
-                  <SelectTrigger
-                    id="cv-language-edit"
-                    className="w-full bg-field"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="en">English</SelectItem>
-                    <SelectItem value="sv">Svenska</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="cv-page-size-edit">Page size</Label>
-                <Select
-                  value={document.pageSize}
-                  onValueChange={(value) =>
-                    value && changePageSize(value as CvPageSize)
-                  }
-                >
-                  <SelectTrigger
-                    id="cv-page-size-edit"
-                    className="w-full bg-field"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="a4">A4</SelectItem>
-                    <SelectItem value="letter">US Letter</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="cv-extra-context-edit">Extra context</Label>
-                <Textarea
-                  id="cv-extra-context-edit"
-                  value={document.extraContext}
-                  onChange={(event) =>
-                    setField("extraContext", event.target.value)
-                  }
-                  className={textareaClass}
+            <Card className="bg-surface border-border">
+              <CardContent className="space-y-3 pt-4">
+                <h3 className="text-sm font-semibold text-text-primary">
+                  Headline
+                </h3>
+                <Input
+                  value={document.headline}
+                  onChange={(event) => setField("headline", event.target.value)}
+                  placeholder="Headline, e.g. Frontend Engineer focused on accessible design systems"
+                  className={fieldClass}
                 />
-              </div>
-            </CardContent>
-          </Card>
-        </aside>
-      </div>
+              </CardContent>
+            </Card>
+
+            {document.sectionOrder.map(renderSection)}
+          </div>
+
+          <aside className="space-y-4 lg:sticky lg:top-0 lg:self-start">
+            <Card className="bg-surface border-border">
+              <CardContent className="space-y-3 pt-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-text-primary">
+                    ATS readiness
+                  </h3>
+                  <span className="font-mono text-[11px] text-text-secondary">
+                    {ats ? `${Math.round(ats.keywordCoverage * 100)}%` : "—"}
+                  </span>
+                </div>
+                {ats && (
+                  <>
+                    <p className="text-[11px] text-text-muted">
+                      Exact keyword matches from the job title, description and
+                      requirements. Use missing terms only if they are true.
+                    </p>
+                    <div>
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                        Missing ({ats.missingKeywords.length})
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {ats.missingKeywords.slice(0, 10).map((keyword) => (
+                          <span
+                            key={keyword}
+                            className="rounded border border-amber-600/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-800 dark:text-amber-300"
+                          >
+                            {keyword}
+                          </span>
+                        ))}
+                        {ats.missingKeywords.length === 0 && (
+                          <span className="text-[11px] text-text-muted">
+                            None detected.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                        Matched ({ats.matchedKeywords.length})
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {ats.matchedKeywords.slice(0, 10).map((keyword) => (
+                          <span
+                            key={keyword}
+                            className="rounded border border-green-700/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-800 dark:text-green-300"
+                          >
+                            {keyword}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <ul className="space-y-1 border-t border-border pt-2">
+                      {ats.checks.map((check) => (
+                        <li
+                          key={check.id}
+                          className="flex items-start gap-1.5 text-[11px]"
+                        >
+                          {check.ok ? (
+                            <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-green-700 dark:text-green-400" />
+                          ) : (
+                            <AlertTriangle className="mt-0.5 size-3 shrink-0 text-amber-700 dark:text-amber-400" />
+                          )}
+                          <span>
+                            <span className="text-text-primary">
+                              {check.label}
+                            </span>
+                            {!check.ok && (
+                              <span className="block text-text-muted">
+                                {check.detail}
+                              </span>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {ats.unverifiedNumbers.length > 0 && (
+                      <div className="space-y-1 border-t border-border pt-2">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                          Numbers to verify
+                        </p>
+                        <ul className="space-y-1">
+                          {ats.unverifiedNumbers.map((warning) => (
+                            <li
+                              key={warning}
+                              className="text-[10px] text-amber-800 dark:text-amber-300"
+                            >
+                              {warning}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="text-[10px] text-text-muted">
+                          Heuristic check against your profile and extra
+                          context. Verify each number before submitting.
+                        </p>
+                      </div>
+                    )}
+                    <p className="border-t border-border pt-2 text-[10px] text-text-muted">
+                      {ats.wordCount} words. ATS guidance is not a guarantee;
+                      always check the exported file.
+                    </p>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-surface border-border">
+              <CardContent className="space-y-2 pt-4">
+                <h3 className="text-sm font-semibold text-text-primary">
+                  CV settings
+                </h3>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cv-language-edit">Language</Label>
+                  <Select
+                    value={document.language}
+                    onValueChange={(value) =>
+                      value && changeLanguage(value as CvLanguage)
+                    }
+                  >
+                    <SelectTrigger
+                      id="cv-language-edit"
+                      className="w-full bg-field"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="en">English</SelectItem>
+                      <SelectItem value="sv">Svenska</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cv-page-size-edit">Page size</Label>
+                  <Select
+                    value={document.pageSize}
+                    onValueChange={(value) =>
+                      value && changePageSize(value as CvPageSize)
+                    }
+                  >
+                    <SelectTrigger
+                      id="cv-page-size-edit"
+                      className="w-full bg-field"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="a4">A4</SelectItem>
+                      <SelectItem value="letter">US Letter</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cv-extra-context-edit">Extra context</Label>
+                  <Textarea
+                    id="cv-extra-context-edit"
+                    value={document.extraContext}
+                    onChange={(event) =>
+                      setField("extraContext", event.target.value)
+                    }
+                    className={textareaClass}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

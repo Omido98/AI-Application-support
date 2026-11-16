@@ -38,10 +38,16 @@ no AI call.
      deletion;
    - education, projects, certifications, languages and other experience;
    - section order and entry order.
-6. **Export Word** saves a `.docx` through the native save dialog.
+6. Switch to **Preview** for a formatted page view that matches the Word
+   layout, then back to **Edit**.
+7. **Export Word** saves a `.docx` through the native save dialog.
 
 Edits autosave to `cv_<applicationId>.json` in the app data folder. The
 document stores structured content, not the DOCX bytes.
+
+Regenerating or replacing a draft keeps the previous version available for
+**Undo replacement** during the current session. The undo is not persisted
+after restarting the app.
 
 ## Truthfulness and grounding
 
@@ -62,6 +68,12 @@ description and requirements. It shows matched and missing terms, but never
 inserts them: add a missing term only if it is true for you. The checklist also
 covers contact details, summary length, experience bullets, skills, dates and
 document length.
+
+A heuristic **Numbers to verify** check compares numbers in the summary and
+bullets with the numbers in your profile and extra context. It flags numbers
+that do not appear in either source, because those are the easiest claims to
+fabricate accidentally. The check can produce false positives (for example a
+number you derived from dates); it never blocks export or edits.
 
 ## Word and ATS format
 
