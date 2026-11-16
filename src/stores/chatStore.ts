@@ -20,12 +20,18 @@ import type { ProviderId } from "@/utils/providers";
 import { getProvider } from "@/utils/providers";
 import { DEFAULT_CONTEXT_WINDOW } from "@/utils/tokens";
 import type { TokenUsage, WebSource } from "@/types";
+import { newMessageId } from "@/utils/ids";
+
+export { newMessageId };
 
 // ──────────────────────────────────────────────
 // Chat message type (lighter than the full Message type)
 // ──────────────────────────────────────────────
 
 export interface ChatMessage {
+  /** Stable identity, independent of content/timestamp. Generated on load for
+   * files written before IDs existed. */
+  id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: string;
@@ -33,7 +39,7 @@ export interface ChatMessage {
   failed?: boolean;
   /**
    * Marks the user message that started the conversation through the
-   * "Help me answer my application" starter. Keeping the intent on the
+   * "Help me answer your application" starter. Keeping the intent on the
    * message means a failed first send can be retried without losing the
    * fit-evaluation prompt (and its forced web research).
    */
@@ -49,7 +55,7 @@ export interface ChatMessage {
    * rendered as review/suggestion cards and excluded from the model's history.
    */
   kind?: "review" | "improve" | "deslop" | "summary";
-  /** For review/improve/deslop messages: the message they were derived from. */
+  /** For review/improve/deslop messages: the id of the source message. */
   sourceKey?: string;
 }
 
@@ -59,8 +65,9 @@ export function isConversationMessage(msg: ChatMessage): boolean {
 }
 
 /**
- * Stable identity key for a message, used by action buttons and re-sends.
- * Matches the key the UI computes for each rendered message.
+ * Legacy identity key used by chat files written before messages had stable
+ * IDs. It still exists so old files can be migrated (timestamps + the first 40
+ * characters were not unique enough to keep as the primary identity).
  */
 export function messageKey(msg: {
   timestamp: string;
@@ -72,11 +79,14 @@ export function messageKey(msg: {
 /**
  * Validate a thread loaded from disk. A malformed or hand-edited file must
  * never crash the chat UI; invalid entries are dropped and the storage layer
- * reports the underlying problem.
+ * reports the underlying problem. Missing IDs are generated, duplicate IDs
+ * are replaced, and old `sourceKey` values are rewritten to the target's new
+ * stable id.
  */
 export function normalizeChatMessages(value: unknown): ChatMessage[] {
   if (!Array.isArray(value)) return [];
   const messages: ChatMessage[] = [];
+  const usedIds = new Set<string>();
   for (const entry of value) {
     if (!entry || typeof entry !== "object") continue;
     const candidate = entry as Record<string, unknown>;
@@ -90,6 +100,12 @@ export function normalizeChatMessages(value: unknown): ChatMessage[] {
     ) {
       continue;
     }
+    let id =
+      typeof candidate.id === "string" && candidate.id.trim().length > 0
+        ? candidate.id
+        : newMessageId();
+    if (usedIds.has(id)) id = newMessageId();
+    usedIds.add(id);
     const sources = normalizeSources(candidate.sources);
     const usage = normalizeUsage(candidate.usage);
     const costUsd =
@@ -110,6 +126,7 @@ export function normalizeChatMessages(value: unknown): ChatMessage[] {
         ? candidate.sourceKey
         : undefined;
     messages.push({
+      id,
       role,
       content,
       timestamp,
@@ -124,7 +141,22 @@ export function normalizeChatMessages(value: unknown): ChatMessage[] {
       ...(sourceKey ? { sourceKey } : {}),
     });
   }
-  return messages;
+
+  // Old files point at their target with `timestamp + first 40 chars`. Rewrite
+  // those references to the (possibly newly generated) stable id. References
+  // that are already ids, or cannot be resolved, are left untouched.
+  const legacyKeyToId = new Map<string, string>();
+  for (const msg of messages) {
+    const legacyKey = messageKey(msg);
+    if (!legacyKeyToId.has(legacyKey)) {
+      legacyKeyToId.set(legacyKey, msg.id);
+    }
+  }
+  return messages.map((msg) => {
+    if (!msg.sourceKey) return msg;
+    const mapped = legacyKeyToId.get(msg.sourceKey);
+    return mapped && mapped !== msg.id ? { ...msg, sourceKey: mapped } : msg;
+  });
 }
 
 function normalizeSources(value: unknown): WebSource[] | undefined {
@@ -164,11 +196,11 @@ function normalizeUsage(value: unknown): TokenUsage | undefined {
 /** Copy an accepted suggestion into its source draft and drop the suggestion. */
 function applySuggestion(
   messages: ChatMessage[],
-  suggestionKey: string,
-  sourceKey: string,
+  suggestionId: string,
+  sourceId: string,
 ): ChatMessage[] | null {
-  const suggestion = messages.find((msg) => messageKey(msg) === suggestionKey);
-  const source = messages.find((msg) => messageKey(msg) === sourceKey);
+  const suggestion = messages.find((msg) => msg.id === suggestionId);
+  const source = messages.find((msg) => msg.id === sourceId);
   if (!suggestion || !source || suggestion === source) return null;
   return messages
     .map((msg) =>
@@ -182,7 +214,7 @@ function applySuggestion(
           }
         : msg,
     )
-    .filter((msg) => messageKey(msg) !== suggestionKey);
+    .filter((msg) => msg.id !== suggestionId);
 }
 
 // ──────────────────────────────────────────────
@@ -243,59 +275,90 @@ function persistableConfig(config: ApiConfig): ApiConfig {
 }
 
 // ──────────────────────────────────────────────
-// Debounced thread save (per application)
+// Per-thread state and debounced persistence
 // ──────────────────────────────────────────────
 
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingThreadId: string | null = null;
-let pendingSnapshot: ChatMessage[] = [];
-/**
- * Monotonic token for thread loads. A slow load that finishes after the user
- * switched again must not overwrite the newer thread's messages.
- */
-let threadLoadGeneration = 0;
-
-/** Write the current thread to disk, debounced. */
-function scheduleThreadSave() {
-  const s = useChatStore.getState();
-  const threadId = s.activeThreadId;
-  if (!threadId) return;
-  pendingThreadId = threadId;
-  pendingSnapshot = [...s.messages];
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    saveTimer = null;
-    const snapshotThreadId = pendingThreadId;
-    const snapshot = pendingSnapshot;
-    pendingThreadId = null;
-    pendingSnapshot = [];
-    if (!snapshotThreadId) return;
-    await saveJson(`chat_${snapshotThreadId}.json`, snapshot);
-  }, 400);
+/** Everything one application's chat thread owns. Threads stay in memory after
+ * the user switches away, so a reply or refine result always lands in the
+ * thread it was started from. */
+export interface ThreadState {
+  messages: ChatMessage[];
+  /** True once the thread file has been read (or created). */
+  loaded: boolean;
+  /** True while the thread file is being read. */
+  loading: boolean;
+  /** Unsent composer text for this thread. */
+  draft: string;
+  /** Last error for this thread. */
+  error: string | null;
+  /** Whether a generation is currently streaming into this thread. */
+  isSending: boolean;
+  /** Text of the assistant message currently being generated. */
+  streamingText: string;
 }
 
-function cancelPendingSave() {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
+function emptyThread(): ThreadState {
+  return {
+    messages: [],
+    loaded: false,
+    loading: false,
+    draft: "",
+    error: null,
+    isSending: false,
+    streamingText: "",
+  };
+}
+
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
+/** Per-thread debounced save timers. */
+const threadSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Monotonic token per thread, so a slow load cannot overwrite newer data. */
+const threadLoadGeneration = new Map<string, number>();
+
+/** Write one thread's current messages now. Missing/failed loads are skipped. */
+async function saveThread(threadId: string): Promise<boolean> {
+  const thread = useChatStore.getState().threads[threadId];
+  if (!thread || !thread.loaded) return true;
+  return saveJson(`chat_${threadId}.json`, thread.messages);
+}
+
+/** Debounce a save of one thread; other threads' pending saves are untouched. */
+function scheduleThreadSave(threadId: string) {
+  const existing = threadSaveTimers.get(threadId);
+  if (existing) clearTimeout(existing);
+  threadSaveTimers.set(
+    threadId,
+    setTimeout(() => {
+      threadSaveTimers.delete(threadId);
+      void saveThread(threadId);
+    }, 400),
+  );
+}
+
+function cancelThreadSave(threadId: string) {
+  const existing = threadSaveTimers.get(threadId);
+  if (existing) {
+    clearTimeout(existing);
+    threadSaveTimers.delete(threadId);
   }
-  pendingThreadId = null;
-  pendingSnapshot = [];
 }
 
 /**
- * Flush any pending debounced thread save immediately.
- * Returns false when the write failed; the storage banner reports the reason.
+ * Flush every pending thread save immediately. Returns false when any write
+ * failed; the storage banner reports the reason.
  */
 export async function flushChatSave(): Promise<boolean> {
-  if (!saveTimer || !pendingThreadId) return true;
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  const threadId = pendingThreadId;
-  const snapshot = pendingSnapshot;
-  pendingThreadId = null;
-  pendingSnapshot = [];
-  return saveJson(`chat_${threadId}.json`, snapshot);
+  const threadIds = [...threadSaveTimers.keys()];
+  for (const threadId of threadIds) {
+    cancelThreadSave(threadId);
+  }
+  let ok = true;
+  for (const threadId of threadIds) {
+    if (!(await saveThread(threadId))) ok = false;
+  }
+  return ok;
 }
 
 // ──────────────────────────────────────────────
@@ -305,15 +368,16 @@ export async function flushChatSave(): Promise<boolean> {
 const DRAFTS_FILE = "drafts.json";
 let draftsSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Only non-empty drafts are worth writing to disk. */
-function persistableDrafts(
-  drafts: Record<string, string>,
+function collectDrafts(
+  threads: Record<string, ThreadState>,
 ): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(drafts).filter(
-      ([threadId, text]) => threadId.length > 0 && text.length > 0,
-    ),
-  );
+  const drafts: Record<string, string> = {};
+  for (const [threadId, thread] of Object.entries(threads)) {
+    if (threadId.length > 0 && thread.draft.length > 0) {
+      drafts[threadId] = thread.draft;
+    }
+  }
+  return drafts;
 }
 
 function scheduleDraftsSave() {
@@ -321,10 +385,11 @@ function scheduleDraftsSave() {
   draftsSaveTimer = setTimeout(async () => {
     draftsSaveTimer = null;
     const state = useChatStore.getState();
+    const drafts = collectDrafts(state.threads);
     // Never overwrite the stored drafts with an empty object before the
     // startup load has completed.
-    if (!state.draftsLoaded && Object.keys(state.drafts).length === 0) return;
-    await saveJson(DRAFTS_FILE, persistableDrafts(state.drafts));
+    if (!state.draftsLoaded && Object.keys(drafts).length === 0) return;
+    await saveJson(DRAFTS_FILE, drafts);
   }, 500);
 }
 
@@ -335,12 +400,57 @@ export async function flushDraftsSave(): Promise<boolean> {
     draftsSaveTimer = null;
   }
   const state = useChatStore.getState();
+  const drafts = collectDrafts(state.threads);
   // Do not overwrite the stored drafts with an empty object before the
   // startup load has completed. A draft typed during the load still wins.
-  if (!state.draftsLoaded && Object.keys(state.drafts).length === 0) {
+  if (!state.draftsLoaded && Object.keys(drafts).length === 0) {
     return true;
   }
-  return saveJson(DRAFTS_FILE, persistableDrafts(state.drafts));
+  return saveJson(DRAFTS_FILE, drafts);
+}
+
+// ──────────────────────────────────────────────
+// Thread loading
+// ──────────────────────────────────────────────
+
+/**
+ * Read a thread file into the per-thread cache without changing which thread
+ * is on screen. Concurrent callers for the same thread share the generation
+ * guard, and a cache reset invalidates any in-flight load.
+ */
+async function loadThread(threadId: string, force = false): Promise<void> {
+  const current = useChatStore.getState();
+  if (!force && current.threads[threadId]?.loaded) return;
+  const generation = (threadLoadGeneration.get(threadId) ?? 0) + 1;
+  threadLoadGeneration.set(threadId, generation);
+  useChatStore.setState((state) => ({
+    threads: {
+      ...state.threads,
+      [threadId]: {
+        ...(state.threads[threadId] ?? emptyThread()),
+        loading: true,
+      },
+    },
+  }));
+
+  const data = await loadJson<unknown>(`chat_${threadId}.json`);
+  if (threadLoadGeneration.get(threadId) !== generation) return;
+  useChatStore.setState((state) => {
+    // The cache was reset while the read was in flight: do not resurrect it.
+    if (!(threadId in state.threads)) return {};
+    const thread = state.threads[threadId];
+    return {
+      threads: {
+        ...state.threads,
+        [threadId]: {
+          ...thread,
+          messages: normalizeChatMessages(data),
+          loaded: true,
+          loading: false,
+        },
+      },
+    };
+  });
 }
 
 // ──────────────────────────────────────────────
@@ -348,62 +458,45 @@ export async function flushDraftsSave(): Promise<boolean> {
 // ──────────────────────────────────────────────
 
 interface ChatState {
-  /** Chat messages of the active thread */
-  messages: ChatMessage[];
+  /** Chat threads by application id. Populated lazily from disk. */
+  threads: Record<string, ThreadState>;
+  /** Which thread the UI currently shows. */
+  activeThreadId: string | null;
+
   /** Whether config has been loaded from disk */
   configLoaded: boolean;
-  /** Whether the API is currently processing a request */
-  isSending: boolean;
-  /** Last error message, if any */
-  error: string | null;
-  /** Text of the assistant message currently being generated (live stream). */
-  streamingText: string;
-
-  /** Unsent message drafts, keyed by thread (application) id. Kept in
-   * memory so switching tabs does not wipe what the user is typing, and
-   * persisted to drafts.json so closing the app does not either. */
-  drafts: Record<string, string>;
   /** Whether drafts.json has been read for this launch. */
   draftsLoaded: boolean;
 
   /** API configuration */
   config: ApiConfig;
 
-  /** Application whose chat thread is currently loaded (null = none) */
-  activeThreadId: string | null;
-  /** Whether the current thread has finished loading from disk */
-  threadLoaded: boolean;
-
-  // Message actions
-  addMessage: (msg: ChatMessage) => void;
-  /** Replace a message by key (e.g. clear a failed flag, swap a regenerated reply). */
+  // Message actions (all target a specific thread)
+  addMessage: (threadId: string, msg: ChatMessage) => void;
+  /** Replace a message by stable id. */
   updateMessage: (
-    key: string,
+    threadId: string,
+    messageId: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => void;
-  /**
-   * Append a message to a specific thread. If that thread is no longer active
-   * (the user switched applications while a refine action was running), the
-   * message is appended to that thread's file instead of leaking into the
-   * thread currently on screen.
-   */
+  /** Append a message to a thread, active or not (loads it when needed). */
   appendMessageToThread: (threadId: string, msg: ChatMessage) => Promise<void>;
-  /** Replace a message in a specific thread, active or not. */
+  /** Replace a message in a thread, active or not. */
   updateMessageInThread: (
     threadId: string,
-    key: string,
+    messageId: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => Promise<void>;
   /** Remove one message from a thread (discarding a suggestion or review). */
-  removeMessageInThread: (threadId: string, key: string) => Promise<void>;
+  removeMessageInThread: (threadId: string, messageId: string) => Promise<void>;
   /**
    * Accept an improve/deslop suggestion: replace the source draft's content
    * with the suggestion and remove the suggestion message in one write.
    */
   acceptSuggestion: (
     threadId: string,
-    suggestionKey: string,
-    sourceKey: string,
+    suggestionId: string,
+    sourceId: string,
   ) => Promise<void>;
   clearMessages: () => Promise<void>;
   /** Load (or reset) the chat thread for an application. `force` reloads even
@@ -412,11 +505,22 @@ interface ChatState {
     applicationId: string | null,
     force?: boolean,
   ) => Promise<void>;
+  /** Drop every cached thread (used after importing a backup). */
+  resetThreadCache: () => void;
   /** Load persisted unsent drafts. `force` replaces in-memory drafts instead
    * of merging over them (used after importing a backup). */
   loadDrafts: (force?: boolean) => Promise<void>;
   /** Remove the draft belonging to a deleted application. */
   discardDraft: (threadId: string) => void;
+
+  // Per-thread streaming state
+  setThreadSending: (threadId: string, sending: boolean) => void;
+  setThreadError: (threadId: string, error: string | null) => void;
+  /** Set the live-streamed assistant text (string, or updater for appends). */
+  setThreadStreamingText: (
+    threadId: string,
+    updater: string | ((prev: string) => string),
+  ) => void;
 
   // Config actions
   /** Merge the given fields into the stored config and persist the result. */
@@ -425,13 +529,20 @@ interface ChatState {
   /** Mark config as not yet configured (e.g. user clicks Edit) */
   resetConfig: () => void;
 
-  // Sending state
-  setIsSending: (sending: boolean) => void;
-  setError: (error: string | null) => void;
-  /** Set the live-streamed assistant text (string, or updater for appends). */
-  setStreamingText: (updater: string | ((prev: string) => string)) => void;
   /** Save the unsent message draft for the current thread. */
   setDraft: (value: string) => void;
+}
+
+/** True while any thread has a generation in flight. */
+export function selectAnyThreadSending(state: ChatState): boolean {
+  return Object.values(state.threads).some((thread) => thread.isSending);
+}
+
+/** Messages of the active thread (stable empty array when none). */
+export function selectActiveMessages(state: ChatState): ChatMessage[] {
+  const threadId = state.activeThreadId;
+  if (!threadId) return EMPTY_MESSAGES;
+  return state.threads[threadId]?.messages ?? EMPTY_MESSAGES;
 }
 
 // ──────────────────────────────────────────────
@@ -439,127 +550,172 @@ interface ChatState {
 // ──────────────────────────────────────────────
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  messages: [],
+  threads: {},
+  activeThreadId: null,
   configLoaded: false,
-  isSending: false,
-  error: null,
-  streamingText: "",
-  drafts: {},
   draftsLoaded: false,
 
   config: { ...defaultApiConfig },
 
-  activeThreadId: null,
-  threadLoaded: true,
-
   // ── Messages ──
 
-  addMessage: (msg) => {
-    set((s) => ({ messages: [...s.messages, msg] }));
-    scheduleThreadSave();
+  addMessage: (threadId, msg) => {
+    set((s) => {
+      const thread = s.threads[threadId] ?? emptyThread();
+      return {
+        threads: {
+          ...s.threads,
+          [threadId]: {
+            ...thread,
+            messages: [...thread.messages, msg],
+            loaded: true,
+          },
+        },
+      };
+    });
+    scheduleThreadSave(threadId);
   },
 
-  updateMessage: (key, updater) => {
-    set((s) => ({
-      messages: s.messages.map((m) => (messageKey(m) === key ? updater(m) : m)),
-    }));
-    scheduleThreadSave();
-  },
-
-  appendMessageToThread: async (threadId, msg) => {
-    const current = get();
-    if (current.activeThreadId === threadId) {
-      set((s) => ({ messages: [...s.messages, msg] }));
-      scheduleThreadSave();
-      return;
-    }
-    const data = await loadJson<unknown>(`chat_${threadId}.json`);
-    const messages = [...normalizeChatMessages(data), msg];
-    await saveJson(`chat_${threadId}.json`, messages);
-  },
-
-  updateMessageInThread: async (threadId, key, updater) => {
-    const current = get();
-    if (current.activeThreadId === threadId) {
-      let changed = false;
-      const messages = current.messages.map((msg) => {
-        if (messageKey(msg) !== key) return msg;
+  updateMessage: (threadId, messageId, updater) => {
+    let changed = false;
+    set((s) => {
+      const thread = s.threads[threadId];
+      if (!thread) return {};
+      const messages = thread.messages.map((msg) => {
+        if (msg.id !== messageId) return msg;
         changed = true;
         return updater(msg);
       });
-      if (changed) {
-        set({ messages });
-        scheduleThreadSave();
-      }
-      return;
-    }
-    const data = await loadJson<unknown>(`chat_${threadId}.json`);
-    let changed = false;
-    const messages = normalizeChatMessages(data).map((msg) => {
-      if (messageKey(msg) !== key) return msg;
-      changed = true;
-      return updater(msg);
+      if (!changed) return {};
+      return {
+        threads: {
+          ...s.threads,
+          [threadId]: { ...thread, messages },
+        },
+      };
     });
-    if (changed) {
-      await saveJson(`chat_${threadId}.json`, messages);
-    }
+    if (changed) scheduleThreadSave(threadId);
   },
 
-  removeMessageInThread: async (threadId, key) => {
-    const current = get();
-    if (current.activeThreadId === threadId) {
-      const messages = current.messages.filter(
-        (msg) => messageKey(msg) !== key,
-      );
-      if (messages.length !== current.messages.length) {
-        set({ messages });
-        scheduleThreadSave();
-      }
-      return;
-    }
-    const data = await loadJson<unknown>(`chat_${threadId}.json`);
-    const messages = normalizeChatMessages(data);
-    const next = messages.filter((msg) => messageKey(msg) !== key);
-    if (next.length !== messages.length) {
-      await saveJson(`chat_${threadId}.json`, next);
-    }
+  appendMessageToThread: async (threadId, msg) => {
+    await loadThread(threadId);
+    set((s) => {
+      const thread = s.threads[threadId] ?? emptyThread();
+      return {
+        threads: {
+          ...s.threads,
+          [threadId]: {
+            ...thread,
+            messages: [...thread.messages, msg],
+            loaded: true,
+          },
+        },
+      };
+    });
+    scheduleThreadSave(threadId);
   },
 
-  acceptSuggestion: async (threadId, suggestionKey, sourceKey) => {
-    const current = get();
-    if (current.activeThreadId === threadId) {
-      const next = applySuggestion(current.messages, suggestionKey, sourceKey);
-      if (next) {
-        set({ messages: next });
-        scheduleThreadSave();
-      }
-      return;
-    }
-    const data = await loadJson<unknown>(`chat_${threadId}.json`);
-    const next = applySuggestion(
-      normalizeChatMessages(data),
-      suggestionKey,
-      sourceKey,
-    );
-    if (next) {
-      await saveJson(`chat_${threadId}.json`, next);
-    }
+  updateMessageInThread: async (threadId, messageId, updater) => {
+    await loadThread(threadId);
+    let changed = false;
+    set((s) => {
+      const thread = s.threads[threadId];
+      if (!thread) return {};
+      const messages = thread.messages.map((msg) => {
+        if (msg.id !== messageId) return msg;
+        changed = true;
+        return updater(msg);
+      });
+      if (!changed) return {};
+      return {
+        threads: {
+          ...s.threads,
+          [threadId]: { ...thread, messages },
+        },
+      };
+    });
+    if (changed) scheduleThreadSave(threadId);
+  },
+
+  removeMessageInThread: async (threadId, messageId) => {
+    await loadThread(threadId);
+    let changed = false;
+    set((s) => {
+      const thread = s.threads[threadId];
+      if (!thread) return {};
+      const messages = thread.messages.filter((msg) => msg.id !== messageId);
+      if (messages.length === thread.messages.length) return {};
+      changed = true;
+      return {
+        threads: {
+          ...s.threads,
+          [threadId]: { ...thread, messages },
+        },
+      };
+    });
+    if (changed) scheduleThreadSave(threadId);
+  },
+
+  acceptSuggestion: async (threadId, suggestionId, sourceId) => {
+    await loadThread(threadId);
+    let next: ChatMessage[] | null = null;
+    set((s) => {
+      const thread = s.threads[threadId];
+      if (!thread) return {};
+      next = applySuggestion(thread.messages, suggestionId, sourceId);
+      if (!next) return {};
+      return {
+        threads: {
+          ...s.threads,
+          [threadId]: { ...thread, messages: next },
+        },
+      };
+    });
+    if (next) scheduleThreadSave(threadId);
   },
 
   clearMessages: async () => {
     const threadId = get().activeThreadId;
-    // Invalidate any in-flight load so it cannot repopulate the cleared thread.
-    threadLoadGeneration += 1;
-    cancelPendingSave();
-    set({ messages: [], threadLoaded: true, error: null });
     if (!threadId) return;
-    set((s) => {
-      const drafts = { ...s.drafts };
-      delete drafts[threadId];
-      return { drafts };
-    });
+    // Invalidate any in-flight load so it cannot repopulate the cleared thread.
+    threadLoadGeneration.set(
+      threadId,
+      (threadLoadGeneration.get(threadId) ?? 0) + 1,
+    );
+    cancelThreadSave(threadId);
+    set((s) => ({
+      threads: {
+        ...s.threads,
+        [threadId]: {
+          ...(s.threads[threadId] ?? emptyThread()),
+          messages: [],
+          draft: "",
+          error: null,
+          isSending: false,
+          streamingText: "",
+          loaded: true,
+          loading: false,
+        },
+      },
+    }));
     scheduleDraftsSave();
     await deleteFile(`chat_${threadId}.json`);
+  },
+
+  switchThread: async (applicationId, force = false) => {
+    if (!applicationId) {
+      set({ activeThreadId: null });
+      return;
+    }
+    set({ activeThreadId: applicationId });
+    await loadThread(applicationId, force);
+  },
+
+  resetThreadCache: () => {
+    for (const timer of threadSaveTimers.values()) clearTimeout(timer);
+    threadSaveTimers.clear();
+    threadLoadGeneration.clear();
+    set({ threads: {}, activeThreadId: null });
   },
 
   loadDrafts: async (force = false) => {
@@ -567,10 +723,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (raw == null) {
       // A missing file is normal. On a forced reload (import) it means the
       // restored backup has no drafts, so clear the old ones.
-      set((s) => ({
-        drafts: force ? {} : s.drafts,
-        draftsLoaded: true,
-      }));
+      if (!force) {
+        set({ draftsLoaded: true });
+        return;
+      }
+      set((s) => {
+        const threads: Record<string, ThreadState> = {};
+        for (const [threadId, thread] of Object.entries(s.threads)) {
+          threads[threadId] = { ...thread, draft: "" };
+        }
+        return { threads, draftsLoaded: true };
+      });
       return;
     }
     const loaded = normalizeDraftsData(raw);
@@ -582,61 +745,80 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ draftsLoaded: true });
       return;
     }
-    // A draft typed while the file was loading wins over the stored text.
-    set((s) => ({
-      drafts: force ? loaded : { ...loaded, ...s.drafts },
-      draftsLoaded: true,
-    }));
+    set((s) => {
+      const threads: Record<string, ThreadState> = {};
+      for (const [threadId, thread] of Object.entries(s.threads)) {
+        // A forced reload replaces drafts; a normal load keeps text typed
+        // while the file was being read.
+        threads[threadId] = {
+          ...thread,
+          draft: force ? "" : thread.draft,
+        };
+      }
+      for (const [threadId, draft] of Object.entries(loaded)) {
+        const thread = threads[threadId] ?? emptyThread();
+        threads[threadId] = {
+          ...thread,
+          draft: force ? draft : thread.draft || draft,
+        };
+      }
+      return { threads, draftsLoaded: true };
+    });
   },
 
   discardDraft: (threadId) => {
-    const current = get().drafts;
-    if (!(threadId in current)) return;
-    const drafts = { ...current };
-    delete drafts[threadId];
-    set({ drafts });
+    const thread = get().threads[threadId];
+    if (!thread || thread.draft.length === 0) return;
+    set((s) => ({
+      threads: {
+        ...s.threads,
+        [threadId]: { ...thread, draft: "" },
+      },
+    }));
     scheduleDraftsSave();
   },
 
-  switchThread: async (applicationId, force = false) => {
-    const current = get();
-    if (
-      !force &&
-      current.activeThreadId === applicationId &&
-      current.threadLoaded
-    ) {
-      return;
-    }
-    const generation = ++threadLoadGeneration;
-    // Persist the outgoing thread before its messages are replaced. Without
-    // this, a message sent inside the 400 ms debounce window is lost.
-    await flushChatSave();
-    if (generation !== threadLoadGeneration) return;
+  // ── Streaming state ──
 
-    if (!applicationId) {
-      set({
-        messages: [],
-        activeThreadId: null,
-        threadLoaded: true,
-        streamingText: "",
-        error: null,
-      });
-      return;
-    }
+  setThreadSending: (threadId, sending) => {
+    set((s) => ({
+      threads: {
+        ...s.threads,
+        [threadId]: {
+          ...(s.threads[threadId] ?? emptyThread()),
+          isSending: sending,
+        },
+      },
+    }));
+  },
 
-    set({
-      messages: [],
-      threadLoaded: false,
-      activeThreadId: applicationId,
-      streamingText: "",
-      error: null,
-    });
-    const data = await loadJson<unknown>(`chat_${applicationId}.json`);
-    // A newer switch (or a reset) won the race: discard this result.
-    if (generation !== threadLoadGeneration) return;
-    set({
-      messages: normalizeChatMessages(data),
-      threadLoaded: true,
+  setThreadError: (threadId, error) => {
+    set((s) => ({
+      threads: {
+        ...s.threads,
+        [threadId]: {
+          ...(s.threads[threadId] ?? emptyThread()),
+          error,
+        },
+      },
+    }));
+  },
+
+  setThreadStreamingText: (threadId, updater) => {
+    set((s) => {
+      const thread = s.threads[threadId] ?? emptyThread();
+      return {
+        threads: {
+          ...s.threads,
+          [threadId]: {
+            ...thread,
+            streamingText:
+              typeof updater === "function"
+                ? updater(thread.streamingText)
+                : updater,
+          },
+        },
+      };
     });
   },
 
@@ -728,24 +910,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ config: { ...defaultApiConfig }, configLoaded: false });
   },
 
-  // ── Sending state ──
-
-  setIsSending: (sending) => set({ isSending: sending }),
-  setError: (error) => set({ error }),
-  setStreamingText: (updater) =>
-    set((s) => ({
-      streamingText:
-        typeof updater === "function"
-          ? (updater as (prev: string) => string)(s.streamingText)
-          : updater,
-    })),
   setDraft: (value) => {
     const threadId = get().activeThreadId;
     if (!threadId) return;
     set((s) => ({
-      drafts: {
-        ...s.drafts,
-        [threadId]: value,
+      threads: {
+        ...s.threads,
+        [threadId]: {
+          ...(s.threads[threadId] ?? emptyThread()),
+          draft: value,
+        },
       },
     }));
     scheduleDraftsSave();

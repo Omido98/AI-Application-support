@@ -29,7 +29,7 @@ import { copyDiagnostics, logToFileInBackground } from "@/utils/diagnostics";
 import { isTauriRuntime } from "@/utils/runtime";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
-import { useChatStore } from "@/stores/chatStore";
+import { selectAnyThreadSending, useChatStore } from "@/stores/chatStore";
 import ApiConfigForm from "./ApiConfigForm";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -92,7 +92,7 @@ export default function SettingsDialog({
   // Bumped after an import so the API form remounts from the restored config
   // instead of writing its pre-import local state back over it.
   const [configFormKey, setConfigFormKey] = useState(0);
-  const isSending = useChatStore((s) => s.isSending);
+  const isSending = useChatStore(selectAnyThreadSending);
 
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [update, setUpdate] = useState<Update | null>(null);
@@ -184,6 +184,8 @@ export default function SettingsDialog({
       // Reload every store so the restored data shows immediately.
       await useApplicationStore.getState().loadApplications();
       await useProfileStore.getState().loadProfile();
+      // Cached threads belong to the pre-import data directory.
+      useChatStore.getState().resetThreadCache();
       await useChatStore.getState().loadConfig();
       await useChatStore.getState().loadDrafts(true);
       await useChatStore

@@ -23,6 +23,7 @@ import {
   MESSAGE_OVERHEAD_TOKENS,
 } from "@/utils/contextBudget";
 import { estimateTokens } from "@/utils/tokens";
+import { newMessageId } from "@/utils/ids";
 import type { ChatMessage } from "@/stores/chatStore";
 import type { ProfileData } from "@/types";
 import { evalCase, installEvalSummary } from "./harness";
@@ -44,7 +45,12 @@ import {
 } from "./modelOutputs";
 
 function message(role: "user" | "assistant", content: string): ChatMessage {
-  return { role, content, timestamp: "2026-11-01T00:00:00.000Z" };
+  return {
+    id: newMessageId(),
+    role,
+    content,
+    timestamp: "2026-11-01T00:00:00.000Z",
+  };
 }
 
 /** Exactly 40 characters, so every message costs 10 + 4 tokens. */

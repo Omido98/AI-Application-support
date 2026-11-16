@@ -9,6 +9,7 @@ import {
   buildDraftVerifyPrompt,
 } from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
+import { newMessageId } from "@/utils/ids";
 import type { ProfileData, TokenUsage, WebSource } from "@/types";
 
 export interface ApiResponse {
@@ -297,7 +298,14 @@ export async function deslopText(
   options: SendMessageOptions = {},
 ): Promise<ApiResponse> {
   return sendMessage(
-    [{ role: "user", content: draft, timestamp: new Date().toISOString() }],
+    [
+      {
+        id: newMessageId(),
+        role: "user",
+        content: draft,
+        timestamp: new Date().toISOString(),
+      },
+    ],
     { ...config, webSearchEnabled: false },
     buildDeslopPrompt(),
     options,
@@ -328,6 +336,7 @@ export async function reviewDraft(
   return sendMessage(
     [
       {
+        id: newMessageId(),
         role: "user",
         content: "Review the draft above.",
         timestamp: new Date().toISOString(),
@@ -375,6 +384,7 @@ export async function verifyDraft(
   return sendMessage(
     [
       {
+        id: newMessageId(),
         role: "user",
         content:
           "Verify whether the revised draft above addresses the feedback below.",
@@ -413,6 +423,7 @@ export async function reviseDraft(
   return sendMessage(
     [
       {
+        id: newMessageId(),
         role: "user",
         content: "Revise the draft above.",
         timestamp: new Date().toISOString(),

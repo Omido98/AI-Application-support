@@ -55,8 +55,14 @@ export function StreamingBubbleView({
  * store separately for auto-scroll without re-rendering.
  */
 export default function StreamingBubble() {
-  const isSending = useChatStore((s) => s.isSending);
-  const streamingText = useChatStore((s) => s.streamingText);
+  const isSending = useChatStore((s) =>
+    s.activeThreadId
+      ? (s.threads[s.activeThreadId]?.isSending ?? false)
+      : false,
+  );
+  const streamingText = useChatStore((s) =>
+    s.activeThreadId ? (s.threads[s.activeThreadId]?.streamingText ?? "") : "",
+  );
 
   return (
     <StreamingBubbleView isSending={isSending} streamingText={streamingText} />

@@ -3,6 +3,7 @@ import { isTauriRuntime } from "@/utils/runtime";
 import { normalizeProfileData } from "@/utils/dataValidation";
 import { sendMessage } from "@/utils/api";
 import { buildCvExtractionPrompt } from "@/utils/systemPrompt";
+import { newMessageId } from "@/utils/ids";
 import type { ApiConfig } from "@/stores/chatStore";
 import type { ProfileData } from "@/types";
 
@@ -128,7 +129,14 @@ export async function analyzeCvText(
   signal?: AbortSignal,
 ): Promise<ProfileData> {
   const response = await sendMessage(
-    [{ role: "user", content: text, timestamp: new Date().toISOString() }],
+    [
+      {
+        id: newMessageId(),
+        role: "user",
+        content: text,
+        timestamp: new Date().toISOString(),
+      },
+    ],
     { ...config, webSearchEnabled: false },
     buildCvExtractionPrompt(),
     { signal },
