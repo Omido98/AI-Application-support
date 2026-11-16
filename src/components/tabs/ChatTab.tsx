@@ -150,6 +150,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
   // Aborts the in-flight generation (used by the Stop button / Escape).
   const controllerRef = useRef<AbortController | null>(null);
+  // Aborts the in-flight summarization (Stop button / Escape).
+  const summaryControllerRef = useRef<AbortController | null>(null);
 
   // Streamed deltas are coalesced into at most one state update per frame.
   const streamBatcher = useMemo(
@@ -191,6 +193,10 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     // Abort any generation still in flight for the previous thread.
     controllerRef.current?.abort();
     controllerRef.current = null;
+    // A summary belongs to one thread; never let it land in another one.
+    summaryControllerRef.current?.abort();
+    summaryControllerRef.current = null;
+    setSummarizing(false);
     cancelStreamBuffer();
     setReplyNotice(null);
     setToolActivity(null);
@@ -204,19 +210,36 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     controllerRef.current?.abort();
   }, []);
 
+  const handleStopSummarize = useCallback(() => {
+    summaryControllerRef.current?.abort();
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isSending) {
+      if (e.key !== "Escape") return;
+      if (isSending) {
         e.preventDefault();
         handleStop();
+      } else if (summarizing) {
+        e.preventDefault();
+        handleStopSummarize();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isSending, handleStop]);
+  }, [isSending, summarizing, handleStop, handleStopSummarize]);
+
+  // Leaving the chat tab abandons an unfinished summary: a reply for a card
+  // the user can no longer see must not land in the thread later.
+  useEffect(() => {
+    return () => summaryControllerRef.current?.abort();
+  }, []);
 
   // ── Handle reset chat ──
   const handleReset = useCallback(() => {
+    summaryControllerRef.current?.abort();
+    summaryControllerRef.current = null;
+    setSummarizing(false);
     clearMessages();
     setError(null);
     setDraft("");
@@ -265,6 +288,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
     setSummarizing(true);
     setSummaryError(null);
+    const controller = new AbortController();
+    summaryControllerRef.current = controller;
     try {
       const result = await sendMessage(
         [
@@ -276,7 +301,11 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         ],
         { ...config, webSearchEnabled: false },
         buildConversationSummaryPrompt(capped.messages),
+        { signal: controller.signal },
       );
+      // A cancelled summary is discarded completely: no error message, no
+      // partial note, and no summary card in the thread.
+      if (controller.signal.aborted) return;
       if (result.error) {
         setSummaryError(result.error);
         return;
@@ -307,12 +336,16 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         });
       }
     } catch (err) {
+      if (controller.signal.aborted) return;
       setSummaryError(
         err instanceof Error
           ? err.message
           : "Could not summarize the earlier conversation.",
       );
     } finally {
+      if (summaryControllerRef.current === controller) {
+        summaryControllerRef.current = null;
+      }
       setSummarizing(false);
     }
   }, [
@@ -876,6 +909,16 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
                 ? "Update summary"
                 : "Summarize omitted messages"}
           </button>
+          {summarizing && (
+            <button
+              type="button"
+              onClick={handleStopSummarize}
+              className="text-destructive transition-colors hover:text-destructive/80"
+              title="Stop summarizing and discard the partial result"
+            >
+              Stop
+            </button>
+          )}
         </div>
       )}
 
