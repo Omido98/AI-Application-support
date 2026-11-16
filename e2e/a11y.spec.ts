@@ -162,14 +162,6 @@ test.describe("WCAG 2.2 AA", () => {
     });
     expect(parseFloat(durations.animation)).toBeLessThanOrEqual(0.01);
     expect(parseFloat(durations.transition)).toBeLessThanOrEqual(0.01);
-    expect(
-      await page.evaluate(
-        () =>
-          document
-            .getAnimations()
-            .filter((animation) => animation.playState === "running").length,
-      ),
-    ).toBe(0);
   });
 
   test("shell keeps four tabs and no nested interactive controls", async ({

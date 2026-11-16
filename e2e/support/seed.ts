@@ -207,4 +207,11 @@ export async function openApp(
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
+  // Wait until the saved theme has actually been applied, so axe never scans
+  // a half-initialised light/dark palette.
+  if (options.theme === "light") {
+    await expect(page.locator("html")).not.toHaveClass(/dark/);
+  } else if (options.theme !== "system") {
+    await expect(page.locator("html")).toHaveClass(/dark/);
+  }
 }
