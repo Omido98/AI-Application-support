@@ -16,8 +16,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    // Playwright specs live in e2e/ and must not be collected by Vitest.
-    exclude: [...configDefaults.exclude, "e2e/**"],
+    // Playwright specs live in e2e/ and the native suite in tests/; neither
+    // must be collected by Vitest.
+    exclude: [...configDefaults.exclude, "e2e/**", "tests/**"],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
