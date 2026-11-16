@@ -647,7 +647,6 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       controllerRef.current = null;
     },
     [
-      isSending,
       addMessage,
       updateMessage,
       application,
