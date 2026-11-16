@@ -1,0 +1,1610 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  CheckCircle2,
+  Download,
+  FileText,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Save,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import type { JobApplication } from "@/types";
+import type {
+  CvCertification,
+  CvDocument,
+  CvEducation,
+  CvExperience,
+  CvLanguage,
+  CvLanguageSkill,
+  CvOtherEngagement,
+  CvPageSize,
+  CvProject,
+  CvSectionId,
+} from "@/types/cv";
+import { useCvStore } from "@/stores/cvStore";
+import { useProfileStore } from "@/stores/profileStore";
+import { useChatStore } from "@/stores/chatStore";
+import { newMessageId } from "@/utils/ids";
+import {
+  createCvDocumentFromProfile,
+  profileFingerprint,
+} from "@/utils/cvSchema";
+import { analyzeCvAts } from "@/utils/cvAts";
+import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
+import { exportCvDocx } from "@/utils/cvDocx";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+
+const fieldClass =
+  "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 h-9 transition-[border-color,box-shadow] hover:border-primary/30";
+const textareaClass =
+  "bg-field border-border text-text-primary placeholder:text-text-muted focus-visible:ring-primary/50 min-h-[80px] transition-[border-color,box-shadow] hover:border-primary/30";
+
+function inferLanguage(application: JobApplication): CvLanguage {
+  const value = application.applicationLanguage.trim().toLowerCase();
+  return value.includes("sv") || value.includes("swedish") ? "sv" : "en";
+}
+
+function lines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
+  const target = index + direction;
+  if (target < 0 || target >= items.length) return items;
+  const next = [...items];
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
+function SectionCard({
+  section,
+  language,
+  onMove,
+  canMoveUp,
+  canMoveDown,
+  children,
+}: {
+  section: CvSectionId;
+  language: CvLanguage;
+  onMove: (direction: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Card className="bg-surface border-border">
+      <CardContent className="space-y-3 pt-4">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-text-primary">
+            {CV_SECTION_LABELS[language][section]}
+          </h3>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Move section up"
+              aria-label={`Move ${CV_SECTION_LABELS[language][section]} up`}
+              disabled={!canMoveUp}
+              onClick={() => onMove(-1)}
+            >
+              <ArrowUp className="size-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Move section down"
+              aria-label={`Move ${CV_SECTION_LABELS[language][section]} down`}
+              disabled={!canMoveDown}
+              onClick={() => onMove(1)}
+            >
+              <ArrowDown className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function EntryControls({
+  include,
+  onInclude,
+  onMove,
+  canMoveUp,
+  canMoveDown,
+  onDelete,
+  label,
+}: {
+  include: boolean;
+  onInclude: (value: boolean) => void;
+  onMove: (direction: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onDelete: () => void;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <label className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+        <Checkbox
+          checked={include}
+          onCheckedChange={(checked) => onInclude(checked === true)}
+          aria-label={`Include ${label}`}
+        />
+        Include
+      </label>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        title="Move up"
+        aria-label={`Move ${label} up`}
+        disabled={!canMoveUp}
+        onClick={() => onMove(-1)}
+      >
+        <ArrowUp className="size-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        title="Move down"
+        aria-label={`Move ${label} down`}
+        disabled={!canMoveDown}
+        onClick={() => onMove(1)}
+      >
+        <ArrowDown className="size-3.5" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        title="Remove from CV"
+        aria-label={`Remove ${label}`}
+        onClick={onDelete}
+      >
+        <Trash2 className="size-3.5 text-destructive" />
+      </Button>
+    </div>
+  );
+}
+
+/** Application sub-view: generate, edit and export a tailored CV. */
+export default function CvBuilder({
+  application,
+}: {
+  application: JobApplication;
+}) {
+  const profile = useProfileStore();
+  const apiConfig = useChatStore((state) => state.config);
+  const configLoaded = useChatStore((state) => state.configLoaded);
+  const loadConfig = useChatStore((state) => state.loadConfig);
+
+  const document = useCvStore((state) => state.documents[application.id]);
+  const loaded = useCvStore((state) => state.loaded[application.id]);
+  const saving = useCvStore((state) => state.saving[application.id]);
+  const storeError = useCvStore((state) => state.errors[application.id]);
+  const generating = useCvStore((state) => state.generating[application.id]);
+  const generationError = useCvStore(
+    (state) => state.generationErrors[application.id],
+  );
+  const loadCv = useCvStore((state) => state.loadCv);
+  const setCv = useCvStore((state) => state.setCv);
+  const updateCv = useCvStore((state) => state.updateCv);
+  const saveCv = useCvStore((state) => state.saveCv);
+  const generateCv = useCvStore((state) => state.generateCv);
+  const cancelGeneration = useCvStore((state) => state.cancelGeneration);
+
+  const [language, setLanguage] = useState<CvLanguage>(() =>
+    inferLanguage(application),
+  );
+  const [pageSize, setPageSize] = useState<CvPageSize>("a4");
+  const [extraContext, setExtraContext] = useState("");
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    if (!profile.isLoaded) void profile.loadProfile();
+    if (!configLoaded) void loadConfig();
+    void loadCv(application.id);
+  }, [
+    application.id,
+    configLoaded,
+    loadConfig,
+    loadCv,
+    profile.isLoaded,
+    profile.loadProfile,
+    profile,
+  ]);
+
+  useEffect(() => {
+    if (!document) return;
+    setLanguage(document.language);
+    setPageSize(document.pageSize);
+    setExtraContext(document.extraContext);
+  }, [document]);
+
+  const profileHasContent = Boolean(
+    profile.fullName.trim() ||
+    profile.email.trim() ||
+    profile.workExperience.length ||
+    profile.education.length ||
+    profile.skills.length ||
+    profile.otherEngagements.length,
+  );
+  const hasJobDescription = application.jobDescription.trim().length > 0;
+  const hasApiKey = apiConfig.apiKey.trim().length > 0;
+  const canGenerate = profileHasContent && hasJobDescription && hasApiKey;
+
+  const stale = Boolean(
+    document &&
+    (document.profileFingerprint !== profileFingerprint(profile) ||
+      document.applicationUpdatedAt !== application.updatedAt),
+  );
+
+  const ats = useMemo(
+    () => (document ? analyzeCvAts(document, application) : null),
+    [document, application],
+  );
+
+  const patch = (updater: (current: CvDocument) => CvDocument) => {
+    updateCv(application.id, updater);
+  };
+
+  const setField = <K extends keyof CvDocument>(
+    key: K,
+    value: CvDocument[K],
+  ) => {
+    patch((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateExperience = (id: string, next: Partial<CvExperience>) => {
+    patch((current) => ({
+      ...current,
+      experience: current.experience.map((item) =>
+        item.id === id ? { ...item, ...next } : item,
+      ),
+    }));
+  };
+  const updateEducation = (id: string, next: Partial<CvEducation>) => {
+    patch((current) => ({
+      ...current,
+      education: current.education.map((item) =>
+        item.id === id ? { ...item, ...next } : item,
+      ),
+    }));
+  };
+  const updateProject = (id: string, next: Partial<CvProject>) => {
+    patch((current) => ({
+      ...current,
+      projects: current.projects.map((item) =>
+        item.id === id ? { ...item, ...next } : item,
+      ),
+    }));
+  };
+  const updateCertification = (id: string, next: Partial<CvCertification>) => {
+    patch((current) => ({
+      ...current,
+      certifications: current.certifications.map((item) =>
+        item.id === id ? { ...item, ...next } : item,
+      ),
+    }));
+  };
+  const updateLanguage = (id: string, next: Partial<CvLanguageSkill>) => {
+    patch((current) => ({
+      ...current,
+      languages: current.languages.map((item) =>
+        item.id === id ? { ...item, ...next } : item,
+      ),
+    }));
+  };
+  const updateOther = (id: string, next: Partial<CvOtherEngagement>) => {
+    patch((current) => ({
+      ...current,
+      otherEngagements: current.otherEngagements.map((item) =>
+        item.id === id ? { ...item, ...next } : item,
+      ),
+    }));
+  };
+
+  const moveSection = (section: CvSectionId, direction: -1 | 1) => {
+    patch((current) => {
+      const index = current.sectionOrder.indexOf(section);
+      return {
+        ...current,
+        sectionOrder: moveItem(current.sectionOrder, index, direction),
+      };
+    });
+  };
+
+  const startFromProfile = () => {
+    const next = createCvDocumentFromProfile(profile, application, {
+      language,
+      pageSize,
+      extraContext,
+    });
+    setCv(application.id, next);
+  };
+
+  const handleGenerate = async () => {
+    setExportStatus(null);
+    await generateCv({
+      application,
+      profile,
+      config: apiConfig,
+      options: { language, pageSize, extraContext },
+    });
+  };
+
+  const handleExport = async () => {
+    if (!document) return;
+    setExportStatus(null);
+    setExporting(true);
+    try {
+      const path = await exportCvDocx(document, application.companyName);
+      if (path) {
+        const name = path.split(/[\\/]/).pop() ?? path;
+        setExportStatus(`Exported ${name}.`);
+      }
+    } catch (err) {
+      setExportStatus(
+        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const changeLanguage = (value: CvLanguage) => {
+    setLanguage(value);
+    if (document) setField("language", value);
+  };
+
+  const changePageSize = (value: CvPageSize) => {
+    setPageSize(value);
+    if (document) setField("pageSize", value);
+  };
+
+  if (!loaded) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="size-5 animate-spin text-text-muted" />
+      </div>
+    );
+  }
+
+  if (!document) {
+    return (
+      <div className="space-y-5">
+        <Card className="bg-surface border-border">
+          <CardContent className="space-y-4 pt-4">
+            <div className="flex items-start gap-3">
+              <FileText className="mt-0.5 size-5 text-primary" />
+              <div>
+                <h2 className="text-base font-semibold text-text-primary">
+                  Tailor a CV for this application
+                </h2>
+                <p className="mt-1 text-sm text-text-muted">
+                  Build a one- or two-page CV from your profile, tailored to
+                  this job and optimised for ATS parsing. Nothing is generated
+                  until you press the button.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="cv-language">CV language</Label>
+                <Select
+                  value={language}
+                  onValueChange={(value) =>
+                    value && changeLanguage(value as CvLanguage)
+                  }
+                >
+                  <SelectTrigger id="cv-language" className="w-full bg-field">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en">English</SelectItem>
+                    <SelectItem value="sv">Svenska</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cv-page-size">Page size</Label>
+                <Select
+                  value={pageSize}
+                  onValueChange={(value) =>
+                    value && changePageSize(value as CvPageSize)
+                  }
+                >
+                  <SelectTrigger id="cv-page-size" className="w-full bg-field">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="a4">A4</SelectItem>
+                    <SelectItem value="letter">US Letter</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="cv-extra-context">
+                Extra context for this CV
+              </Label>
+              <Textarea
+                id="cv-extra-context"
+                value={extraContext}
+                onChange={(event) => setExtraContext(event.target.value)}
+                placeholder="Add anything the CV should know that is not in your profile: a relevant achievement, a career-change rationale, the narrative you want…"
+                className={textareaClass}
+              />
+              <p className="text-[11px] text-text-muted">
+                This is treated as your own factual input. The builder will not
+                invent achievements or metrics.
+              </p>
+            </div>
+
+            {!profileHasContent && (
+              <p className="rounded-md border border-amber-600/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+                Add some profile details first so the CV has real content.
+              </p>
+            )}
+            {!hasJobDescription && (
+              <p className="rounded-md border border-amber-600/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+                Add the job description in the Details view so the CV can be
+                tailored.
+              </p>
+            )}
+            {!hasApiKey && (
+              <p className="rounded-md border border-border bg-field p-2 text-xs text-text-secondary">
+                Configure an AI provider in Settings to generate a CV. You can
+                still start from your profile and edit it manually.
+              </p>
+            )}
+            {generationError && (
+              <p role="alert" className="text-xs text-destructive">
+                {generationError}
+              </p>
+            )}
+            {storeError && (
+              <p role="alert" className="text-xs text-destructive">
+                {storeError}
+              </p>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => void handleGenerate()}
+                disabled={!canGenerate || generating}
+              >
+                {generating ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Sparkles className="size-4" />
+                )}
+                {generating ? "Generating CV…" : "Generate tailored CV"}
+              </Button>
+              {generating && (
+                <Button
+                  variant="outline"
+                  onClick={() => cancelGeneration(application.id)}
+                >
+                  Stop
+                </Button>
+              )}
+              <Button variant="outline" onClick={startFromProfile}>
+                Start from profile
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const sectionIndex = (section: CvSectionId) =>
+    document.sectionOrder.indexOf(section);
+
+  const renderSection = (section: CvSectionId) => {
+    const index = sectionIndex(section);
+    const card = (children: ReactNode) => (
+      <SectionCard
+        key={section}
+        section={section}
+        language={document.language}
+        onMove={(direction) => moveSection(section, direction)}
+        canMoveUp={index > 0}
+        canMoveDown={index < document.sectionOrder.length - 1}
+      >
+        {children}
+      </SectionCard>
+    );
+
+    switch (section) {
+      case "summary":
+        return card(
+          <Textarea
+            value={document.summary}
+            onChange={(event) => setField("summary", event.target.value)}
+            placeholder="Professional summary tailored to this role…"
+            className={textareaClass}
+            aria-label="Professional summary"
+          />,
+        );
+      case "skills":
+        return card(
+          <div className="space-y-1.5">
+            <Textarea
+              value={document.skills.join("\n")}
+              onChange={(event) =>
+                setField("skills", lines(event.target.value))
+              }
+              placeholder="One skill per line"
+              className={textareaClass}
+              aria-label="Skills, one per line"
+            />
+            <p className="text-[11px] text-text-muted">
+              Keep only skills you can defend in an interview.
+            </p>
+          </div>,
+        );
+      case "experience":
+        return card(
+          <div className="space-y-3">
+            {document.experience.map((item, itemIndex) => (
+              <div
+                key={item.id}
+                className="space-y-2 rounded-md border border-border bg-field/40 p-3"
+              >
+                <EntryControls
+                  include={item.included}
+                  onInclude={(included) =>
+                    updateExperience(item.id, { included })
+                  }
+                  onMove={(direction) =>
+                    patch((current) => ({
+                      ...current,
+                      experience: moveItem(
+                        current.experience,
+                        itemIndex,
+                        direction,
+                      ),
+                    }))
+                  }
+                  canMoveUp={itemIndex > 0}
+                  canMoveDown={itemIndex < document.experience.length - 1}
+                  onDelete={() =>
+                    patch((current) => ({
+                      ...current,
+                      experience: current.experience.filter(
+                        (entry) => entry.id !== item.id,
+                      ),
+                    }))
+                  }
+                  label={`${item.role || "experience"} at ${
+                    item.company || "company"
+                  }`}
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    value={item.role}
+                    onChange={(event) =>
+                      updateExperience(item.id, { role: event.target.value })
+                    }
+                    placeholder="Role"
+                    className={fieldClass}
+                    aria-label={`Role for ${item.company || "experience"}`}
+                  />
+                  <Input
+                    value={item.company}
+                    onChange={(event) =>
+                      updateExperience(item.id, { company: event.target.value })
+                    }
+                    placeholder="Company"
+                    className={fieldClass}
+                    aria-label={`Company for ${item.role || "experience"}`}
+                  />
+                  <Input
+                    value={item.location}
+                    onChange={(event) =>
+                      updateExperience(item.id, {
+                        location: event.target.value,
+                      })
+                    }
+                    placeholder="Location (optional)"
+                    className={fieldClass}
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      value={item.startDate}
+                      onChange={(event) =>
+                        updateExperience(item.id, {
+                          startDate: event.target.value,
+                        })
+                      }
+                      placeholder="Start"
+                      className={fieldClass}
+                    />
+                    <Input
+                      value={item.endDate}
+                      onChange={(event) =>
+                        updateExperience(item.id, {
+                          endDate: event.target.value,
+                        })
+                      }
+                      placeholder="End"
+                      className={fieldClass}
+                      disabled={item.current}
+                    />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  <Checkbox
+                    checked={item.current}
+                    onCheckedChange={(checked) =>
+                      updateExperience(item.id, {
+                        current: checked === true,
+                        endDate:
+                          checked === true
+                            ? CV_UI_TEXT[document.language].present
+                            : item.endDate,
+                      })
+                    }
+                  />
+                  Current role
+                </label>
+                <div className="space-y-1">
+                  <Label className="text-xs">Bullets (one per line)</Label>
+                  <Textarea
+                    value={item.bullets.join("\n")}
+                    onChange={(event) =>
+                      updateExperience(item.id, {
+                        bullets: lines(event.target.value),
+                      })
+                    }
+                    className={textareaClass}
+                    aria-label={`Bullets for ${item.role || "experience"}`}
+                  />
+                </div>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                patch((current) => ({
+                  ...current,
+                  experience: [
+                    ...current.experience,
+                    {
+                      id: newMessageId(),
+                      company: "",
+                      role: "",
+                      location: "",
+                      startDate: "",
+                      endDate: "",
+                      current: false,
+                      bullets: [],
+                      included: true,
+                    },
+                  ],
+                }))
+              }
+            >
+              <Plus className="size-3.5" /> Add role
+            </Button>
+          </div>,
+        );
+      case "education":
+        return card(
+          <div className="space-y-3">
+            {document.education.map((item, itemIndex) => (
+              <div
+                key={item.id}
+                className="space-y-2 rounded-md border border-border bg-field/40 p-3"
+              >
+                <EntryControls
+                  include={item.included}
+                  onInclude={(included) =>
+                    updateEducation(item.id, { included })
+                  }
+                  onMove={(direction) =>
+                    patch((current) => ({
+                      ...current,
+                      education: moveItem(
+                        current.education,
+                        itemIndex,
+                        direction,
+                      ),
+                    }))
+                  }
+                  canMoveUp={itemIndex > 0}
+                  canMoveDown={itemIndex < document.education.length - 1}
+                  onDelete={() =>
+                    patch((current) => ({
+                      ...current,
+                      education: current.education.filter(
+                        (entry) => entry.id !== item.id,
+                      ),
+                    }))
+                  }
+                  label={item.school || "education"}
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    value={item.school}
+                    onChange={(event) =>
+                      updateEducation(item.id, { school: event.target.value })
+                    }
+                    placeholder="School"
+                    className={fieldClass}
+                  />
+                  <Input
+                    value={item.degree}
+                    onChange={(event) =>
+                      updateEducation(item.id, { degree: event.target.value })
+                    }
+                    placeholder="Degree"
+                    className={fieldClass}
+                  />
+                  <Input
+                    value={item.field}
+                    onChange={(event) =>
+                      updateEducation(item.id, { field: event.target.value })
+                    }
+                    placeholder="Field / programme"
+                    className={fieldClass}
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      value={item.startDate}
+                      onChange={(event) =>
+                        updateEducation(item.id, {
+                          startDate: event.target.value,
+                        })
+                      }
+                      placeholder="Start"
+                      className={fieldClass}
+                    />
+                    <Input
+                      value={item.endDate}
+                      onChange={(event) =>
+                        updateEducation(item.id, {
+                          endDate: event.target.value,
+                        })
+                      }
+                      placeholder="End"
+                      className={fieldClass}
+                    />
+                  </div>
+                </div>
+                <Textarea
+                  value={item.details.join("\n")}
+                  onChange={(event) =>
+                    updateEducation(item.id, {
+                      details: lines(event.target.value),
+                    })
+                  }
+                  placeholder="Details (one per line)"
+                  className={textareaClass}
+                  aria-label={`Details for ${item.school || "education"}`}
+                />
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                patch((current) => ({
+                  ...current,
+                  education: [
+                    ...current.education,
+                    {
+                      id: newMessageId(),
+                      school: "",
+                      degree: "",
+                      field: "",
+                      startDate: "",
+                      endDate: "",
+                      details: [],
+                      included: true,
+                    },
+                  ],
+                }))
+              }
+            >
+              <Plus className="size-3.5" /> Add education
+            </Button>
+          </div>,
+        );
+      case "projects":
+        return card(
+          <div className="space-y-3">
+            {document.projects.map((item, itemIndex) => (
+              <div
+                key={item.id}
+                className="space-y-2 rounded-md border border-border bg-field/40 p-3"
+              >
+                <EntryControls
+                  include={item.included}
+                  onInclude={(included) => updateProject(item.id, { included })}
+                  onMove={(direction) =>
+                    patch((current) => ({
+                      ...current,
+                      projects: moveItem(
+                        current.projects,
+                        itemIndex,
+                        direction,
+                      ),
+                    }))
+                  }
+                  canMoveUp={itemIndex > 0}
+                  canMoveDown={itemIndex < document.projects.length - 1}
+                  onDelete={() =>
+                    patch((current) => ({
+                      ...current,
+                      projects: current.projects.filter(
+                        (entry) => entry.id !== item.id,
+                      ),
+                    }))
+                  }
+                  label={item.title || item.description || "project"}
+                />
+                <Input
+                  value={item.title}
+                  onChange={(event) =>
+                    updateProject(item.id, { title: event.target.value })
+                  }
+                  placeholder="Project title"
+                  className={fieldClass}
+                />
+                <Input
+                  value={item.period}
+                  onChange={(event) =>
+                    updateProject(item.id, { period: event.target.value })
+                  }
+                  placeholder="Dates (e.g. Jan 2024 – Jun 2025)"
+                  className={fieldClass}
+                />
+                <Textarea
+                  value={item.description}
+                  onChange={(event) =>
+                    updateProject(item.id, { description: event.target.value })
+                  }
+                  placeholder="Project description"
+                  className={textareaClass}
+                  aria-label={`Description for ${item.title || "project"}`}
+                />
+                <Textarea
+                  value={item.bullets.join("\n")}
+                  onChange={(event) =>
+                    updateProject(item.id, {
+                      bullets: lines(event.target.value),
+                    })
+                  }
+                  placeholder="Achievement bullets (one per line)"
+                  className={textareaClass}
+                  aria-label={`Bullets for ${item.title || "project"}`}
+                />
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                patch((current) => ({
+                  ...current,
+                  projects: [
+                    ...current.projects,
+                    {
+                      id: newMessageId(),
+                      title: "",
+                      description: "",
+                      period: "",
+                      bullets: [],
+                      included: true,
+                    },
+                  ],
+                }))
+              }
+            >
+              <Plus className="size-3.5" /> Add project
+            </Button>
+          </div>,
+        );
+      case "certifications":
+        return card(
+          <div className="space-y-2">
+            {document.certifications.map((item, itemIndex) => (
+              <div
+                key={item.id}
+                className="space-y-2 rounded-md border border-border bg-field/40 p-3"
+              >
+                <EntryControls
+                  include={item.included}
+                  onInclude={(included) =>
+                    updateCertification(item.id, { included })
+                  }
+                  onMove={(direction) =>
+                    patch((current) => ({
+                      ...current,
+                      certifications: moveItem(
+                        current.certifications,
+                        itemIndex,
+                        direction,
+                      ),
+                    }))
+                  }
+                  canMoveUp={itemIndex > 0}
+                  canMoveDown={itemIndex < document.certifications.length - 1}
+                  onDelete={() =>
+                    patch((current) => ({
+                      ...current,
+                      certifications: current.certifications.filter(
+                        (entry) => entry.id !== item.id,
+                      ),
+                    }))
+                  }
+                  label={item.name || "certification"}
+                />
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Input
+                    value={item.name}
+                    onChange={(event) =>
+                      updateCertification(item.id, {
+                        name: event.target.value,
+                      })
+                    }
+                    placeholder="Certification"
+                    className={fieldClass}
+                  />
+                  <Input
+                    value={item.issuer}
+                    onChange={(event) =>
+                      updateCertification(item.id, {
+                        issuer: event.target.value,
+                      })
+                    }
+                    placeholder="Issuer"
+                    className={fieldClass}
+                  />
+                  <Input
+                    value={item.date}
+                    onChange={(event) =>
+                      updateCertification(item.id, {
+                        date: event.target.value,
+                      })
+                    }
+                    placeholder="Date"
+                    className={fieldClass}
+                  />
+                </div>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                patch((current) => ({
+                  ...current,
+                  certifications: [
+                    ...current.certifications,
+                    {
+                      id: newMessageId(),
+                      name: "",
+                      issuer: "",
+                      date: "",
+                      included: true,
+                    },
+                  ],
+                }))
+              }
+            >
+              <Plus className="size-3.5" /> Add certification
+            </Button>
+          </div>,
+        );
+      case "languages":
+        return card(
+          <div className="space-y-2">
+            {document.languages.map((item, itemIndex) => (
+              <div
+                key={item.id}
+                className="space-y-2 rounded-md border border-border bg-field/40 p-3"
+              >
+                <EntryControls
+                  include={item.included}
+                  onInclude={(included) =>
+                    updateLanguage(item.id, { included })
+                  }
+                  onMove={(direction) =>
+                    patch((current) => ({
+                      ...current,
+                      languages: moveItem(
+                        current.languages,
+                        itemIndex,
+                        direction,
+                      ),
+                    }))
+                  }
+                  canMoveUp={itemIndex > 0}
+                  canMoveDown={itemIndex < document.languages.length - 1}
+                  onDelete={() =>
+                    patch((current) => ({
+                      ...current,
+                      languages: current.languages.filter(
+                        (entry) => entry.id !== item.id,
+                      ),
+                    }))
+                  }
+                  label={item.name || "language"}
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    value={item.name}
+                    onChange={(event) =>
+                      updateLanguage(item.id, { name: event.target.value })
+                    }
+                    placeholder="Language"
+                    className={fieldClass}
+                  />
+                  <Input
+                    value={item.level}
+                    onChange={(event) =>
+                      updateLanguage(item.id, { level: event.target.value })
+                    }
+                    placeholder="Level"
+                    className={fieldClass}
+                  />
+                </div>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                patch((current) => ({
+                  ...current,
+                  languages: [
+                    ...current.languages,
+                    {
+                      id: newMessageId(),
+                      name: "",
+                      level: "",
+                      included: true,
+                    },
+                  ],
+                }))
+              }
+            >
+              <Plus className="size-3.5" /> Add language
+            </Button>
+          </div>,
+        );
+      case "other":
+        return card(
+          <div className="space-y-3">
+            {document.otherEngagements.map((item, itemIndex) => (
+              <div
+                key={item.id}
+                className="space-y-2 rounded-md border border-border bg-field/40 p-3"
+              >
+                <EntryControls
+                  include={item.included}
+                  onInclude={(included) => updateOther(item.id, { included })}
+                  onMove={(direction) =>
+                    patch((current) => ({
+                      ...current,
+                      otherEngagements: moveItem(
+                        current.otherEngagements,
+                        itemIndex,
+                        direction,
+                      ),
+                    }))
+                  }
+                  canMoveUp={itemIndex > 0}
+                  canMoveDown={itemIndex < document.otherEngagements.length - 1}
+                  onDelete={() =>
+                    patch((current) => ({
+                      ...current,
+                      otherEngagements: current.otherEngagements.filter(
+                        (entry) => entry.id !== item.id,
+                      ),
+                    }))
+                  }
+                  label={item.organization || "other experience"}
+                />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    value={item.organization}
+                    onChange={(event) =>
+                      updateOther(item.id, {
+                        organization: event.target.value,
+                      })
+                    }
+                    placeholder="Organization"
+                    className={fieldClass}
+                  />
+                  <Input
+                    value={item.role}
+                    onChange={(event) =>
+                      updateOther(item.id, { role: event.target.value })
+                    }
+                    placeholder="Role"
+                    className={fieldClass}
+                  />
+                  <Input
+                    value={item.startDate}
+                    onChange={(event) =>
+                      updateOther(item.id, { startDate: event.target.value })
+                    }
+                    placeholder="Start"
+                    className={fieldClass}
+                  />
+                  <Input
+                    value={item.endDate}
+                    onChange={(event) =>
+                      updateOther(item.id, { endDate: event.target.value })
+                    }
+                    placeholder="End"
+                    className={fieldClass}
+                    disabled={item.current}
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-text-secondary">
+                  <Checkbox
+                    checked={item.current}
+                    onCheckedChange={(checked) =>
+                      updateOther(item.id, {
+                        current: checked === true,
+                        endDate:
+                          checked === true
+                            ? CV_UI_TEXT[document.language].present
+                            : item.endDate,
+                      })
+                    }
+                  />
+                  Ongoing
+                </label>
+                <Textarea
+                  value={item.bullets.join("\n")}
+                  onChange={(event) =>
+                    updateOther(item.id, {
+                      bullets: lines(event.target.value),
+                    })
+                  }
+                  placeholder="Bullets (one per line)"
+                  className={textareaClass}
+                  aria-label={`Bullets for ${
+                    item.organization || "other experience"
+                  }`}
+                />
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                patch((current) => ({
+                  ...current,
+                  otherEngagements: [
+                    ...current.otherEngagements,
+                    {
+                      id: newMessageId(),
+                      organization: "",
+                      role: "",
+                      startDate: "",
+                      endDate: "",
+                      current: false,
+                      bullets: [],
+                      included: true,
+                    },
+                  ],
+                }))
+              }
+            >
+              <Plus className="size-3.5" /> Add other experience
+            </Button>
+          </div>,
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border bg-surface p-4">
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary">
+            Tailored CV
+          </h2>
+          <p className="mt-1 text-xs text-text-muted">
+            {document.pageSize === "a4" ? "A4" : "US Letter"} ·{" "}
+            {document.language === "sv" ? "Svenska" : "English"} ·{" "}
+            {saving ? "Saving…" : storeError ? "Not saved" : "Saved locally"}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void saveCv(application.id)}
+            disabled={saving}
+          >
+            <Save className="size-3.5" /> Save
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleExport()}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Download className="size-3.5" />
+            )}
+            Export Word
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleGenerate()}
+            disabled={!canGenerate || generating}
+          >
+            {generating ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3.5" />
+            )}
+            Regenerate
+          </Button>
+          {generating && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => cancelGeneration(application.id)}
+            >
+              Stop
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {storeError && (
+        <p role="alert" className="text-xs text-destructive">
+          {storeError}
+        </p>
+      )}
+      {generationError && (
+        <p role="alert" className="text-xs text-destructive">
+          {generationError}
+        </p>
+      )}
+      {exportStatus && (
+        <p role="status" className="text-xs text-text-secondary">
+          {exportStatus}
+        </p>
+      )}
+      {stale && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-600/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+          <span>
+            Your profile or this application changed after the CV was generated.
+            Regenerate to pick up the changes, or keep editing manually.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleGenerate()}
+            disabled={!canGenerate || generating}
+          >
+            Regenerate
+          </Button>
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-4">
+          <Card className="bg-surface border-border">
+            <CardContent className="space-y-3 pt-4">
+              <h3 className="text-sm font-semibold text-text-primary">
+                Contact
+              </h3>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="cv-contact-full-name">Full name</Label>
+                  <Input
+                    id="cv-contact-full-name"
+                    value={document.contact.fullName}
+                    onChange={(event) =>
+                      setField("contact", {
+                        ...document.contact,
+                        fullName: event.target.value,
+                      })
+                    }
+                    placeholder="Full name"
+                    className={fieldClass}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cv-contact-email">Email</Label>
+                  <Input
+                    id="cv-contact-email"
+                    value={document.contact.email}
+                    onChange={(event) =>
+                      setField("contact", {
+                        ...document.contact,
+                        email: event.target.value,
+                      })
+                    }
+                    placeholder="Email"
+                    className={fieldClass}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cv-contact-phone">Phone</Label>
+                  <Input
+                    id="cv-contact-phone"
+                    value={document.contact.phone}
+                    onChange={(event) =>
+                      setField("contact", {
+                        ...document.contact,
+                        phone: event.target.value,
+                      })
+                    }
+                    placeholder="Phone"
+                    className={fieldClass}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cv-contact-location">Location</Label>
+                  <Input
+                    id="cv-contact-location"
+                    value={document.contact.location}
+                    onChange={(event) =>
+                      setField("contact", {
+                        ...document.contact,
+                        location: event.target.value,
+                      })
+                    }
+                    placeholder="Location"
+                    className={fieldClass}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cv-contact-linkedin">LinkedIn URL</Label>
+                  <Input
+                    id="cv-contact-linkedin"
+                    value={document.contact.linkedinUrl}
+                    onChange={(event) =>
+                      setField("contact", {
+                        ...document.contact,
+                        linkedinUrl: event.target.value,
+                      })
+                    }
+                    placeholder="LinkedIn URL"
+                    className={fieldClass}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cv-contact-portfolio">
+                    Portfolio / website
+                  </Label>
+                  <Input
+                    id="cv-contact-portfolio"
+                    value={document.contact.portfolioUrl}
+                    onChange={(event) =>
+                      setField("contact", {
+                        ...document.contact,
+                        portfolioUrl: event.target.value,
+                      })
+                    }
+                    placeholder="Portfolio / website"
+                    className={fieldClass}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cv-contact-github">GitHub URL</Label>
+                  <Input
+                    id="cv-contact-github"
+                    value={document.contact.githubUrl}
+                    onChange={(event) =>
+                      setField("contact", {
+                        ...document.contact,
+                        githubUrl: event.target.value,
+                      })
+                    }
+                    placeholder="GitHub URL"
+                    className={fieldClass}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-surface border-border">
+            <CardContent className="space-y-3 pt-4">
+              <h3 className="text-sm font-semibold text-text-primary">
+                Headline
+              </h3>
+              <Input
+                value={document.headline}
+                onChange={(event) => setField("headline", event.target.value)}
+                placeholder="Headline, e.g. Frontend Engineer focused on accessible design systems"
+                className={fieldClass}
+              />
+            </CardContent>
+          </Card>
+
+          {document.sectionOrder.map(renderSection)}
+        </div>
+
+        <aside className="space-y-4 lg:sticky lg:top-0 lg:self-start">
+          <Card className="bg-surface border-border">
+            <CardContent className="space-y-3 pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-text-primary">
+                  ATS readiness
+                </h3>
+                <span className="font-mono text-[11px] text-text-secondary">
+                  {ats ? `${Math.round(ats.keywordCoverage * 100)}%` : "—"}
+                </span>
+              </div>
+              {ats && (
+                <>
+                  <p className="text-[11px] text-text-muted">
+                    Exact keyword matches from the job title, description and
+                    requirements. Use missing terms only if they are true.
+                  </p>
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                      Missing ({ats.missingKeywords.length})
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {ats.missingKeywords.slice(0, 10).map((keyword) => (
+                        <span
+                          key={keyword}
+                          className="rounded border border-amber-600/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-800 dark:text-amber-300"
+                        >
+                          {keyword}
+                        </span>
+                      ))}
+                      {ats.missingKeywords.length === 0 && (
+                        <span className="text-[11px] text-text-muted">
+                          None detected.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                      Matched ({ats.matchedKeywords.length})
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {ats.matchedKeywords.slice(0, 10).map((keyword) => (
+                        <span
+                          key={keyword}
+                          className="rounded border border-green-700/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-800 dark:text-green-300"
+                        >
+                          {keyword}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <ul className="space-y-1 border-t border-border pt-2">
+                    {ats.checks.map((check) => (
+                      <li
+                        key={check.id}
+                        className="flex items-start gap-1.5 text-[11px]"
+                      >
+                        {check.ok ? (
+                          <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-green-700 dark:text-green-400" />
+                        ) : (
+                          <AlertTriangle className="mt-0.5 size-3 shrink-0 text-amber-700 dark:text-amber-400" />
+                        )}
+                        <span>
+                          <span className="text-text-primary">
+                            {check.label}
+                          </span>
+                          {!check.ok && (
+                            <span className="block text-text-muted">
+                              {check.detail}
+                            </span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="border-t border-border pt-2 text-[10px] text-text-muted">
+                    {ats.wordCount} words. ATS guidance is not a guarantee;
+                    always check the exported file.
+                  </p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="bg-surface border-border">
+            <CardContent className="space-y-2 pt-4">
+              <h3 className="text-sm font-semibold text-text-primary">
+                CV settings
+              </h3>
+              <div className="space-y-1.5">
+                <Label htmlFor="cv-language-edit">Language</Label>
+                <Select
+                  value={document.language}
+                  onValueChange={(value) =>
+                    value && changeLanguage(value as CvLanguage)
+                  }
+                >
+                  <SelectTrigger
+                    id="cv-language-edit"
+                    className="w-full bg-field"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en">English</SelectItem>
+                    <SelectItem value="sv">Svenska</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cv-page-size-edit">Page size</Label>
+                <Select
+                  value={document.pageSize}
+                  onValueChange={(value) =>
+                    value && changePageSize(value as CvPageSize)
+                  }
+                >
+                  <SelectTrigger
+                    id="cv-page-size-edit"
+                    className="w-full bg-field"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="a4">A4</SelectItem>
+                    <SelectItem value="letter">US Letter</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cv-extra-context-edit">Extra context</Label>
+                <Textarea
+                  id="cv-extra-context-edit"
+                  value={document.extraContext}
+                  onChange={(event) =>
+                    setField("extraContext", event.target.value)
+                  }
+                  className={textareaClass}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+      </div>
+    </div>
+  );
+}

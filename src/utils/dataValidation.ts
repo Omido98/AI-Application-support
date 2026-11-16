@@ -202,6 +202,7 @@ function normalizeProject(value: unknown): Project | null {
       startMonth: "",
       startYear: "",
       isCurrent: false,
+      achievements: [],
     };
   }
   if (!isRecord(value)) return null;
@@ -213,6 +214,13 @@ function normalizeProject(value: unknown): Project | null {
     isCurrent: asBoolean(value.isCurrent),
     endMonth: asOptionalString(value.endMonth),
     endYear: asOptionalString(value.endYear),
+    achievements: [
+      ...new Set(
+        asStringArray(value.achievements)
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ].slice(0, 20),
   };
 }
 
@@ -228,6 +236,13 @@ function normalizeWorkExperience(value: unknown): WorkExperience | null {
     endMonth: asOptionalString(value.endMonth),
     endYear: asOptionalString(value.endYear),
     jobDescription: asString(value.jobDescription),
+    achievements: [
+      ...new Set(
+        asStringArray(value.achievements)
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    ].slice(0, 20),
     projects: mapDefined(value.projects, normalizeProject),
   };
 }
@@ -389,9 +404,12 @@ export function normalizeProfileData(value: unknown): ProfileData | null {
   return {
     fullName: asString(value.fullName),
     email: asString(value.email),
+    phone: asString(value.phone),
     city: asString(value.city),
     country: asString(value.country),
     linkedinUrl: asString(value.linkedinUrl),
+    portfolioUrl: asString(value.portfolioUrl),
+    githubUrl: asString(value.githubUrl),
     coverLetterSummary: asString(value.coverLetterSummary),
     interests: mapDefined(value.interests, normalizeInterest),
     education: mapDefined(value.education, normalizeEducation),

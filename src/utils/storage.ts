@@ -236,3 +236,34 @@ export async function pruneOrphanChatFiles(
     return [];
   }
 }
+
+/** Application ids are the only variable part of a `cv_<id>.json` name. */
+const CV_FILE_RE = /^cv_([a-zA-Z0-9-]+)\.json(\.bak)?$/;
+
+/** Delete CV drafts whose application is no longer in `validIds`. */
+export async function pruneOrphanCvFiles(
+  validIds: string[],
+): Promise<string[]> {
+  if (!isTauriRuntime()) {
+    const valid = new Set(validIds);
+    const removed: string[] = [];
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith("aas:cv_")) continue;
+      const name = key.slice("aas:".length);
+      const id = CV_FILE_RE.exec(name)?.[1];
+      if (!id || valid.has(id)) continue;
+      localStorage.removeItem(key);
+      removed.push(name);
+    }
+    return removed.sort();
+  }
+
+  try {
+    return await invoke<string[]>("prune_orphan_cv_files", { validIds });
+  } catch (err) {
+    reportIssue("delete", "CV drafts", errorMessage(err));
+    console.error("[storage] Could not remove orphan CV drafts:", err);
+    return [];
+  }
+}

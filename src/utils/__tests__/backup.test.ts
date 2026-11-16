@@ -5,9 +5,15 @@ vi.mock("@/utils/storage", () => ({
   saveJson: vi.fn(),
   loadJson: vi.fn(),
   pruneOrphanChatFiles: vi.fn(),
+  pruneOrphanCvFiles: vi.fn(),
 }));
 
-import { saveJson, loadJson, pruneOrphanChatFiles } from "@/utils/storage";
+import {
+  loadJson,
+  pruneOrphanChatFiles,
+  pruneOrphanCvFiles,
+  saveJson,
+} from "@/utils/storage";
 import {
   BACKUP_FORMAT,
   BACKUP_VERSION,
@@ -20,6 +26,7 @@ import {
 const saveJsonMock = saveJson as Mock;
 const loadJsonMock = loadJson as Mock;
 const pruneChatMock = pruneOrphanChatFiles as Mock;
+const pruneCvMock = pruneOrphanCvFiles as Mock;
 
 const app = {
   id: "6f1d2d0e-aaaa-4bbb-8ccc-1234567890ab",
@@ -39,8 +46,10 @@ beforeEach(() => {
   saveJsonMock.mockReset();
   loadJsonMock.mockReset();
   pruneChatMock.mockReset();
+  pruneCvMock.mockReset();
   saveJsonMock.mockResolvedValue(true);
   pruneChatMock.mockResolvedValue([]);
+  pruneCvMock.mockResolvedValue([]);
   loadJsonMock.mockImplementation(async (name: string) => {
     switch (name) {
       case "applications.json":
@@ -90,6 +99,21 @@ describe("buildBackupBundle", () => {
     expect(config.provider).toBe("zen");
     expect(config.baseUrl).toBe("https://opencode.ai/zen/v1");
     expect(JSON.stringify(bundle)).not.toContain("SECRET-KEY");
+  });
+
+  it("includes CV drafts for existing applications", async () => {
+    const cv = { schemaVersion: 1, headline: "Engineer" };
+    loadJsonMock.mockImplementation(async (name: string) => {
+      if (name === "applications.json") {
+        return { applications: [app], selectedApplicationId: app.id };
+      }
+      if (name === `cv_${app.id}.json`) return cv;
+      return null;
+    });
+
+    const bundle = await buildBackupBundle();
+
+    expect(bundle.files[`cv_${app.id}.json`]).toEqual(cv);
   });
 
   it("skips application ids that could escape the data directory", async () => {
@@ -259,6 +283,7 @@ describe("restoreBackupBundle", () => {
     await restoreBackupBundle(bundle);
 
     expect(pruneChatMock).toHaveBeenCalledWith([app.id]);
+    expect(pruneCvMock).toHaveBeenCalledWith([app.id]);
   });
 
   it("keeps the current application ids when the bundle omits them", async () => {
@@ -273,6 +298,7 @@ describe("restoreBackupBundle", () => {
 
     expect(loadJsonMock).toHaveBeenCalledWith("applications.json");
     expect(pruneChatMock).toHaveBeenCalledWith([app.id]);
+    expect(pruneCvMock).toHaveBeenCalledWith([app.id]);
   });
 
   it("drops drafts for applications that are not in the restored data", async () => {

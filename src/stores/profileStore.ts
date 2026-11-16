@@ -28,9 +28,12 @@ function writeSnapshot() {
   const data: ProfileData = {
     fullName: s.fullName,
     email: s.email,
+    phone: s.phone,
     city: s.city,
     country: s.country,
     linkedinUrl: s.linkedinUrl,
+    portfolioUrl: s.portfolioUrl,
+    githubUrl: s.githubUrl,
     coverLetterSummary: s.coverLetterSummary,
     interests: s.interests,
     education: s.education,
@@ -77,7 +80,14 @@ interface ProfileState extends ProfileData {
     patch: Partial<
       Pick<
         ProfileData,
-        "fullName" | "email" | "city" | "country" | "linkedinUrl"
+        | "fullName"
+        | "email"
+        | "phone"
+        | "city"
+        | "country"
+        | "linkedinUrl"
+        | "portfolioUrl"
+        | "githubUrl"
       >
     >,
   ) => void;
@@ -145,9 +155,12 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   // ── Data ──
   fullName: "",
   email: "",
+  phone: "",
   city: "",
   country: "",
   linkedinUrl: "",
+  portfolioUrl: "",
+  githubUrl: "",
   coverLetterSummary: "",
   interests: [],
   education: [],

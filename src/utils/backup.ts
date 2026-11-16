@@ -1,4 +1,9 @@
-import { saveJson, loadJson, pruneOrphanChatFiles } from "@/utils/storage";
+import {
+  saveJson,
+  loadJson,
+  pruneOrphanChatFiles,
+  pruneOrphanCvFiles,
+} from "@/utils/storage";
 
 /**
  * Backup & restore of all app data as a single JSON bundle.
@@ -73,7 +78,7 @@ export async function buildBackupBundle(): Promise<BackupBundle> {
     }
   }
 
-  // One chat thread per application
+  // One chat thread and one CV draft per application
   const applications = files["applications.json"];
   const appList =
     isRecord(applications) && Array.isArray(applications.applications)
@@ -82,9 +87,11 @@ export async function buildBackupBundle(): Promise<BackupBundle> {
   for (const app of appList) {
     if (!isRecord(app) || typeof app.id !== "string") continue;
     if (!SAFE_APPLICATION_ID_RE.test(app.id)) continue;
-    const name = `chat_${app.id}.json`;
-    const data = await loadJson<unknown>(name);
-    if (data != null) files[name] = data;
+    for (const prefix of ["chat", "cv"]) {
+      const name = `${prefix}_${app.id}.json`;
+      const data = await loadJson<unknown>(name);
+      if (data != null) files[name] = data;
+    }
   }
 
   return {
@@ -165,8 +172,9 @@ export async function restoreBackupBundle(
     restored.push(name);
   }
 
-  // Thread files for applications that no longer exist would otherwise stay
-  // on disk forever (and are not part of any backup either).
+  // Thread/CV files for applications that no longer exist would otherwise
+  // stay on disk forever (and are not part of any backup either).
   await pruneOrphanChatFiles(applicationIds);
+  await pruneOrphanCvFiles(applicationIds);
   return restored;
 }

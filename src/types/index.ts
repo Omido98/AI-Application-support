@@ -41,18 +41,23 @@ export interface WorkExperience {
   endMonth?: string;
   endYear?: string;
   jobDescription: string;
+  /** Optional concrete outcomes. Never inferred; used by the CV builder. */
+  achievements?: string[];
   projects: Project[];
 }
 
 /** A project or initiative within a work experience entry. */
 export interface Project {
   id: string;
+  /** Free-text project/initiative description (legacy field name). */
   name: string;
   startMonth: string;
   startYear: string;
   isCurrent: boolean;
   endMonth?: string;
   endYear?: string;
+  /** Optional concrete outcomes for this project. */
+  achievements?: string[];
 }
 
 /** A private/non-employment engagement, e.g. volunteering, civil society work, merits. */
@@ -105,10 +110,13 @@ export interface ProfileData {
   /** Basic contact / header details used in the CV and for personalising letters. */
   fullName: string;
   email: string;
+  phone?: string;
   city: string;
   country: string;
-  /** Public profile URL (e.g. LinkedIn) the AI can reference for extra context. */
+  /** Public profile URLs the AI can reference for extra context. */
   linkedinUrl: string;
+  portfolioUrl?: string;
+  githubUrl?: string;
   /** AI-extracted highlights from the previous cover letters, deduplicated
    * against the rest of the profile. The chat agent reads this instead of
    * the full letters when it is non-empty. */

@@ -35,6 +35,7 @@ import {
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { selectAnyThreadSending, useChatStore } from "@/stores/chatStore";
+import { useCvStore } from "@/stores/cvStore";
 import ApiConfigForm from "./ApiConfigForm";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -199,6 +200,7 @@ export default function SettingsDialog({
       await useProfileStore.getState().loadProfile();
       // Cached threads belong to the pre-import data directory.
       useChatStore.getState().resetThreadCache();
+      useCvStore.getState().resetCache();
       await useChatStore.getState().loadConfig();
       await useChatStore.getState().loadDrafts(true);
       await useChatStore

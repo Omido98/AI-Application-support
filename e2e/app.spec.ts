@@ -221,3 +221,31 @@ test("exports future deadlines and follow-ups as an ICS calendar", async ({
     /^applications-calendar-\d{4}-\d{2}-\d{2}\.ics$/,
   );
 });
+
+test("CV sub-view starts from the profile and exports a Word file", async ({
+  page,
+}) => {
+  const application = makeApplication("cv", "CV Corp", "applied");
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Tailor a CV for this application" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Tailored CV" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
+  await expect(page.getByText("Saved locally")).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Word" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.docx$/);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
+});

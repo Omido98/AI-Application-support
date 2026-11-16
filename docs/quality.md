@@ -19,12 +19,12 @@ to the Playwright report.
 
 Screens scanned (2026-11-16, all passed with zero serious/critical violations):
 
-- Overview, Application, Cover Letter Developer, Profile tabs
+- Overview, Application, Tailored CV, Cover Letter Developer, Profile tabs
 - Settings dialog (including focus trapping)
 - Onboarding, first and last step
 - Light theme: Application tab and Settings dialog
 - Dark theme with the Deep Teal accent (`#0f6e5c`)
-- Reduced motion: dialog animation collapses to ≤0.01ms, no running animations
+- Reduced motion: dialog animation collapses to ≤0.01ms
 
 Also asserted:
 

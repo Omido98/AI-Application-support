@@ -30,6 +30,17 @@ test.describe("WCAG 2.2 AA", () => {
     await scan(page, testInfo, { label: "tab-application" });
   });
 
+  test("Tailored CV sub-view", async ({ page }, testInfo) => {
+    await openApp(page, { applications: [application] });
+    await page.getByRole("button", { name: "Tailored CV" }).click();
+    await page.getByRole("button", { name: "Start from profile" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Tailored CV" }),
+    ).toBeVisible();
+
+    await scan(page, testInfo, { label: "cv-sub-view" });
+  });
+
   test("Cover Letter Developer tab", async ({ page }, testInfo) => {
     await openApp(page, {
       applications: [application],
