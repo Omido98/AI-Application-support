@@ -61,7 +61,7 @@ Tauri signs the `.app` and submits it for notarization/staple during bundling.
 
 Windows installers are **unsigned by design**. No Authenticode certificate is
 purchased or configured, and the release workflow has no Windows signing step.
-SmartScreen can therefore warn on first launch (*"Windows protected your PC"*);
+SmartScreen can therefore warn on first launch (_"Windows protected your PC"_);
 choose **More info → Run anyway**. This is expected and is not a sign of a
 damaged download.
 
@@ -73,6 +73,6 @@ downloaded update, so they (and `latest.json`) must stay.
 
 Application data is still plain JSON under the app-data directory. Full-text
 search is an in-memory scan over the loaded applications, which is fast at
-personal-tracker scale. SQLite/FTS is intentionally deferred until search or
-status history outgrows that model; moving to it would also require a data
-migration and changes to the backup format.
+personal-tracker scale. The measured decision, thresholds and SQLite/FTS5
+migration plan live in [data-storage.md](data-storage.md). Re-run
+`npm run bench:data` before changing the storage model.

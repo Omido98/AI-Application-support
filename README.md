@@ -189,5 +189,6 @@ verifies, and removing them would break signed auto-updates.
   parsed locally and only the extracted text is sent to the configured AI
   provider when you start the import analysis.
 - Data stays in plain JSON with an in-memory search. SQLite/FTS is deferred
-  until the tracker outgrows personal-scale search; see
-  [docs/releasing.md](docs/releasing.md#data-storage).
+  until the tracker outgrows personal-scale search; the measurements, thresholds
+  and migration plan are in
+  [docs/data-storage.md](docs/data-storage.md).

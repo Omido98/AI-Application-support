@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "eval": "vitest run src/eval",
+    "bench:data": "vitest run src/bench/dataScale.test.ts --reporter=verbose",
     "lint": "eslint src --max-warnings 0",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" \"scripts/**/*.mjs\" \"*.{json,js,ts}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"e2e/**/*.ts\" \"scripts/**/*.mjs\" \"*.{json,js,ts}\"",

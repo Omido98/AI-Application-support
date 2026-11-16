@@ -28,6 +28,7 @@ import {
   isArchivedStatus,
   sortApplications,
 } from "@/utils/applicationStatus";
+import { applicationMatchesQuery } from "@/utils/applicationSearch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -374,26 +375,7 @@ export default function ApplicationTab() {
     return visibleApps.filter((a) => {
       if (statusFilter && a.status !== statusFilter) return false;
       if (!q) return true;
-      // Search the whole application, not just company/title, so notes,
-      // tags and posting text are findable too.
-      const haystack = [
-        a.companyName,
-        a.jobTitle,
-        a.jobDescription,
-        a.requirements,
-        a.companyResearch,
-        a.notes,
-        a.location,
-        a.workMode,
-        a.salary,
-        a.source,
-        a.contactName,
-        a.contactEmail,
-        ...a.tags,
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
+      return applicationMatchesQuery(a, q);
     });
   }, [visibleApps, filter, statusFilter]);
 
