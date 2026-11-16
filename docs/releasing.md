@@ -7,7 +7,7 @@ agent. This page covers the tooling around that process.
 ## Version bumps
 
 ```bash
-npm run version:bump -- 1.4.0
+npm run version:bump -- X.Y.Z
 npm run version:check
 ```
 
@@ -37,8 +37,10 @@ The `PR verification` workflow runs:
 
 ## Signing
 
-Updater artifacts are already signed with `TAURI_SIGNING_PRIVATE_KEY` in the
-release workflow; that is separate from operating-system code signing.
+Updater artifacts are signed with `TAURI_SIGNING_PRIVATE_KEY` in the release
+workflow; that is separate from operating-system code signing. Each updater
+artifact gets a `.sig` file and the release gets a `latest.json` manifest, both
+required for signed auto-updates.
 
 ### macOS
 
@@ -57,24 +59,15 @@ Tauri signs the `.app` and submits it for notarization/staple during bundling.
 
 ### Windows
 
-Windows Authenticode signing needs a code-signing certificate (OV/EV, or Azure
-Trusted Signing). The certificate is not stored in this repository, so the
-repository currently produces unsigned Windows installers, which can trigger
-SmartScreen warnings until a certificate is configured.
+Windows installers are **unsigned by design**. No Authenticode certificate is
+purchased or configured, and the release workflow has no Windows signing step.
+SmartScreen can therefore warn on first launch (*"Windows protected your PC"*);
+choose **More info → Run anyway**. This is expected and is not a sign of a
+damaged download.
 
-To enable it:
-
-1. Add the base64-encoded `.pfx` as `WINDOWS_CERTIFICATE` and its password as
-   `WINDOWS_CERTIFICATE_PASSWORD` repository secrets.
-2. In the Windows release job, decode the `.pfx`, import it into
-   `Cert:\CurrentUser\My`, and read its thumbprint.
-3. Set `bundle.windows.certificateThumbprint` (and a SHA-256
-   `digestAlgorithm` plus a `timestampUrl`) in a generated Tauri config passed
-   with `--config`, or add the thumbprint to `src-tauri/tauri.conf.json` for a
-   single-machine build.
-
-Do not commit a certificate or its password. The agent never publishes a
-release; see AGENTS.md for the draft-release workflow.
+The `.sig` files attached to a release are **Tauri updater signatures**, not
+Windows Authenticode signatures. The auto-updater uses them to verify a
+downloaded update, so they (and `latest.json`) must stay.
 
 ## Data storage
 
