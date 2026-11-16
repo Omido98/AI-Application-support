@@ -28,12 +28,7 @@ export const appBinary =
     isWindows ? "ai-application-support.exe" : "ai-application-support",
   );
 
-export const artifactsDir = path.join(
-  root,
-  "tests",
-  "e2e-native",
-  ".artifacts",
-);
+export const artifactsDir = path.join(root, "tests", "e2e-native", "artifacts");
 
 /** Linux XDG roots: fully isolated under the artifacts directory. */
 export const xdg = {

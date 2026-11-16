@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
   createWriteStream,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -239,19 +240,26 @@ export function startTauriDriver() {
   mkdirSync(tmpDir, { recursive: true });
   const webviewDir = path.join(artifactsDir, "webview2");
   mkdirSync(webviewDir, { recursive: true });
-  const log = createWriteStream(path.join(artifactsDir, "tauri-driver.log"));
+  // Local sandboxed runs need a workspace temp and WebView2 profile; normal
+  // CI runs should use the platform defaults that tauri-driver expects.
+  const localRun = Boolean(process.env.NATIVE_E2E_DATA_DIR);
+  const log = createWriteStream(driverLogPath(), { flags: "a" });
+  log.write(
+    `[native-e2e] starting on ${process.platform}: app=${appBinary} local=${localRun}\n`,
+  );
   const child = spawn(
     isWindows ? "tauri-driver.exe" : "tauri-driver",
     ["--port", String(driverPort), "--native-port", String(nativeDriverPort)],
     {
       env: {
         ...process.env,
-        // Keep WebView2's profile and native-driver temp files in the test
-        // artifacts directory instead of inheriting a possibly restricted OS
-        // temp/appdata location.
-        TEMP: tmpDir,
-        TMP: tmpDir,
-        ...(isWindows ? { WEBVIEW2_USER_DATA_FOLDER: webviewDir } : {}),
+        ...(localRun
+          ? {
+              TEMP: tmpDir,
+              TMP: tmpDir,
+              ...(isWindows ? { WEBVIEW2_USER_DATA_FOLDER: webviewDir } : {}),
+            }
+          : {}),
         ...(isWindows
           ? {}
           : {
@@ -267,9 +275,31 @@ export function startTauriDriver() {
   child.stdout.pipe(log);
   child.stderr.pipe(log);
   child.on("error", (err) => {
+    log.write(`[native-e2e] spawn error: ${err.message}\n`);
     console.error("[native-e2e] tauri-driver failed to start:", err);
   });
+  child.on("exit", (code, signal) => {
+    log.write(
+      `[native-e2e] tauri-driver exited code=${code} signal=${signal}\n`,
+    );
+  });
   return child;
+}
+
+export function driverLogPath() {
+  return path.join(artifactsDir, "tauri-driver.log");
+}
+
+/** Last lines of the driver log, printed on failure so CI logs are enough. */
+export function driverLogTail(lines = 60) {
+  try {
+    return readFileSync(driverLogPath(), "utf8")
+      .split("\n")
+      .slice(-lines)
+      .join("\n");
+  } catch {
+    return "(no tauri-driver log)";
+  }
 }
 
 export async function waitForDriver(timeout = 30_000) {

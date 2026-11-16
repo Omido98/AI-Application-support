@@ -195,7 +195,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-e2e-${{ matrix.name }}
-          path: tests/e2e-native/.artifacts/
+          path: tests/e2e-native/artifacts/
           if-no-files-found: ignore
           retention-days: 7
 

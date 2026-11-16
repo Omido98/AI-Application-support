@@ -17,7 +17,7 @@ playwright-report
 test-results
 
 # Native e2e (drivers, logs, isolated app data)
-tests/e2e-native/.artifacts/
+tests/e2e-native/artifacts/
 
 # Local build temp
 .tmp-build

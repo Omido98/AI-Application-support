@@ -33,7 +33,7 @@ npm run test:e2e:native  # node --test tests/e2e-native/app.e2e.test.mjs
 `src-tauri/tauri.e2e.conf.json` overrides the bundle identifier to
 `com.ai-application-support.app.e2e`, so the test app reads and writes a
 separate data directory and never touches a real installation. WebView2's
-profile and driver temp files go under `tests/e2e-native/.artifacts/`.
+profile and driver temp files go under `tests/e2e-native/artifacts/`.
 
 Prerequisites:
 
@@ -54,7 +54,7 @@ normal machines do not need it.
 
 `.github/workflows/pr-verify.yml` has a `native-e2e` job on `windows-latest`
 and `ubuntu-24.04`, gated on the frontend job. It builds the debug app, runs
-the suite, and uploads `tests/e2e-native/.artifacts/` on failure (driver log,
+the suite, and uploads `tests/e2e-native/artifacts/` on failure (driver log,
 copied app data, isolated XDG homes). The job is bounded to 45 minutes.
 
 Common failures: driver/runtime version mismatch (download the matching
