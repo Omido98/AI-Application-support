@@ -153,6 +153,40 @@ describe("parseBackupBundle", () => {
 });
 
 describe("restoreBackupBundle", () => {
+  it("preserves stable chat message ids through export and restore", async () => {
+    const messages = [
+      {
+        id: "message-1",
+        role: "user",
+        content: "Draft my cover letter.",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "message-2",
+        role: "assistant",
+        content: "Improved draft.",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        kind: "improve",
+        sourceKey: "message-1",
+      },
+    ];
+    loadJsonMock.mockImplementation(async (name: string) => {
+      if (name === "applications.json") {
+        return { applications: [app], selectedApplicationId: app.id };
+      }
+      if (name === `chat_${app.id}.json`) return messages;
+      return null;
+    });
+
+    const bundle = await buildBackupBundle();
+    expect(bundle.files[`chat_${app.id}.json`]).toEqual(messages);
+
+    saveJsonMock.mockClear();
+    await restoreBackupBundle(bundle);
+
+    expect(saveJsonMock).toHaveBeenCalledWith(`chat_${app.id}.json`, messages);
+  });
+
   it("strips credentials from old backups before writing config", async () => {
     const bundle: BackupBundle = {
       format: BACKUP_FORMAT,

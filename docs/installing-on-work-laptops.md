@@ -1,10 +1,10 @@
 # Installing on a work laptop
 
 This guide covers installing the app on a managed/work laptop that blocks
-"untrusted" software. Windows installers are intentionally unsigned by design,
-so Windows SmartScreen and macOS Gatekeeper may show a security warning on the
-first run. That warning is expected and harmless — it means the app has no paid
-code-signing certificate, not that it is unsafe.
+"untrusted" software. Windows and macOS installers are intentionally unsigned
+by design, so Windows SmartScreen and macOS Gatekeeper may show a security
+warning on the first run. That warning is expected and harmless — it means the
+app has no paid code-signing certificate, not that it is unsafe.
 
 ## Downloading the app
 

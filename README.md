@@ -143,11 +143,12 @@ Useful commands:
 Installers and the macOS `.app.tar.gz` (no-install app bundle) are
 available on the [GitHub Releases
 page](https://github.com/Omido98/AI-Application-support/releases/latest).
-Windows installers are intentionally unsigned (there is no Authenticode
-certificate), so SmartScreen may show *"Windows protected your PC"* on first
-launch — choose **More info → Run anyway**. The `.sig` files on a release are
-**Tauri updater signatures**, not Windows code signatures; the built-in
-updater needs them to verify downloads.
+Windows and macOS installers are intentionally unsigned (there is no
+Authenticode certificate or Apple Developer ID/notarization), so SmartScreen
+or Gatekeeper may warn on first launch — choose **More info → Run anyway** on
+Windows. The `.sig` files on a release are **Tauri updater signatures**, not
+operating-system code signatures; the built-in updater needs them to verify
+downloads.
 If you are installing on a managed/work laptop, see
 [docs/installing-on-work-laptops.md](docs/installing-on-work-laptops.md).
 
