@@ -28,6 +28,7 @@ import {
   isArchivedStatus,
   sortApplications,
 } from "@/utils/applicationStatus";
+import { applicationMatchesQuery } from "@/utils/applicationSearch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -115,13 +116,15 @@ function dueChip(
   if (days === 0) {
     return {
       text: `${noun} today`,
-      className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
+      className:
+        "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
     };
   }
   if (days <= 7) {
     return {
       text: `${noun} in ${days}d`,
-      className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
+      className:
+        "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
     };
   }
   return null;
@@ -134,7 +137,7 @@ function PriorityBadge({ priority }: { priority: ApplicationPriority }) {
       className={cn(
         "rounded border px-1.5 py-0.5 text-[10px] font-medium",
         priority === "high"
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-500"
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
           : "border-border bg-field text-text-secondary",
       )}
     >
@@ -374,26 +377,7 @@ export default function ApplicationTab() {
     return visibleApps.filter((a) => {
       if (statusFilter && a.status !== statusFilter) return false;
       if (!q) return true;
-      // Search the whole application, not just company/title, so notes,
-      // tags and posting text are findable too.
-      const haystack = [
-        a.companyName,
-        a.jobTitle,
-        a.jobDescription,
-        a.requirements,
-        a.companyResearch,
-        a.notes,
-        a.location,
-        a.workMode,
-        a.salary,
-        a.source,
-        a.contactName,
-        a.contactEmail,
-        ...a.tags,
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
+      return applicationMatchesQuery(a, q);
     });
   }, [visibleApps, filter, statusFilter]);
 

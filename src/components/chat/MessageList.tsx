@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
   isConversationMessage,
-  messageKey,
+  newMessageId,
+  selectActiveMessages,
   useChatStore,
+  type ChatMessage,
 } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
@@ -114,10 +116,16 @@ export default function MessageList({
   /** Regenerate the latest assistant message, replacing it in place. */
   onRegenerate?: (key: string) => void;
 }) {
-  const messages = useChatStore((s) => s.messages);
+  const messages = useChatStore(selectActiveMessages);
   const activeThreadId = useChatStore((s) => s.activeThreadId);
-  const isSending = useChatStore((s) => s.isSending);
-  const error = useChatStore((s) => s.error);
+  const isSending = useChatStore((s) =>
+    s.activeThreadId
+      ? (s.threads[s.activeThreadId]?.isSending ?? false)
+      : false,
+  );
+  const error = useChatStore((s) =>
+    s.activeThreadId ? (s.threads[s.activeThreadId]?.error ?? null) : null,
+  );
   const scrollKey = activeThreadId
     ? `${CHAT_SCROLL_PREFIX}${activeThreadId}`
     : "chat";
@@ -127,8 +135,8 @@ export default function MessageList({
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastMessageRef = useRef<{
+    id: string;
     role: "user" | "assistant";
-    timestamp: string;
   } | null>(messages[messages.length - 1] ?? null);
   // The chat tab may unmount when the user visits another section. Remember
   // whether the view was pinned to the newest message, so coming back does not
@@ -147,7 +155,7 @@ export default function MessageList({
   const appendMessageToThread = useChatStore((s) => s.appendMessageToThread);
   const removeMessageInThread = useChatStore((s) => s.removeMessageInThread);
   const acceptSuggestion = useChatStore((s) => s.acceptSuggestion);
-  const setError = useChatStore((s) => s.setError);
+  const setThreadError = useChatStore((s) => s.setThreadError);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -191,13 +199,7 @@ export default function MessageList({
    * on, keep the current thread calm and leave a breadcrumb for debugging.
    */
   const reportActionError = (threadId: string, message: string) => {
-    if (useChatStore.getState().activeThreadId === threadId) {
-      setError(message);
-    } else {
-      console.warn(
-        `[chat] Action failed in inactive thread ${threadId}: ${message}`,
-      );
-    }
+    setThreadError(threadId, message);
   };
 
   const STEP_LABELS: Record<ImproveStep, string> = {
@@ -237,16 +239,16 @@ export default function MessageList({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [openRefineKey]);
 
-  const handleAcceptSuggestion = async (msg: (typeof messages)[number]) => {
+  const handleAcceptSuggestion = async (msg: ChatMessage) => {
     const threadId = useChatStore.getState().activeThreadId;
     if (!threadId || !msg.sourceKey) return;
-    await acceptSuggestion(threadId, messageKey(msg), msg.sourceKey);
+    await acceptSuggestion(threadId, msg.id, msg.sourceKey);
   };
 
-  const handleDiscardMessage = async (msg: (typeof messages)[number]) => {
+  const handleDiscardMessage = async (msg: ChatMessage) => {
     const threadId = useChatStore.getState().activeThreadId;
     if (!threadId) return;
-    await removeMessageInThread(threadId, messageKey(msg));
+    await removeMessageInThread(threadId, msg.id);
   };
 
   const application = applications.find((a) => a.id === selectedId) ?? null;
@@ -259,8 +261,7 @@ export default function MessageList({
   useEffect(() => {
     const last = messages[messages.length - 1] ?? null;
     const isNewUserMessage =
-      last?.role === "user" &&
-      lastMessageRef.current?.timestamp !== last.timestamp;
+      last?.role === "user" && lastMessageRef.current?.id !== last.id;
     lastMessageRef.current = last;
 
     if (isNewUserMessage || stickyToBottom) {
@@ -278,7 +279,14 @@ export default function MessageList({
   // to the store directly and coalesce scroll work into one animation frame.
   useEffect(() => {
     const unsubscribe = useChatStore.subscribe((state, previous) => {
-      if (state.streamingText === previous.streamingText) return;
+      const threadId = state.activeThreadId;
+      if (!threadId) return;
+      if (
+        state.threads[threadId]?.streamingText ===
+        previous.threads[threadId]?.streamingText
+      ) {
+        return;
+      }
       if (!stickyRef.current || scrollRafRef.current !== null) return;
       scrollRafRef.current = requestAnimationFrame(() => {
         scrollRafRef.current = null;
@@ -376,14 +384,18 @@ export default function MessageList({
     content: string,
     format: ExportFormat,
   ) => {
+    const threadId = useChatStore.getState().activeThreadId;
     setOpenRefineKey(null);
     setExporting({ key, format });
     try {
       await exportCoverLetter(content, company, format);
     } catch (err) {
-      setError(
-        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      if (threadId) {
+        setThreadError(
+          threadId,
+          `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     } finally {
       setExporting(null);
     }
@@ -396,7 +408,7 @@ export default function MessageList({
       deslopPendingId ||
       anyActionPending ||
       !threadId ||
-      useChatStore.getState().isSending
+      useChatStore.getState().threads[threadId]?.isSending
     ) {
       return;
     }
@@ -404,7 +416,7 @@ export default function MessageList({
     actionControllerRef.current = controller;
     setDeslopPendingId(msgId);
     setActionActivity(null);
-    setError(null);
+    setThreadError(threadId, null);
     const sources: WebSource[] = [];
     const result = await deslopText(content, config, {
       signal: controller.signal,
@@ -426,6 +438,7 @@ export default function MessageList({
     }
     if (result.content.trim() && threadStillExists(threadId)) {
       await appendMessageToThread(threadId, {
+        id: newMessageId(),
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
@@ -444,7 +457,7 @@ export default function MessageList({
       anyActionPending ||
       !application ||
       !threadId ||
-      useChatStore.getState().isSending
+      useChatStore.getState().threads[threadId]?.isSending
     ) {
       return;
     }
@@ -452,7 +465,7 @@ export default function MessageList({
     actionControllerRef.current = controller;
     setReviewPendingId(msgId);
     setActionActivity(null);
-    setError(null);
+    setThreadError(threadId, null);
 
     const appCtx = applicationContextFrom(application);
 
@@ -479,6 +492,7 @@ export default function MessageList({
     }
     if (result.content.trim() && threadStillExists(threadId)) {
       await appendMessageToThread(threadId, {
+        id: newMessageId(),
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
@@ -532,7 +546,7 @@ export default function MessageList({
       anyActionPending ||
       !application ||
       !threadId ||
-      useChatStore.getState().isSending
+      useChatStore.getState().threads[threadId]?.isSending
     ) {
       return;
     }
@@ -543,7 +557,7 @@ export default function MessageList({
     setImproveStep("review");
     setImprovePreview("");
     setActionActivity(null);
-    setError(null);
+    setThreadError(threadId, null);
 
     const appCtx = applicationContextFrom(application);
 
@@ -586,6 +600,7 @@ export default function MessageList({
     }
     if (result.content.trim() && threadStillExists(threadId)) {
       await appendMessageToThread(threadId, {
+        id: newMessageId(),
         role: "assistant",
         content: result.content,
         timestamp: new Date().toISOString(),
@@ -596,10 +611,10 @@ export default function MessageList({
     }
   };
 
-  const lastConversationKey = (() => {
+  const lastConversationId = (() => {
     for (let index = messages.length - 1; index >= 0; index--) {
       if (isConversationMessage(messages[index])) {
-        return messageKey(messages[index]);
+        return messages[index].id;
       }
     }
     return null;
@@ -638,16 +653,15 @@ export default function MessageList({
       {messages.map((msg) => {
         if (msg.kind === "summary") return null;
         const isUser = msg.role === "user";
-        const key = messageKey(msg);
+        const key = msg.id;
         const time = formatMessageTime(msg.timestamp);
         const feedback =
           copiedId === key ? "copied" : savedId === key ? "saved" : null;
 
         if (!isUser && (msg.kind === "improve" || msg.kind === "deslop")) {
           const source = msg.sourceKey
-            ? (messages.find(
-                (candidate) => messageKey(candidate) === msg.sourceKey,
-              ) ?? null)
+            ? (messages.find((candidate) => candidate.id === msg.sourceKey) ??
+              null)
             : null;
           return (
             <div key={key} className="flex justify-start">
@@ -663,9 +677,8 @@ export default function MessageList({
 
         if (!isUser && msg.kind === "review") {
           const source = msg.sourceKey
-            ? (messages.find(
-                (candidate) => messageKey(candidate) === msg.sourceKey,
-              ) ?? null)
+            ? (messages.find((candidate) => candidate.id === msg.sourceKey) ??
+              null)
             : null;
           return (
             <div key={key} className="flex justify-start">
@@ -770,7 +783,7 @@ export default function MessageList({
 
             {!isUser && (
               <div className="relative flex flex-col gap-0.5 pl-1">
-                {lastConversationKey === key && (
+                {lastConversationId === key && (
                   <button
                     type="button"
                     onClick={() => onRegenerate?.(key)}
@@ -974,7 +987,9 @@ export default function MessageList({
             {error}
             <button
               type="button"
-              onClick={() => setError(null)}
+              onClick={() =>
+                activeThreadId && setThreadError(activeThreadId, null)
+              }
               aria-label="Dismiss error"
               title="Dismiss"
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-destructive/70 transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/40"

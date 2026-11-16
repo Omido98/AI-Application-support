@@ -64,7 +64,7 @@ function formatDueDays(daysUntil: number): string {
 
 function dueClass(daysUntil: number): string {
   if (daysUntil < 0) return "text-destructive";
-  if (daysUntil <= 1) return "text-amber-500";
+  if (daysUntil <= 1) return "text-amber-700 dark:text-amber-400";
   return "text-text-secondary";
 }
 

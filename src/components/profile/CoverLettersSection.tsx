@@ -5,6 +5,7 @@ import { useApplicationStore } from "@/stores/applicationStore";
 import { useAppStore } from "@/stores/useAppStore";
 import { sendMessage } from "@/utils/api";
 import { buildCoverLetterSummaryPrompt } from "@/utils/systemPrompt";
+import { newMessageId } from "@/utils/ids";
 import { Trash2, Plus, ChevronDown, ChevronUp, Sparkles } from "lucide-react";
 import type { CoverLetter } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -125,6 +126,7 @@ export default function CoverLettersSection() {
       const result = await sendMessage(
         [
           {
+            id: newMessageId(),
             role: "user",
             content: "Extract the main points from my cover letters now.",
             timestamp: new Date().toISOString(),
@@ -224,7 +226,9 @@ export default function CoverLettersSection() {
             </div>
           </div>
           {summaryError && (
-            <p className="text-xs text-destructive">{summaryError}</p>
+            <p role="alert" className="text-xs text-destructive">
+              {summaryError}
+            </p>
           )}
         </div>
 

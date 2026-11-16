@@ -48,6 +48,10 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   chat link back to their application. **Import CV** reads a PDF, DOCX or TXT
   locally, structures it with your AI provider, and offers merge or replace
   after a preview.
+- **Deadline reminders** — opt-in desktop notifications for overdue,
+  due-today and due-tomorrow deadlines and follow-ups, deduplicated per item
+  per day. See [docs/deadline-notifications.md](docs/deadline-notifications.md)
+  for per-OS behaviour and troubleshooting.
 - **Settings** — light, dark or follow-system theme, accent colour, AI
   provider/model/context window, backup and restore, update checks, a
   **Copy diagnostics** report with versions, data-file sizes and the recent
@@ -118,9 +122,15 @@ Useful commands:
 
 - `npm test` — run the Vitest unit tests
 - `npm run eval` — run the offline prompt/response eval harness
+- `npm run eval:live` — opt-in live provider eval (see [docs/live-eval.md](docs/live-eval.md))
+- `npm run bench:data` — JSON data-scale diagnostic (see [docs/data-storage.md](docs/data-storage.md))
 - `npm run lint` — ESLint
 - `npm run format:check` / `npm run format` — Prettier check / rewrite
 - `npm run test:e2e` — Playwright browser-mode end-to-end tests
+- `npm run build:e2e` / `npm run test:e2e:native` — native tauri-driver smoke tests
+  (see [docs/native-e2e.md](docs/native-e2e.md))
+- `npm run test:a11y` — axe WCAG 2.1/2.2 AA checks (see [docs/quality.md](docs/quality.md))
+- `npm run test:perf` — render and streaming-update performance checks
 - `npm run version:check` / `npm run version:bump -- X.Y.Z` — release version
   consistency check and five-file bump (see [docs/releasing.md](docs/releasing.md))
 - `npx tsc --noEmit` — TypeScript typecheck
@@ -185,5 +195,6 @@ verifies, and removing them would break signed auto-updates.
   parsed locally and only the extracted text is sent to the configured AI
   provider when you start the import analysis.
 - Data stays in plain JSON with an in-memory search. SQLite/FTS is deferred
-  until the tracker outgrows personal-scale search; see
-  [docs/releasing.md](docs/releasing.md#data-storage).
+  until the tracker outgrows personal-scale search; the measurements, thresholds
+  and migration plan are in
+  [docs/data-storage.md](docs/data-storage.md).

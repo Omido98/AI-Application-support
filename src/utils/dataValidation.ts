@@ -415,6 +415,8 @@ export function normalizeSettingsData(value: unknown): {
   profileSectionOrder: ProfileSectionId[];
   autoUpdateCheck: boolean;
   skippedUpdateVersion: string;
+  notificationsEnabled: boolean;
+  notificationLog: { day: string; keys: string[] };
 } | null {
   if (!isRecord(value)) return null;
   const theme =
@@ -443,7 +445,29 @@ export function normalizeSettingsData(value: unknown): {
     skippedUpdateVersion: asString(value.skippedUpdateVersion)
       .trim()
       .slice(0, 64),
+    notificationsEnabled: value.notificationsEnabled === true,
+    notificationLog: normalizeNotificationLog(value.notificationLog),
   };
+}
+
+/** `${applicationId}:${kind}:${YYYY-MM-DD}` reminder ledger keys. */
+const NOTIFICATION_KEY_RE =
+  /^[A-Za-z0-9._-]+:(deadline|followUp):\d{4}-\d{2}-\d{2}$/;
+const MAX_NOTIFICATION_KEYS = 200;
+
+function normalizeNotificationLog(value: unknown): {
+  day: string;
+  keys: string[];
+} {
+  if (!isRecord(value)) return { day: "", keys: [] };
+  const day = normalizeDate(value.day).slice(0, 10);
+  if (!day) return { day: "", keys: [] };
+  const keys = [
+    ...new Set(
+      asStringArray(value.keys).filter((key) => NOTIFICATION_KEY_RE.test(key)),
+    ),
+  ].slice(-MAX_NOTIFICATION_KEYS);
+  return { day, keys };
 }
 
 /**

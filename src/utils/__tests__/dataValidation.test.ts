@@ -245,6 +245,47 @@ describe("normalizeSettingsData", () => {
     expect(normalized?.profileSectionOrder).toHaveLength(9);
     expect(new Set(normalized?.profileSectionOrder).size).toBe(9);
   });
+
+  it("defaults deadline reminders off and sanitizes the reminder ledger", () => {
+    expect(normalizeSettingsData({})).toMatchObject({
+      notificationsEnabled: false,
+      notificationLog: { day: "", keys: [] },
+    });
+
+    const normalized = normalizeSettingsData({
+      notificationsEnabled: true,
+      notificationLog: {
+        day: "2026-05-20",
+        keys: [
+          "app-1:deadline:2026-05-20",
+          "app-1:deadline:2026-05-20",
+          "app-2:followUp:2026-05-21",
+          "not a key",
+          "app-3:unknown:2026-05-20",
+          42,
+        ],
+      },
+    });
+
+    expect(normalized).toMatchObject({
+      notificationsEnabled: true,
+      notificationLog: {
+        day: "2026-05-20",
+        keys: ["app-1:deadline:2026-05-20", "app-2:followUp:2026-05-21"],
+      },
+    });
+  });
+
+  it("drops an invalid reminder ledger day", () => {
+    expect(
+      normalizeSettingsData({
+        notificationLog: {
+          day: "yesterday",
+          keys: ["app-1:deadline:2026-05-20"],
+        },
+      }),
+    ).toMatchObject({ notificationLog: { day: "", keys: [] } });
+  });
 });
 
 describe("normalizeDraftsData", () => {

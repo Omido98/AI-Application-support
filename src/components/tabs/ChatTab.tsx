@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   isConversationMessage,
-  messageKey,
+  newMessageId,
+  selectActiveMessages,
   useChatStore,
   type ChatMessage,
 } from "@/stores/chatStore";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useAppStore } from "@/stores/useAppStore";
-import { sendMessage, type ToolActivity } from "@/utils/api";
+import { sendMessage, type ApiResponse, type ToolActivity } from "@/utils/api";
 import {
   applicationContextFrom,
   buildConversationSummaryPrompt,
@@ -39,6 +40,14 @@ interface ChatTabProps {
   onOpenSettings: () => void;
 }
 
+/**
+ * Generation and summarization controllers live outside the component so a
+ * remount (switching sections) can still stop a request that is still writing
+ * into its thread. Keyed by thread: concurrent generations are independent.
+ */
+const generationControllers = new Map<string, AbortController>();
+const summaryControllers = new Map<string, AbortController>();
+
 export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   // ── Stores ──
   const configLoaded = useChatStore((s) => s.configLoaded);
@@ -47,22 +56,24 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const setConfig = useChatStore((s) => s.setConfig);
 
   const activeThreadId = useChatStore((s) => s.activeThreadId);
-  const threadLoaded = useChatStore((s) => s.threadLoaded);
+  const activeThread = useChatStore((s) =>
+    s.activeThreadId ? s.threads[s.activeThreadId] : undefined,
+  );
+  const messages = useChatStore(selectActiveMessages);
+  const threadLoaded = activeThread?.loaded ?? false;
+  const isSending = activeThread?.isSending ?? false;
+  const inputValue = activeThread?.draft ?? "";
+
   const switchThread = useChatStore((s) => s.switchThread);
   const addMessage = useChatStore((s) => s.addMessage);
   const appendMessageToThread = useChatStore((s) => s.appendMessageToThread);
   const updateMessageInThread = useChatStore((s) => s.updateMessageInThread);
   const clearMessages = useChatStore((s) => s.clearMessages);
   const updateMessage = useChatStore((s) => s.updateMessage);
-  const isSending = useChatStore((s) => s.isSending);
-  const setIsSending = useChatStore((s) => s.setIsSending);
-  const setError = useChatStore((s) => s.setError);
-  const setStreamingText = useChatStore((s) => s.setStreamingText);
-  const inputValue = useChatStore(
-    (s) => s.drafts[s.activeThreadId ?? ""] ?? "",
-  );
+  const setThreadSending = useChatStore((s) => s.setThreadSending);
+  const setThreadError = useChatStore((s) => s.setThreadError);
+  const setThreadStreamingText = useChatStore((s) => s.setThreadStreamingText);
   const setDraft = useChatStore((s) => s.setDraft);
-  const messages = useChatStore((s) => s.messages);
 
   const applications = useApplicationStore((s) => s.applications);
   const applicationsLoaded = useApplicationStore((s) => s.isLoaded);
@@ -144,44 +155,15 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const [confirmReset, setConfirmReset] = useState(false);
   const [replyNotice, setReplyNotice] = useState<string | null>(null);
   const [toolActivity, setToolActivity] = useState<ToolActivity | null>(null);
-  const [summarizing, setSummarizing] = useState(false);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
-  const sourcesRef = useRef<WebSource[]>([]);
-
-  // Aborts the in-flight generation (used by the Stop button / Escape).
-  const controllerRef = useRef<AbortController | null>(null);
-  // Aborts the in-flight summarization (Stop button / Escape).
-  const summaryControllerRef = useRef<AbortController | null>(null);
-
-  // Streamed deltas are coalesced into at most one state update per frame.
-  const streamBatcher = useMemo(
-    () =>
-      createStreamBatcher(
-        (text) => setStreamingText((previous) => previous + text),
-        (callback) => requestAnimationFrame(callback),
-        (handle) => cancelAnimationFrame(handle),
-      ),
-    [setStreamingText],
+  const [summarizingThreadId, setSummarizingThreadId] = useState<string | null>(
+    null,
   );
-
-  const cancelStreamBuffer = useCallback(
-    () => streamBatcher.cancel(),
-    [streamBatcher],
-  );
-
-  const flushStreamBuffer = useCallback(
-    () => streamBatcher.flush(),
-    [streamBatcher],
-  );
-
-  const queueStreamDelta = useCallback(
-    (chunk: string) => streamBatcher.push(chunk),
-    [streamBatcher],
-  );
-
-  useEffect(() => {
-    return () => streamBatcher.cancel();
-  }, [streamBatcher]);
+  const [summaryError, setSummaryError] = useState<{
+    threadId: string;
+    message: string;
+  } | null>(null);
+  const summarizingHere =
+    summarizingThreadId !== null && summarizingThreadId === activeThreadId;
 
   // ── Load on mount ──
   useEffect(() => {
@@ -190,29 +172,21 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
   // ── Load the selected application's thread ──
   useEffect(() => {
-    // Abort any generation still in flight for the previous thread.
-    controllerRef.current?.abort();
-    controllerRef.current = null;
-    // A summary belongs to one thread; never let it land in another one.
-    summaryControllerRef.current?.abort();
-    summaryControllerRef.current = null;
-    setSummarizing(false);
-    cancelStreamBuffer();
+    // A thread switch changes what is on screen, not what is in flight: a
+    // generation started in another thread keeps writing to that thread.
     setReplyNotice(null);
     setToolActivity(null);
-    setSummaryError(null);
-    sourcesRef.current = [];
     void switchThread(selectedId);
-  }, [selectedId, switchThread, cancelStreamBuffer]);
+  }, [selectedId, switchThread]);
 
   // ── Stop generation (Stop button / Escape key) ──
   const handleStop = useCallback(() => {
-    controllerRef.current?.abort();
-  }, []);
+    if (activeThreadId) generationControllers.get(activeThreadId)?.abort();
+  }, [activeThreadId]);
 
   const handleStopSummarize = useCallback(() => {
-    summaryControllerRef.current?.abort();
-  }, []);
+    if (activeThreadId) summaryControllers.get(activeThreadId)?.abort();
+  }, [activeThreadId]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -220,47 +194,53 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       if (isSending) {
         e.preventDefault();
         handleStop();
-      } else if (summarizing) {
+      } else if (summarizingHere) {
         e.preventDefault();
         handleStopSummarize();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isSending, summarizing, handleStop, handleStopSummarize]);
+  }, [isSending, summarizingHere, handleStop, handleStopSummarize]);
 
-  // Leaving the chat tab abandons an unfinished summary: a reply for a card
-  // the user can no longer see must not land in the thread later.
+  // Leaving the chat tab abandons unfinished summaries: a reply for a card
+  // the user can no longer see must not land in the thread later. Chat
+  // generations are allowed to finish in their own thread.
   useEffect(() => {
-    return () => summaryControllerRef.current?.abort();
+    return () => {
+      for (const controller of summaryControllers.values()) controller.abort();
+      summaryControllers.clear();
+    };
   }, []);
 
   // ── Handle reset chat ──
   const handleReset = useCallback(() => {
-    summaryControllerRef.current?.abort();
-    summaryControllerRef.current = null;
-    setSummarizing(false);
+    if (activeThreadId) {
+      generationControllers.get(activeThreadId)?.abort();
+      summaryControllers.get(activeThreadId)?.abort();
+      summaryControllers.delete(activeThreadId);
+    }
+    setSummarizingThreadId((current) =>
+      current === activeThreadId ? null : current,
+    );
     clearMessages();
-    setError(null);
     setDraft("");
     setReplyNotice(null);
     setToolActivity(null);
     setSummaryError(null);
-    sourcesRef.current = [];
     // A fresh thread means web search should behave like a first message
     // again: enabled for the next message, off afterwards by default.
     void setConfig({ webSearchEnabled: false });
     setConfirmReset(false);
-  }, [clearMessages, setError, setDraft, setConfig]);
+  }, [activeThreadId, clearMessages, setDraft, setConfig]);
 
   const handleSummarizeHistory = useCallback(async () => {
-    if (summarizing || isSending || !application) return;
-    const threadId = useChatStore.getState().activeThreadId;
-    if (!threadId) return;
+    const threadId = activeThreadId;
+    if (!threadId || summarizingThreadId === threadId || isSending) return;
+    if (!application) return;
 
-    const conversation = useChatStore
-      .getState()
-      .messages.filter(isConversationMessage);
+    const thread = useChatStore.getState().threads[threadId];
+    const conversation = (thread?.messages ?? []).filter(isConversationMessage);
     const appCtx = applicationContextFrom(application);
     const basePrompt = buildSystemPrompt(appCtx, profile, {
       mode: config.systemPromptMode ?? "standard",
@@ -272,9 +252,11 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       reservedTokens: estimateTokens(basePrompt) + estimateTokens(inputValue),
     });
     if (fitted.droppedCount === 0) {
-      setSummaryError(
-        "No older messages are being omitted yet; there is nothing to summarize.",
-      );
+      setSummaryError({
+        threadId,
+        message:
+          "No older messages are being omitted yet; there is nothing to summarize.",
+      });
       return;
     }
 
@@ -286,14 +268,15 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     const lastDropped = capped.messages[capped.messages.length - 1];
     if (!lastDropped) return;
 
-    setSummarizing(true);
+    setSummarizingThreadId(threadId);
     setSummaryError(null);
     const controller = new AbortController();
-    summaryControllerRef.current = controller;
+    summaryControllers.set(threadId, controller);
     try {
       const result = await sendMessage(
         [
           {
+            id: newMessageId(),
             role: "user",
             content: "Summarize the earlier conversation.",
             timestamp: new Date().toISOString(),
@@ -305,66 +288,79 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       );
       // A cancelled summary is discarded completely: no error message, no
       // partial note, and no summary card in the thread.
-      if (controller.signal.aborted) return;
+      if (
+        controller.signal.aborted ||
+        summaryControllers.get(threadId) !== controller
+      ) {
+        return;
+      }
       if (result.error) {
-        setSummaryError(result.error);
+        setSummaryError({ threadId, message: result.error });
         return;
       }
       if (result.stopped || !result.content.trim()) return;
 
       const existingSummary = useChatStore
         .getState()
-        .messages.find((message) => message.kind === "summary");
+        .threads[threadId]?.messages.find(
+          (message) => message.kind === "summary",
+        );
       if (existingSummary) {
         await updateMessageInThread(
           threadId,
-          messageKey(existingSummary),
+          existingSummary.id,
           (message) => ({
             ...message,
             content: result.content,
-            sourceKey: messageKey(lastDropped),
+            sourceKey: lastDropped.id,
             timestamp: new Date().toISOString(),
           }),
         );
       } else {
         await appendMessageToThread(threadId, {
+          id: newMessageId(),
           role: "assistant",
           content: result.content,
           timestamp: new Date().toISOString(),
           kind: "summary",
-          sourceKey: messageKey(lastDropped),
+          sourceKey: lastDropped.id,
         });
       }
     } catch (err) {
       if (controller.signal.aborted) return;
-      setSummaryError(
-        err instanceof Error
-          ? err.message
-          : "Could not summarize the earlier conversation.",
-      );
+      setSummaryError({
+        threadId,
+        message:
+          err instanceof Error
+            ? err.message
+            : "Could not summarize the earlier conversation.",
+      });
     } finally {
-      if (summaryControllerRef.current === controller) {
-        summaryControllerRef.current = null;
+      if (summaryControllers.get(threadId) === controller) {
+        summaryControllers.delete(threadId);
       }
-      setSummarizing(false);
+      setSummarizingThreadId((current) =>
+        current === threadId ? null : current,
+      );
     }
   }, [
+    activeThreadId,
     application,
     appendMessageToThread,
     config,
     inputValue,
     isSending,
     profile,
-    summarizing,
+    summarizingThreadId,
     updateMessageInThread,
   ]);
 
   // ── Send a message to the chat ──
   // Three modes:
   // - default: `text` is added as a new user message and sent.
-  // - `resendKey`: an existing failed user message is sent again in place
+  // - `resendId`: an existing failed user message is sent again in place
   //   (no duplicate is created; the failed marker is cleared on the way out).
-  // - `regenerateKey`: the given assistant message is dropped from the
+  // - `regenerateId`: the given assistant message is dropped from the
   //   request history and generated anew; on success it is replaced in
   //   place, and on failure the old reply is kept.
   // `triggerFitEvaluation` is set by the starter button only, so the agent
@@ -374,31 +370,28 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       opts: {
         text?: string;
         triggerFitEvaluation?: boolean;
-        resendKey?: string;
-        regenerateKey?: string;
+        resendId?: string;
+        regenerateId?: string;
       } = {},
     ) => {
-      const isResend = !!opts.resendKey;
-      const isRegenerate = !!opts.regenerateKey;
+      const isResend = !!opts.resendId;
+      const isRegenerate = !!opts.regenerateId;
 
-      // Read the live flag, not the render-closure value: two fast Enter
-      // presses must not start two overlapping generations.
-      if (useChatStore.getState().isSending || !application) return;
+      const threadId = useChatStore.getState().activeThreadId;
+      if (!threadId || !application) return;
+      const threadAtStart = useChatStore.getState().threads[threadId];
+      if (!threadAtStart || threadAtStart.isSending) return;
 
-      const threadAtStart = useChatStore.getState().activeThreadId;
-      if (!threadAtStart) return;
-      const messagesBefore = useChatStore
-        .getState()
-        .messages.filter(isConversationMessage);
+      const messagesBefore = threadAtStart.messages.filter(
+        isConversationMessage,
+      );
 
       let targetIndex = -1;
       let target: ChatMessage | null = null;
       let trimmed: string;
       if (isResend || isRegenerate) {
-        const lookupKey = opts.resendKey ?? opts.regenerateKey;
-        targetIndex = messagesBefore.findIndex(
-          (m) => messageKey(m) === lookupKey,
-        );
+        const lookupId = opts.resendId ?? opts.regenerateId;
+        targetIndex = messagesBefore.findIndex((m) => m.id === lookupId);
         target = messagesBefore[targetIndex] ?? null;
         if (!target || !target.content.trim()) return;
         trimmed = target.content.trim();
@@ -434,8 +427,11 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
 
       // A re-send clears the failed marker immediately so the button
       // disappears while the request is in flight.
-      if (isResend) {
-        updateMessage(opts.resendKey!, (m) => ({ ...m, failed: false }));
+      if (isResend && opts.resendId) {
+        updateMessage(threadId, opts.resendId, (m) => ({
+          ...m,
+          failed: false,
+        }));
       }
 
       // Add the user message only for a fresh send; re-sends reuse the
@@ -444,27 +440,39 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       let userMsg: ChatMessage | null = null;
       if (!isResend && !isRegenerate) {
         userMsg = {
+          id: newMessageId(),
           role: "user",
           content: trimmed,
           timestamp: new Date().toISOString(),
           ...(isFitEvaluation ? { purpose: "fit-evaluation" as const } : {}),
         };
-        addMessage(userMsg);
+        addMessage(threadId, userMsg);
       }
 
-      // Send to API. The controller exists before any await so a thread
-      // switch can still abort this request.
+      // Send to API. The controller is registered before any await so the
+      // Stop button (even from another mount of this tab) can abort it.
       const controller = new AbortController();
-      controllerRef.current = controller;
-      cancelStreamBuffer();
-      setStreamingText("");
-      setIsSending(true);
-      setError(null);
-      setReplyNotice(null);
-      setToolActivity(null);
-      sourcesRef.current = [];
+      generationControllers.set(threadId, controller);
+      setThreadSending(threadId, true);
+      setThreadError(threadId, null);
+      setThreadStreamingText(threadId, "");
+      if (useChatStore.getState().activeThreadId === threadId) {
+        setReplyNotice(null);
+        setToolActivity(null);
+      }
 
-      // Application context of the current thread
+      // Each send owns its batcher and source list, so two threads can stream
+      // at the same time without sharing state.
+      const batcher = createStreamBatcher(
+        (text) =>
+          setThreadStreamingText(threadId, (previous) => previous + text),
+        (callback) => requestAnimationFrame(callback),
+        (handle) => cancelAnimationFrame(handle),
+      );
+      const sources: WebSource[] = [];
+      let toolActivityCleared = false;
+
+      // Application context of the thread this request belongs to.
       const appCtx = applicationContextFrom(application);
 
       // Make sure the profile has been loaded from disk before it is sent.
@@ -472,15 +480,12 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       if (!profile.isLoaded) {
         await loadProfile();
       }
-      // The user switched threads (or stopped) while the profile was loading:
-      // do not send this request with the old application's context.
-      if (
-        controller.signal.aborted ||
-        useChatStore.getState().activeThreadId !== threadAtStart
-      ) {
-        setIsSending(false);
-        setStreamingText("");
-        controllerRef.current = null;
+      // The user stopped while the profile was loading.
+      if (controller.signal.aborted) {
+        batcher.cancel();
+        generationControllers.delete(threadId);
+        setThreadSending(threadId, false);
+        setThreadStreamingText(threadId, "");
         return;
       }
       const freshProfile = useProfileStore.getState();
@@ -507,15 +512,15 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         fitEvaluation: isFitEvaluation,
       });
 
-      const threadAtSend = threadAtStart;
-      const conversation = useChatStore
-        .getState()
-        .messages.filter(isConversationMessage);
+      const conversation = (
+        useChatStore.getState().threads[threadId]?.messages ?? []
+      ).filter(isConversationMessage);
       // A regeneration drops the old reply from the history so the model
       // answers afresh; the stored message itself stays until replaced.
-      const history = isRegenerate
-        ? conversation.filter((m) => messageKey(m) !== opts.regenerateKey)
-        : conversation;
+      const history =
+        isRegenerate && opts.regenerateId
+          ? conversation.filter((m) => m.id !== opts.regenerateId)
+          : conversation;
       const budget = getContextBudget(config.contextWindow);
       const baseFitted = fitHistoryToBudget(history, {
         inputBudget: budget.inputBudget,
@@ -525,7 +530,9 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         baseFitted.droppedCount > 0
           ? (useChatStore
               .getState()
-              .messages.find((message) => message.kind === "summary")
+              .threads[threadId]?.messages.find(
+                (message) => message.kind === "summary",
+              )
               ?.content.trim() ?? "")
           : "";
       const systemPrompt = summaryAtSend
@@ -548,52 +555,62 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       if (
         isResend &&
         target &&
-        !sendHistory.some((m) => messageKey(m) === opts.resendKey)
+        !sendHistory.some((m) => m.id === opts.resendId)
       ) {
         sendHistory = [...sendHistory, target];
       }
-      const result = await sendMessage(
-        sendHistory,
-        { ...config, webSearchEnabled },
-        systemPrompt,
-        {
-          signal: controller.signal,
-          onDelta: (chunk) => {
-            // Only buffer text while still in the thread it was sent from.
-            if (useChatStore.getState().activeThreadId === threadAtSend) {
-              setToolActivity((current) => (current ? null : current));
-              queueStreamDelta(chunk);
-            }
-          },
-          onToolActivity: (activity) => {
-            if (useChatStore.getState().activeThreadId === threadAtSend) {
-              setToolActivity(activity);
-            }
-          },
-          onSource: (source) => {
-            if (useChatStore.getState().activeThreadId !== threadAtSend) return;
-            if (sourcesRef.current.some((entry) => entry.url === source.url)) {
-              return;
-            }
-            sourcesRef.current.push(source);
-          },
-        },
-      );
 
-      // Drop the reply if the user switched applications while it was in flight
-      if (useChatStore.getState().activeThreadId !== threadAtSend) {
-        cancelStreamBuffer();
-        setIsSending(false);
-        setStreamingText("");
-        controllerRef.current = null;
+      let result: ApiResponse;
+      try {
+        result = await sendMessage(
+          sendHistory,
+          { ...config, webSearchEnabled },
+          systemPrompt,
+          {
+            signal: controller.signal,
+            onDelta: (chunk) => {
+              batcher.push(chunk);
+              if (
+                !toolActivityCleared &&
+                useChatStore.getState().activeThreadId === threadId
+              ) {
+                toolActivityCleared = true;
+                setToolActivity(null);
+              }
+            },
+            onToolActivity: (activity) => {
+              if (useChatStore.getState().activeThreadId === threadId) {
+                setToolActivity(activity);
+              }
+            },
+            onSource: (source) => {
+              if (sources.some((entry) => entry.url === source.url)) return;
+              sources.push(source);
+            },
+          },
+        );
+      } catch (err) {
+        batcher.cancel();
+        generationControllers.delete(threadId);
+        setThreadSending(threadId, false);
+        setThreadStreamingText(threadId, "");
+        setThreadError(
+          threadId,
+          err instanceof Error ? err.message : "An unknown error occurred.",
+        );
         return;
       }
+
       // Make sure the final buffered chunk reaches the store before the
       // stopped-partial path reads it.
-      flushStreamBuffer();
-      setToolActivity(null);
-      const sources =
-        sourcesRef.current.length > 0 ? sourcesRef.current : undefined;
+      batcher.flush();
+      batcher.cancel();
+      const partial =
+        useChatStore.getState().threads[threadId]?.streamingText ?? "";
+      if (useChatStore.getState().activeThreadId === threadId) {
+        setToolActivity(null);
+      }
+      const sourceList = sources.length > 0 ? sources : undefined;
       const usage = result.usage;
       const costUsd =
         usage && config.provider === "zen"
@@ -602,82 +619,79 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
             : (estimateUsageCost(config.model, usage) ?? undefined)
           : undefined;
 
+      const finishMessage = (content: string): ChatMessage => ({
+        id: newMessageId(),
+        role: "assistant",
+        content,
+        timestamp: new Date().toISOString(),
+        ...(sourceList ? { sources: sourceList } : {}),
+        ...(usage ? { usage } : {}),
+        ...(costUsd !== undefined ? { costUsd } : {}),
+      });
+
       if (result.error) {
         // The user's message did not land: flag it so it can be re-sent in
         // place. A regeneration keeps the old reply untouched.
         if (!isRegenerate) {
-          const failedKey =
-            opts.resendKey ?? (userMsg ? messageKey(userMsg) : null);
-          if (failedKey) {
-            updateMessage(failedKey, (m) => ({ ...m, failed: true }));
+          const failedId = opts.resendId ?? userMsg?.id;
+          if (failedId) {
+            updateMessage(threadId, failedId, (m) => ({
+              ...m,
+              failed: true,
+            }));
           }
         }
-        setError(result.error);
-        setIsSending(false);
-        setStreamingText("");
+        setThreadError(threadId, result.error);
       } else if (result.stopped) {
         // User stopped mid-answer: keep whatever was generated so far.
-        const partial = useChatStore.getState().streamingText;
         if (partial.trim()) {
-          if (isRegenerate) {
-            updateMessage(opts.regenerateKey!, (m) => ({
+          if (isRegenerate && opts.regenerateId) {
+            updateMessage(threadId, opts.regenerateId, (m) => ({
               ...m,
               content: partial,
-              sources,
+              sources: sourceList,
               usage,
               costUsd,
             }));
           } else {
-            addMessage({
-              role: "assistant",
-              content: partial,
-              timestamp: new Date().toISOString(),
-              ...(sources ? { sources } : {}),
-              ...(usage ? { usage } : {}),
-              ...(costUsd !== undefined ? { costUsd } : {}),
-            });
+            addMessage(threadId, finishMessage(partial));
           }
         }
-        setStreamingText("");
-        setIsSending(false);
       } else {
-        if (isRegenerate) {
-          updateMessage(opts.regenerateKey!, (m) => ({
+        if (isRegenerate && opts.regenerateId) {
+          updateMessage(threadId, opts.regenerateId, (m) => ({
             ...m,
             content: result.content,
-            sources,
+            sources: sourceList,
             usage,
             costUsd,
           }));
         } else {
-          addMessage({
-            role: "assistant",
-            content: result.content,
-            timestamp: new Date().toISOString(),
-            ...(sources ? { sources } : {}),
-            ...(usage ? { usage } : {}),
-            ...(costUsd !== undefined ? { costUsd } : {}),
-          });
+          addMessage(threadId, finishMessage(result.content));
         }
-        if (
-          result.finishReason === "length" ||
-          result.finishReason === "max_tokens"
-        ) {
-          setReplyNotice(
-            "The reply hit the model's output limit and may be incomplete. Ask it to continue if needed.",
-          );
-        } else if (
-          result.finishReason === "content_filter" ||
-          result.finishReason === "refusal"
-        ) {
-          setReplyNotice(
-            "The model stopped because of a safety or content filter; rephrasing the request may help.",
-          );
+        if (useChatStore.getState().activeThreadId === threadId) {
+          if (
+            result.finishReason === "length" ||
+            result.finishReason === "max_tokens"
+          ) {
+            setReplyNotice(
+              "The reply hit the model's output limit and may be incomplete. Ask it to continue if needed.",
+            );
+          } else if (
+            result.finishReason === "content_filter" ||
+            result.finishReason === "refusal"
+          ) {
+            setReplyNotice(
+              "The model stopped because of a safety or content filter; rephrasing the request may help.",
+            );
+          }
         }
-        setStreamingText("");
-        setIsSending(false);
       }
-      controllerRef.current = null;
+      setThreadStreamingText(threadId, "");
+      setThreadSending(threadId, false);
+      if (generationControllers.get(threadId) === controller) {
+        generationControllers.delete(threadId);
+      }
     },
     [
       addMessage,
@@ -686,13 +700,10 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       profile,
       loadProfile,
       config,
-      setIsSending,
-      setError,
-      setStreamingText,
+      setThreadSending,
+      setThreadError,
+      setThreadStreamingText,
       setDraft,
-      queueStreamDelta,
-      flushStreamBuffer,
-      cancelStreamBuffer,
     ],
   );
 
@@ -867,8 +878,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       {/* Messages */}
       <MessageList
         onStart={handleStart}
-        onResend={(key) => void sendText({ resendKey: key })}
-        onRegenerate={(key) => void sendText({ regenerateKey: key })}
+        onResend={(id) => void sendText({ resendId: id })}
+        onRegenerate={(id) => void sendText({ regenerateId: id })}
       />
 
       {toolActivity && (
@@ -884,7 +895,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       )}
 
       {replyNotice && (
-        <p className="px-4 pt-2 text-[10px] leading-snug text-amber-500">
+        <p className="px-4 pt-2 text-[10px] leading-snug text-amber-700 dark:text-amber-400">
           {replyNotice}
         </p>
       )}
@@ -899,17 +910,17 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
           <button
             type="button"
             onClick={() => void handleSummarizeHistory()}
-            disabled={summarizing || isSending}
+            disabled={summarizingHere || isSending}
             className="text-primary transition-colors hover:text-primary/80 disabled:opacity-50"
             title="Summarize the omitted messages so the agent keeps their context"
           >
-            {summarizing
+            {summarizingHere
               ? "Summarizing…"
               : summaryText
                 ? "Update summary"
                 : "Summarize omitted messages"}
           </button>
-          {summarizing && (
+          {summarizingHere && (
             <button
               type="button"
               onClick={handleStopSummarize}
@@ -922,9 +933,12 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         </div>
       )}
 
-      {summaryError && (
-        <p className="px-4 pt-1 text-[10px] leading-snug text-destructive">
-          {summaryError}
+      {summaryError && summaryError.threadId === activeThreadId && (
+        <p
+          role="alert"
+          className="px-4 pt-1 text-[10px] leading-snug text-destructive"
+        >
+          {summaryError.message}
         </p>
       )}
 

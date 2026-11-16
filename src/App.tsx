@@ -5,12 +5,17 @@ import { exit } from "@tauri-apps/plugin-process";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useAppStore } from "@/stores/useAppStore";
-import { useSettingsStore, getAccentForeground } from "@/stores/settingsStore";
+import {
+  useSettingsStore,
+  getAccentForeground,
+  getReadableAccent,
+} from "@/stores/settingsStore";
 import { useProfileStore } from "@/stores/profileStore";
 import { useChatStore } from "@/stores/chatStore";
 import { flushAllSaves } from "@/utils/flushSaves";
 import { logToFileInBackground } from "@/utils/diagnostics";
 import { isTauriRuntime } from "@/utils/runtime";
+import { useDueNotificationSweep } from "@/hooks/useDueNotificationSweep";
 import OverviewTab from "@/components/tabs/OverviewTab";
 import ApplicationTab from "@/components/tabs/ApplicationTab";
 import ChatTab from "@/components/tabs/ChatTab";
@@ -99,6 +104,9 @@ function App() {
   useEffect(() => {
     void useProfileStore.getState().loadProfile();
   }, []);
+
+  // Opt-in OS reminders for due deadlines/follow-ups (Settings toggle).
+  useDueNotificationSweep();
 
   // Restore unsent chat drafts from the previous session.
   const draftsLoaded = useChatStore((s) => s.draftsLoaded);
@@ -207,20 +215,23 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [setActiveTab]);
 
-  // Apply accent colour (+ readable foreground)
+  // Apply accent colour (+ readable foreground). The applied accent is shifted
+  // for contrast when the user's choice would fail WCAG AA as text; the stored
+  // preference is unchanged.
   useEffect(() => {
     const root = document.documentElement;
-    const fg = getAccentForeground(accent);
-    root.style.setProperty("--primary", accent);
+    const appliedAccent = getReadableAccent(accent, isDarkTheme);
+    const fg = getAccentForeground(appliedAccent);
+    root.style.setProperty("--primary", appliedAccent);
     root.style.setProperty("--primary-foreground", fg);
-    root.style.setProperty("--ring", accent);
-    root.style.setProperty("--accent", accent);
+    root.style.setProperty("--ring", appliedAccent);
+    root.style.setProperty("--accent", appliedAccent);
     root.style.setProperty("--accent-foreground", fg);
-    root.style.setProperty("--chart-1", accent);
-    root.style.setProperty("--sidebar-primary", accent);
+    root.style.setProperty("--chart-1", appliedAccent);
+    root.style.setProperty("--sidebar-primary", appliedAccent);
     root.style.setProperty("--sidebar-primary-foreground", fg);
-    root.style.setProperty("--sidebar-ring", accent);
-  }, [accent]);
+    root.style.setProperty("--sidebar-ring", appliedAccent);
+  }, [accent, isDarkTheme]);
 
   const renderTab = () => {
     switch (activeTab) {
@@ -326,14 +337,16 @@ function App() {
 
       {/* Content Area */}
       <StorageAlert />
-      <main
-        className="flex-1 overflow-auto"
-        role="tabpanel"
-        id="tabpanel-main"
-        aria-labelledby={`tab-${activeTab}`}
-        tabIndex={-1}
-      >
-        {renderTab()}
+      <main className="flex-1 overflow-auto">
+        <div
+          id="tabpanel-main"
+          role="tabpanel"
+          aria-labelledby={`tab-${activeTab}`}
+          tabIndex={-1}
+          className="h-full"
+        >
+          {renderTab()}
+        </div>
       </main>
 
       <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />

@@ -39,7 +39,7 @@ export default function MessageInput({
     usageRatio >= 1
       ? "text-destructive"
       : usageRatio >= 0.8
-        ? "text-amber-500"
+        ? "text-amber-700 dark:text-amber-400"
         : "text-text-muted";
 
   const handleSend = useCallback(() => {
@@ -85,7 +85,7 @@ export default function MessageInput({
           size="icon"
           className={
             isGenerating
-              ? "bg-destructive hover:bg-destructive/80 text-white"
+              ? "bg-destructive hover:bg-destructive/80 text-destructive-foreground"
               : "bg-primary hover:bg-primary/80 text-primary-foreground"
           }
           aria-label={isGenerating ? "Stop generating" : "Send message"}

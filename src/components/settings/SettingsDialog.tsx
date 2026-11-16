@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Bell,
   Check,
   ClipboardCopy,
   FolderOpen,
@@ -27,9 +28,13 @@ import { exportBackupFile, importBackupFile } from "@/utils/backupFiles";
 import { flushAllSaves } from "@/utils/flushSaves";
 import { copyDiagnostics, logToFileInBackground } from "@/utils/diagnostics";
 import { isTauriRuntime } from "@/utils/runtime";
+import {
+  ensureNotificationPermission,
+  sendTestNotification,
+} from "@/utils/notificationClient";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useProfileStore } from "@/stores/profileStore";
-import { useChatStore } from "@/stores/chatStore";
+import { selectAnyThreadSending, useChatStore } from "@/stores/chatStore";
 import ApiConfigForm from "./ApiConfigForm";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -79,6 +84,10 @@ export default function SettingsDialog({
   const setSkippedUpdateVersion = useSettingsStore(
     (s) => s.setSkippedUpdateVersion,
   );
+  const notificationsEnabled = useSettingsStore((s) => s.notificationsEnabled);
+  const setNotificationsEnabled = useSettingsStore(
+    (s) => s.setNotificationsEnabled,
+  );
 
   const [showPalette, setShowPalette] = useState(false);
 
@@ -89,10 +98,14 @@ export default function SettingsDialog({
   const [folderStatus, setFolderStatus] = useState<string | null>(null);
   const [resetStatus, setResetStatus] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [notificationStatus, setNotificationStatus] = useState<string | null>(
+    null,
+  );
+  const [testingNotification, setTestingNotification] = useState(false);
   // Bumped after an import so the API form remounts from the restored config
   // instead of writing its pre-import local state back over it.
   const [configFormKey, setConfigFormKey] = useState(0);
-  const isSending = useChatStore((s) => s.isSending);
+  const isSending = useChatStore(selectAnyThreadSending);
 
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
   const [update, setUpdate] = useState<Update | null>(null);
@@ -184,6 +197,8 @@ export default function SettingsDialog({
       // Reload every store so the restored data shows immediately.
       await useApplicationStore.getState().loadApplications();
       await useProfileStore.getState().loadProfile();
+      // Cached threads belong to the pre-import data directory.
+      useChatStore.getState().resetThreadCache();
       await useChatStore.getState().loadConfig();
       await useChatStore.getState().loadDrafts(true);
       await useChatStore
@@ -294,6 +309,45 @@ export default function SettingsDialog({
       setDiagnosticsStatus(
         err instanceof Error ? err.message : "Could not copy diagnostics.",
       );
+    }
+  };
+
+  // ── Deadline reminders ──
+
+  const handleNotificationsToggle = async (enabled: boolean) => {
+    setNotificationStatus(null);
+    if (!enabled) {
+      setNotificationsEnabled(false);
+      return;
+    }
+    const permission = await ensureNotificationPermission();
+    if (permission === "unsupported") {
+      setNotificationStatus(
+        "Desktop notifications only work in the installed app.",
+      );
+      return;
+    }
+    if (permission !== "granted") {
+      setNotificationStatus(
+        "Notifications are blocked. Allow them for AI Application Support in your system settings, then try again.",
+      );
+      return;
+    }
+    setNotificationsEnabled(true);
+  };
+
+  const handleTestNotification = async () => {
+    setTestingNotification(true);
+    setNotificationStatus(null);
+    try {
+      const sent = await sendTestNotification();
+      setNotificationStatus(
+        sent
+          ? "Test notification requested. If nothing appears, check your system notification settings."
+          : "This system did not accept the notification.",
+      );
+    } finally {
+      setTestingNotification(false);
     }
   };
 
@@ -532,6 +586,50 @@ export default function SettingsDialog({
               updateMessage && (
                 <p className="text-xs text-destructive">{updateMessage}</p>
               )}
+          </div>
+
+          {/* Deadline reminders */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium text-text-secondary">
+              Deadline reminders
+            </h3>
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="deadline-notifications"
+                checked={notificationsEnabled}
+                onCheckedChange={(checked) =>
+                  void handleNotificationsToggle(checked === true)
+                }
+                className="mt-0.5"
+              />
+              <div className="space-y-1">
+                <Label
+                  htmlFor="deadline-notifications"
+                  className="text-text-secondary text-xs cursor-pointer"
+                >
+                  Notify me about due deadlines and follow-ups
+                </Label>
+                <p className="text-xs text-text-muted">
+                  A desktop notification for applications that are overdue, due
+                  today or due tomorrow. Reminders run only while the app is
+                  open, at most once a day per item.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => void handleTestNotification()}
+              disabled={!notificationsEnabled || testingNotification}
+              className="justify-center w-full"
+            >
+              <Bell className="size-4 mr-1.5" />
+              {testingNotification
+                ? "Sending test notification…"
+                : "Send test notification"}
+            </Button>
+            {notificationStatus && (
+              <p className="text-xs text-text-muted">{notificationStatus}</p>
+            )}
           </div>
 
           {/* Diagnostics */}
