@@ -122,9 +122,13 @@ Useful commands:
 
 - `npm test` — run the Vitest unit tests
 - `npm run eval` — run the offline prompt/response eval harness
+- `npm run eval:live` — opt-in live provider eval (see [docs/live-eval.md](docs/live-eval.md))
+- `npm run bench:data` — JSON data-scale diagnostic (see [docs/data-storage.md](docs/data-storage.md))
 - `npm run lint` — ESLint
 - `npm run format:check` / `npm run format` — Prettier check / rewrite
 - `npm run test:e2e` — Playwright browser-mode end-to-end tests
+- `npm run test:a11y` — axe WCAG 2.1/2.2 AA checks (see [docs/quality.md](docs/quality.md))
+- `npm run test:perf` — render and streaming-update performance checks
 - `npm run version:check` / `npm run version:bump -- X.Y.Z` — release version
   consistency check and five-file bump (see [docs/releasing.md](docs/releasing.md))
 - `npx tsc --noEmit` — TypeScript typecheck

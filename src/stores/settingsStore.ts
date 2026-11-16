@@ -57,19 +57,65 @@ export const DEFAULT_SETTINGS: Settings = {
 // Accent helpers
 // ──────────────────────────────────────────────
 
-/** Relative luminance of a hex colour (0 = black, 1 = white). */
+/** WCAG relative luminance of a hex colour (0 = black, 1 = white). */
 export function getAccentLuminance(hex: string): number {
   const n = hex.replace("#", "");
   if (n.length !== 6) return 0;
-  const r = parseInt(n.slice(0, 2), 16) / 255;
-  const g = parseInt(n.slice(2, 4), 16) / 255;
-  const b = parseInt(n.slice(4, 6), 16) / 255;
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const channel = (offset: number) => {
+    const value = parseInt(n.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
 }
 
-/** Text colour (hex) that stays readable on top of the given accent. */
+/** WCAG contrast ratio between two hex colours. */
+export function getContrastRatio(a: string, b: string): number {
+  const [lighter, darker] = [getAccentLuminance(a), getAccentLuminance(b)].sort(
+    (x, y) => y - x,
+  );
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** Blend `from` toward `to`; weight 0 = from, 1 = to. */
+function mixHex(from: string, to: string, weight: number): string {
+  const parse = (hex: string) => {
+    const n = hex.replace("#", "");
+    return [0, 2, 4].map((offset) => parseInt(n.slice(offset, offset + 2), 16));
+  };
+  const [fr, fg, fb] = parse(from);
+  const [tr, tg, tb] = parse(to);
+  const mix = (f: number, t: number) =>
+    Math.round(f + (t - f) * weight)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${mix(fr, tr)}${mix(fg, tg)}${mix(fb, tb)}`;
+}
+
+/**
+ * The user's accent is also used as a text colour (links, quiet primary
+ * actions), so a bright or very dark choice can fall below WCAG AA. Shift the
+ * applied accent toward white (dark theme) or black (light theme) until it has
+ * 4.6:1 contrast against the lightest surface it can appear on. The stored
+ * preference stays untouched.
+ */
+export function getReadableAccent(hex: string, isDark: boolean): string {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+  const basis = hex.toLowerCase();
+  const surface = isDark ? "#262219" : "#ffffff";
+  for (let step = 0; step <= 20; step += 1) {
+    const candidate = mixHex(basis, isDark ? "#ffffff" : "#000000", step / 20);
+    if (getContrastRatio(candidate, surface) >= 4.6) return candidate;
+  }
+  return isDark ? "#ffffff" : "#000000";
+}
+
+/** Text colour (hex) with the best contrast on top of the given accent. */
 export function getAccentForeground(hex: string): string {
-  return getAccentLuminance(hex) > 0.45 ? "#0d2b22" : "#ffffff";
+  const darkInk = "#0d2b22";
+  const lightInk = "#ffffff";
+  return getContrastRatio(hex, darkInk) >= getContrastRatio(hex, lightInk)
+    ? darkInk
+    : lightInk;
 }
 
 // ──────────────────────────────────────────────

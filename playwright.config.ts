@@ -18,6 +18,25 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      // Behaviour tests; accessibility and perf run in their own projects.
+      testIgnore: /(a11y|perf)\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "a11y",
+      testMatch: /a11y\.spec\.ts/,
+      timeout: 60_000,
+      use: {
+        ...devices["Desktop Chrome"],
+        // Collapse entry animations so axe never samples a half-open dialog.
+        reducedMotion: "reduce",
+      },
+    },
+    {
+      name: "perf",
+      testMatch: /perf\.spec\.ts/,
+      timeout: 90_000,
+      retries: 0,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

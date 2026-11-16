@@ -895,7 +895,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       )}
 
       {replyNotice && (
-        <p className="px-4 pt-2 text-[10px] leading-snug text-amber-500">
+        <p className="px-4 pt-2 text-[10px] leading-snug text-amber-700 dark:text-amber-400">
           {replyNotice}
         </p>
       )}
@@ -934,7 +934,10 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       )}
 
       {summaryError && summaryError.threadId === activeThreadId && (
-        <p className="px-4 pt-1 text-[10px] leading-snug text-destructive">
+        <p
+          role="alert"
+          className="px-4 pt-1 text-[10px] leading-snug text-destructive"
+        >
           {summaryError.message}
         </p>
       )}

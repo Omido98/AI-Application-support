@@ -226,7 +226,9 @@ export default function CoverLettersSection() {
             </div>
           </div>
           {summaryError && (
-            <p className="text-xs text-destructive">{summaryError}</p>
+            <p role="alert" className="text-xs text-destructive">
+              {summaryError}
+            </p>
           )}
         </div>
 

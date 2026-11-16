@@ -112,6 +112,13 @@ jobs:
       - name: Run e2e tests
         run: npm run test:e2e
 
+      - name: Accessibility checks (WCAG 2.2 AA)
+        run: npm run test:a11y
+
+      - name: Performance checks
+        run: npm run test:perf
+        continue-on-error: true
+
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4

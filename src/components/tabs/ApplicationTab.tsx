@@ -116,13 +116,15 @@ function dueChip(
   if (days === 0) {
     return {
       text: `${noun} today`,
-      className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
+      className:
+        "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
     };
   }
   if (days <= 7) {
     return {
       text: `${noun} in ${days}d`,
-      className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
+      className:
+        "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
     };
   }
   return null;
@@ -135,7 +137,7 @@ function PriorityBadge({ priority }: { priority: ApplicationPriority }) {
       className={cn(
         "rounded border px-1.5 py-0.5 text-[10px] font-medium",
         priority === "high"
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-500"
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
           : "border-border bg-field text-text-secondary",
       )}
     >

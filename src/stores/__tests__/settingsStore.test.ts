@@ -8,7 +8,13 @@ vi.mock("@/utils/storage", () => ({
 }));
 
 import { saveJson, loadJson } from "@/utils/storage";
-import { DEFAULT_SETTINGS, useSettingsStore } from "@/stores/settingsStore";
+import {
+  DEFAULT_SETTINGS,
+  getAccentForeground,
+  getContrastRatio,
+  getReadableAccent,
+  useSettingsStore,
+} from "@/stores/settingsStore";
 
 const saveJsonMock = saveJson as Mock;
 const loadJsonMock = loadJson as Mock;
@@ -19,6 +25,40 @@ beforeEach(() => {
   saveJsonMock.mockResolvedValue(true);
   loadJsonMock.mockResolvedValue(null);
   useSettingsStore.setState({ ...DEFAULT_SETTINGS, isLoaded: false });
+});
+
+describe("accent contrast", () => {
+  const presets = ["#34d399", "#0f6e5c", "#a8a094", "#808080", "#fbbf24"];
+
+  it("shifts a dark-theme accent until it passes AA on the lightest surface", () => {
+    for (const accent of presets) {
+      const readable = getReadableAccent(accent, true);
+      expect(getContrastRatio(readable, "#262219")).toBeGreaterThanOrEqual(4.6);
+    }
+  });
+
+  it("shifts a light-theme accent until it passes AA on white", () => {
+    for (const accent of presets) {
+      const readable = getReadableAccent(accent, false);
+      expect(getContrastRatio(readable, "#ffffff")).toBeGreaterThanOrEqual(4.6);
+    }
+  });
+
+  it("leaves an accent that already passes unchanged", () => {
+    expect(getReadableAccent("#34d399", true)).toBe("#34d399");
+  });
+
+  it("picks the higher-contrast ink for the button label", () => {
+    expect(getAccentForeground("#34d399")).toBe("#0d2b22");
+    expect(getAccentForeground("#0f6e5c")).toBe("#ffffff");
+    for (const accent of presets) {
+      const ink = getAccentForeground(accent);
+      const other = ink === "#ffffff" ? "#0d2b22" : "#ffffff";
+      expect(getContrastRatio(ink, accent)).toBeGreaterThanOrEqual(
+        getContrastRatio(other, accent),
+      );
+    }
+  });
 });
 
 describe("deadline reminder settings", () => {

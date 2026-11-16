@@ -8,7 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const LEVEL_STYLES: Record<FitLevel, string> = {
   strong: "border-primary/30 bg-primary/10 text-primary",
-  partial: "border-amber-500/30 bg-amber-500/10 text-amber-500",
+  partial:
+    "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
   gap: "border-destructive/30 bg-destructive/10 text-destructive",
 };
 
