@@ -13,6 +13,14 @@ import type { TabId } from "@/stores/useAppStore";
 
 export type ThemePreference = "dark" | "light" | "system";
 
+/** Per-day dedupe ledger for deadline/follow-up reminders. */
+export interface NotificationLog {
+  /** Local day (`YYYY-MM-DD`) the keys belong to. */
+  day: string;
+  /** `${applicationId}:${kind}:${date}` already announced that day. */
+  keys: string[];
+}
+
 export interface Settings {
   theme: ThemePreference;
   accent: string;
@@ -26,6 +34,10 @@ export interface Settings {
   autoUpdateCheck: boolean;
   /** Release the user asked not to be reminded about; "" = none. */
   skippedUpdateVersion: string;
+  /** Desktop deadline/follow-up reminders are opt-in. */
+  notificationsEnabled: boolean;
+  /** Reminder dedupe ledger, persisted so a restart cannot re-toast. */
+  notificationLog: NotificationLog;
 }
 
 export const DEFAULT_ACCENT = "#34d399";
@@ -37,6 +49,8 @@ export const DEFAULT_SETTINGS: Settings = {
   profileSectionOrder: DEFAULT_PROFILE_SECTION_ORDER,
   autoUpdateCheck: true,
   skippedUpdateVersion: "",
+  notificationsEnabled: false,
+  notificationLog: { day: "", keys: [] },
 };
 
 // ──────────────────────────────────────────────
@@ -72,6 +86,9 @@ interface SettingsState extends Settings {
   setProfileSectionOrder: (order: ProfileSectionId[]) => void;
   setAutoUpdateCheck: (enabled: boolean) => void;
   setSkippedUpdateVersion: (version: string) => void;
+  setNotificationsEnabled: (enabled: boolean) => void;
+  /** Record which reminders were announced on the given local day. */
+  markNotificationsSent: (day: string, keys: string[]) => void;
 }
 
 function persist(state: SettingsState) {
@@ -83,6 +100,8 @@ function persist(state: SettingsState) {
     profileSectionOrder: state.profileSectionOrder,
     autoUpdateCheck: state.autoUpdateCheck,
     skippedUpdateVersion: state.skippedUpdateVersion,
+    notificationsEnabled: state.notificationsEnabled,
+    notificationLog: state.notificationLog,
   };
   void saveJson("settings.json", settings);
 }
@@ -115,6 +134,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         skippedUpdateVersion:
           normalized?.skippedUpdateVersion ??
           DEFAULT_SETTINGS.skippedUpdateVersion,
+        notificationsEnabled:
+          normalized?.notificationsEnabled ??
+          DEFAULT_SETTINGS.notificationsEnabled,
+        notificationLog:
+          normalized?.notificationLog ?? DEFAULT_SETTINGS.notificationLog,
         isLoaded: true,
       });
     } else {
@@ -154,6 +178,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setSkippedUpdateVersion: (skippedUpdateVersion) => {
     set({ skippedUpdateVersion });
+    persist(get());
+  },
+
+  setNotificationsEnabled: (notificationsEnabled) => {
+    set({ notificationsEnabled });
+    persist(get());
+  },
+
+  markNotificationsSent: (day, keys) => {
+    const unique = [...new Set(keys)].slice(-200);
+    set({ notificationLog: { day, keys: unique } });
     persist(get());
   },
 }));

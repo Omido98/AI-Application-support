@@ -48,6 +48,10 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   chat link back to their application. **Import CV** reads a PDF, DOCX or TXT
   locally, structures it with your AI provider, and offers merge or replace
   after a preview.
+- **Deadline reminders** — opt-in desktop notifications for overdue,
+  due-today and due-tomorrow deadlines and follow-ups, deduplicated per item
+  per day. See [docs/deadline-notifications.md](docs/deadline-notifications.md)
+  for per-OS behaviour and troubleshooting.
 - **Settings** — light, dark or follow-system theme, accent colour, AI
   provider/model/context window, backup and restore, update checks, a
   **Copy diagnostics** report with versions, data-file sizes and the recent

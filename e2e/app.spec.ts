@@ -186,6 +186,24 @@ test("overview shows pipeline stats and upcoming deadlines", async ({
   await expect(page.getByText("in 3d")).toBeVisible();
 });
 
+test("deadline reminder toggle is safe in browser mode", async ({ page }) => {
+  await seed(page, { applications: [makeApplication("a", "Acme", "applied")] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  const toggle = page.getByRole("checkbox", {
+    name: "Notify me about due deadlines and follow-ups",
+  });
+  await expect(toggle).toBeVisible();
+  await expect(toggle).not.toBeChecked();
+
+  await toggle.click();
+  await expect(
+    page.getByText("Desktop notifications only work in the installed app."),
+  ).toBeVisible();
+  await expect(toggle).not.toBeChecked();
+});
+
 test("application filters survive a tab switch", async ({ page }) => {
   const acme = makeApplication("acme", "Acme Corp", "applied");
   const beta = makeApplication("beta", "Beta Ltd", "applied");

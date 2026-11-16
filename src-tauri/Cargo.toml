@@ -23,6 +23,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+# Pinned: 2.5+ requires tauri 2.12; this app is on the 2.11 line.
+tauri-plugin-notification = "=2.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "stream", "gzip"] }

@@ -94,7 +94,7 @@ export interface PipelineStats {
  * Parse a stored date-only value as local midnight. Timestamps, empty strings
  * and impossible dates (e.g. 31 February) are ignored rather than guessed at.
  */
-function parseDateOnly(value: string): Date | null {
+export function parseDateOnly(value: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return null;
   const year = Number(match[1]);
@@ -116,7 +116,7 @@ function startOfDay(date: Date): Date {
 }
 
 /** Whole days between two local-midnight dates (DST-safe). */
-function daysBetween(from: Date, to: Date): number {
+export function daysBetween(from: Date, to: Date): number {
   return Math.round((to.getTime() - from.getTime()) / 86_400_000);
 }
 

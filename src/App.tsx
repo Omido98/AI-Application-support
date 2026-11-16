@@ -11,6 +11,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { flushAllSaves } from "@/utils/flushSaves";
 import { logToFileInBackground } from "@/utils/diagnostics";
 import { isTauriRuntime } from "@/utils/runtime";
+import { useDueNotificationSweep } from "@/hooks/useDueNotificationSweep";
 import OverviewTab from "@/components/tabs/OverviewTab";
 import ApplicationTab from "@/components/tabs/ApplicationTab";
 import ChatTab from "@/components/tabs/ChatTab";
@@ -99,6 +100,9 @@ function App() {
   useEffect(() => {
     void useProfileStore.getState().loadProfile();
   }, []);
+
+  // Opt-in OS reminders for due deadlines/follow-ups (Settings toggle).
+  useDueNotificationSweep();
 
   // Restore unsent chat drafts from the previous session.
   const draftsLoaded = useChatStore((s) => s.draftsLoaded);
