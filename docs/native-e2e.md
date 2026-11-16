@@ -61,3 +61,9 @@ Common failures: driver/runtime version mismatch (download the matching
 msedgedriver), a stale app instance holding the single-instance lock, Linux
 without a D-Bus session, or a WebKit renderer that needs
 `WEBKIT_DISABLE_DMABUF_RENDERER=1` (the harness sets it).
+
+On Windows, GitHub-hosted runners execute elevated (High integrity), where
+WebView2 ignores its profile environment overrides and msedgedriver hangs
+waiting for `DevToolsActivePort`. The CI job installs gsudo and runs the suite
+at **Medium integrity** (`gsudo --direct --integrity Medium npm run
+test:e2e:native`), which is the documented workaround for this runner setup.

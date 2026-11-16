@@ -152,6 +152,13 @@ jobs:
           "$env:RUNNER_TEMP\edgedriver" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           & "$env:RUNNER_TEMP\edgedriver\msedgedriver.exe" --version
 
+      - name: Install gsudo (Medium-integrity test run)
+        if: matrix.platform == 'windows-latest'
+        run: >
+          winget install --id gerardog.gsudo --exact --version 2.6.1
+          --source winget --installer-type wix --silent
+          --accept-package-agreements --accept-source-agreements
+
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -180,7 +187,10 @@ jobs:
 
       - name: Run native e2e (Windows)
         if: matrix.platform == 'windows-latest'
-        run: npm run test:e2e:native
+        shell: pwsh
+        run: >
+          & "$env:ProgramFiles\gsudo\Current\gsudo.exe"
+          --direct --integrity Medium npm run test:e2e:native
         timeout-minutes: 10
 
       - name: Run native e2e (Linux)

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import {
@@ -14,7 +14,14 @@ import {
   stopTauriDriver,
   waitForDriver,
 } from "./driver.mjs";
-import { appBinary, artifactsDir, dataDir, isWindows, xdg } from "./paths.mjs";
+import {
+  appBinary,
+  artifactsDir,
+  dataDir,
+  isWindows,
+  logDir,
+  xdg,
+} from "./paths.mjs";
 
 /**
  * Native smoke suite: exercises the real Tauri app + Rust storage layer via
@@ -95,6 +102,30 @@ after(async () => {
         recursive: true,
         force: true,
       });
+    }
+    const logs = path.join(dataDir, "logs");
+    if (existsSync(logs)) {
+      cpSync(logs, path.join(artifactsDir, "app-logs"), {
+        recursive: true,
+        force: true,
+      });
+    }
+    if (existsSync(logDir)) {
+      cpSync(logDir, path.join(artifactsDir, "app-logs"), {
+        recursive: true,
+        force: true,
+      });
+    }
+    if (existsSync(artifactsDir)) {
+      writeFileSync(
+        path.join(artifactsDir, "environment.txt"),
+        [
+          `platform=${process.platform} arch=${process.arch}`,
+          `app=${appBinary}`,
+          `dataDir=${dataDir}`,
+          `PATH=${process.env.PATH ?? ""}`,
+        ].join("\n"),
+      );
     }
   } catch {
     // Artifacts are best-effort.
