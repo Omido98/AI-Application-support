@@ -291,6 +291,37 @@ function isYear(token: string): boolean {
   return /^(19|20)\d{2}$/.test(token);
 }
 
+function unverifiedNumberWarnings(
+  fields: { label: string; text: string }[],
+  profile: ProfileData,
+  extraContext: string,
+): string[] {
+  const source = `${JSON.stringify(profile)}\n${extraContext}`;
+  const sourceNumbers = new Set(numericTokens(source));
+  const warnings = new Map<string, string>();
+  for (const field of fields) {
+    for (const token of numericTokens(field.text)) {
+      if (isYear(token) || sourceNumbers.has(token)) continue;
+      if (warnings.has(token)) continue;
+      warnings.set(
+        token,
+        `${field.label} mentions “${token}”, which is not in your profile or extra context.`,
+      );
+    }
+  }
+  return [...warnings.values()].slice(0, 8);
+}
+
+/** Check one proposed rewrite before the user accepts it. */
+export function findUnverifiedNumbersInText(
+  label: string,
+  text: string,
+  profile: ProfileData,
+  extraContext: string,
+): string[] {
+  return unverifiedNumberWarnings([{ label, text }], profile, extraContext);
+}
+
 /**
  * Heuristic check for numbers in the CV prose that do not occur anywhere in
  * the profile or the extra context. It deliberately does not block export;
@@ -300,8 +331,6 @@ export function findUnverifiedNumbers(
   document: CvDocument,
   profile: ProfileData,
 ): string[] {
-  const source = `${JSON.stringify(profile)}\n${document.extraContext}`;
-  const sourceNumbers = new Set(numericTokens(source));
   const fields: { label: string; text: string }[] = [
     { label: "Summary", text: document.summary },
     ...document.experience
@@ -332,18 +361,7 @@ export function findUnverifiedNumbers(
       ),
   ];
 
-  const warnings = new Map<string, string>();
-  for (const field of fields) {
-    for (const token of numericTokens(field.text)) {
-      if (isYear(token) || sourceNumbers.has(token)) continue;
-      if (warnings.has(token)) continue;
-      warnings.set(
-        token,
-        `${field.label} mentions “${token}”, which is not in your profile or extra context.`,
-      );
-    }
-  }
-  return [...warnings.values()].slice(0, 8);
+  return unverifiedNumberWarnings(fields, profile, document.extraContext);
 }
 
 export function analyzeCvAts(

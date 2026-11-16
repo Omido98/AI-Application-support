@@ -45,10 +45,11 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
 - **Tailored CV builder** — generate an editable, ATS-friendly Word CV from
   your profile and one application's job description. Edit every section,
   reorder entries and sections, add extra context, preview the formatted page,
-  rewrite individual sections with AI guidance, check exact keyword matches
-  and numbers that are not grounded in your profile, and export a
+  review AI section rewrites with a before/after diff, check exact keyword
+  matches and numbers that are not grounded in your profile, and export a
   single-column `.docx` in English or Swedish. See
-  [docs/cv-builder.md](docs/cv-builder.md).
+  [docs/cv-builder.md](docs/cv-builder.md) and the
+  [improvement plan](docs/cv-improvement-plan.md).
 - **Profile** — education, work experience, certifications, skills, languages,
   previous cover letters, phone and portfolio/GitHub links, per-role
   achievements, and a public profile (e.g. LinkedIn) URL that the AI can

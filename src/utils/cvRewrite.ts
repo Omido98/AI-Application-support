@@ -4,6 +4,7 @@ import type { CvDocument, CvRewriteTarget } from "@/types/cv";
 import { newMessageId } from "@/utils/ids";
 import { sendMessage } from "@/utils/api";
 import { buildCvRewritePrompt } from "@/utils/cvRewritePrompt";
+import { findUnverifiedNumbersInText } from "@/utils/cvAts";
 
 export type CvRewriteResult =
   | {
@@ -31,6 +32,114 @@ export interface CvRewriteArgs {
   config: ApiConfig;
   signal?: AbortSignal;
   onDelta?: (text: string) => void;
+}
+
+export interface CvRewriteProposal {
+  target: CvRewriteTarget;
+  label: string;
+  result: CvRewriteResult;
+  currentText: string;
+  proposedText: string;
+  warnings: string[];
+}
+
+/** The text a proposal would change, for the before/after diff. */
+export function sectionText(
+  document: CvDocument,
+  target: CvRewriteTarget,
+): string {
+  if (target.kind === "summary") {
+    return [document.headline, document.summary].filter(Boolean).join("\n\n");
+  }
+  if (target.kind === "experience") {
+    return (
+      document.experience
+        .find((item) => item.id === target.id)
+        ?.bullets.join("\n") ?? ""
+    );
+  }
+  if (target.kind === "project") {
+    const item = document.projects.find((entry) => entry.id === target.id);
+    return item
+      ? [item.title, item.description, ...item.bullets]
+          .filter(Boolean)
+          .join("\n")
+      : "";
+  }
+  return (
+    document.otherEngagements
+      .find((item) => item.id === target.id)
+      ?.bullets.join("\n") ?? ""
+  );
+}
+
+/** Apply an accepted proposal to the document, preserving every other field. */
+export function applyRewriteResult(
+  document: CvDocument,
+  target: CvRewriteTarget,
+  result: CvRewriteResult,
+): CvDocument {
+  if (result.kind === "summary") {
+    return {
+      ...document,
+      headline: result.headline || document.headline,
+      summary: result.summary || document.summary,
+    };
+  }
+  if (result.kind === "experience") {
+    return {
+      ...document,
+      experience: document.experience.map((item) =>
+        item.id === target.id ? { ...item, bullets: result.bullets } : item,
+      ),
+    };
+  }
+  if (result.kind === "project") {
+    return {
+      ...document,
+      projects: document.projects.map((item) =>
+        item.id === target.id
+          ? {
+              ...item,
+              title: result.title || item.title,
+              description: result.description || item.description,
+              bullets: result.bullets,
+            }
+          : item,
+      ),
+    };
+  }
+  return {
+    ...document,
+    otherEngagements: document.otherEngagements.map((item) =>
+      item.id === target.id ? { ...item, bullets: result.bullets } : item,
+    ),
+  };
+}
+
+/** Build the review payload shown before the user accepts a rewrite. */
+export function buildRewriteProposal(
+  document: CvDocument,
+  target: CvRewriteTarget,
+  label: string,
+  result: CvRewriteResult,
+  profile: ProfileData,
+): CvRewriteProposal {
+  const proposed = applyRewriteResult(document, target, result);
+  const proposedText = sectionText(proposed, target);
+  return {
+    target,
+    label,
+    result,
+    currentText: sectionText(document, target),
+    proposedText,
+    warnings: findUnverifiedNumbersInText(
+      label,
+      proposedText,
+      profile,
+      document.extraContext,
+    ),
+  };
 }
 
 export class CvRewriteError extends Error {}

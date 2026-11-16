@@ -12,8 +12,11 @@ import { createCvDocumentFromProfile } from "@/utils/cvSchema";
 import { buildCvRewritePrompt } from "@/utils/cvRewritePrompt";
 import {
   CvRewriteError,
+  applyRewriteResult,
+  buildRewriteProposal,
   parseCvRewriteJson,
   rewriteCvSection,
+  sectionText,
 } from "@/utils/cvRewrite";
 
 const sendMessageMock = sendMessage as Mock;
@@ -124,6 +127,48 @@ function makeDocument() {
 
 beforeEach(() => {
   sendMessageMock.mockReset();
+});
+
+describe("proposal helpers", () => {
+  it("builds current/proposed text and grounded warnings without mutating", () => {
+    const document = makeDocument();
+    const result = {
+      kind: "summary" as const,
+      headline: "Engineer",
+      summary: "Improved conversion by 47%.",
+    };
+    const original = sectionText(document, { kind: "summary" });
+    const proposal = buildRewriteProposal(
+      document,
+      { kind: "summary" },
+      "summary",
+      result,
+      profile,
+    );
+
+    expect(proposal.currentText).toBe(original);
+    expect(proposal.proposedText).toContain("47%");
+    expect(proposal.warnings[0]).toContain("47%");
+    expect(sectionText(document, { kind: "summary" })).toBe(original);
+  });
+
+  it("applies experience bullets without changing the role identity", () => {
+    const document = makeDocument();
+    const item = document.experience[0];
+    const applied = applyRewriteResult(
+      document,
+      { kind: "experience", id: item.id },
+      {
+        kind: "experience",
+        bullets: ["New bullet."],
+      },
+    );
+
+    expect(applied.experience[0].bullets).toEqual(["New bullet."]);
+    expect(applied.experience[0].company).toBe(item.company);
+    expect(applied.experience[0].startDate).toBe(item.startDate);
+    expect(applied.experience[0].id).toBe(item.id);
+  });
 });
 
 describe("parseCvRewriteJson", () => {

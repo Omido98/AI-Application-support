@@ -43,14 +43,17 @@ no AI call.
 7. Use **AI rewrite** on the summary, a role, a project or other experience to
    rewrite only that section. Add optional guidance such as “make it shorter”
    or “lead with the accessibility work”; the rest of the CV stays untouched.
+   The model's result is not applied automatically: review the before/after
+   diff, any numbers that could not be grounded in the profile, then
+   **Accept**, **Discard** or **Try again**.
 8. **Export Word** saves a `.docx` through the native save dialog.
 
 Edits autosave to `cv_<applicationId>.json` in the app data folder. The
 document stores structured content, not the DOCX bytes.
 
-Regenerating, replacing a draft or rewriting a section keeps the previous
-version available for **Undo replacement** during the current session. The
-undo is not persisted after restarting the app.
+Regenerating, replacing a draft or accepting a section rewrite keeps the
+previous version available for **Undo replacement** during the current
+session. The undo is not persisted after restarting the app.
 
 ## Truthfulness and grounding
 

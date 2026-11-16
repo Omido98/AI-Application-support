@@ -43,7 +43,12 @@ import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import CvPreview from "@/components/cv/CvPreview";
 import CvRewriteDialog from "@/components/cv/CvRewriteDialog";
-import { rewriteCvSection } from "@/utils/cvRewrite";
+import {
+  applyRewriteResult,
+  buildRewriteProposal,
+  rewriteCvSection,
+  type CvRewriteProposal,
+} from "@/utils/cvRewrite";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -240,6 +245,9 @@ export default function CvBuilder({
   const [rewriteLabel, setRewriteLabel] = useState("");
   const [rewriteBusy, setRewriteBusy] = useState(false);
   const [rewriteError, setRewriteError] = useState<string | null>(null);
+  const [rewriteProposal, setRewriteProposal] =
+    useState<CvRewriteProposal | null>(null);
+  const [rewriteInstruction, setRewriteInstruction] = useState("");
   const rewriteController = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -395,6 +403,8 @@ export default function CvBuilder({
     setRewriteTarget(null);
     setRewriteBusy(false);
     setRewriteError(null);
+    setRewriteProposal(null);
+    setRewriteInstruction("");
   };
 
   const requestRewrite = (target: CvRewriteTarget, label: string) => {
@@ -403,16 +413,19 @@ export default function CvBuilder({
     setRewriteTarget(target);
     setRewriteLabel(label);
     setRewriteError(null);
+    setRewriteProposal(null);
+    setRewriteInstruction("");
   };
 
   const handleRewrite = async (instruction: string) => {
     if (!document || !rewriteTarget) return;
-    const before = document;
     const controller = new AbortController();
     rewriteController.current?.abort();
     rewriteController.current = controller;
+    setRewriteInstruction(instruction);
     setRewriteBusy(true);
     setRewriteError(null);
+    setRewriteProposal(null);
     try {
       const result = await rewriteCvSection({
         application,
@@ -423,51 +436,15 @@ export default function CvBuilder({
         config: apiConfig,
         signal: controller.signal,
       });
-      updateCv(application.id, (current) => {
-        if (result.kind === "summary") {
-          return {
-            ...current,
-            headline: result.headline || current.headline,
-            summary: result.summary || current.summary,
-          };
-        }
-        if (result.kind === "experience") {
-          return {
-            ...current,
-            experience: current.experience.map((item) =>
-              item.id === rewriteTarget.id
-                ? { ...item, bullets: result.bullets }
-                : item,
-            ),
-          };
-        }
-        if (result.kind === "project") {
-          return {
-            ...current,
-            projects: current.projects.map((item) =>
-              item.id === rewriteTarget.id
-                ? {
-                    ...item,
-                    title: result.title || item.title,
-                    description: result.description || item.description,
-                    bullets: result.bullets,
-                  }
-                : item,
-            ),
-          };
-        }
-        return {
-          ...current,
-          otherEngagements: current.otherEngagements.map((item) =>
-            item.id === rewriteTarget.id
-              ? { ...item, bullets: result.bullets }
-              : item,
-          ),
-        };
-      });
-      setPreviousDocument(before);
-      setExportStatus(`Rewrote ${rewriteLabel}.`);
-      setRewriteTarget(null);
+      setRewriteProposal(
+        buildRewriteProposal(
+          document,
+          rewriteTarget,
+          rewriteLabel,
+          result,
+          profile,
+        ),
+      );
     } catch (error) {
       if (
         controller.signal.aborted ||
@@ -482,6 +459,28 @@ export default function CvBuilder({
         setRewriteBusy(false);
       }
     }
+  };
+
+  const handleAcceptRewrite = () => {
+    if (!rewriteProposal) return;
+    const before = document;
+    updateCv(application.id, (current) =>
+      applyRewriteResult(
+        current,
+        rewriteProposal.target,
+        rewriteProposal.result,
+      ),
+    );
+    if (before) setPreviousDocument(before);
+    setExportStatus(`Applied ${rewriteProposal.label} rewrite.`);
+    closeRewrite();
+  };
+
+  const handleTryAgain = () => {
+    const instruction = rewriteInstruction;
+    setRewriteProposal(null);
+    setRewriteError(null);
+    void handleRewrite(instruction);
   };
 
   const handleExport = async () => {
@@ -1818,8 +1817,11 @@ export default function CvBuilder({
         label={rewriteLabel}
         busy={rewriteBusy}
         error={rewriteError}
+        proposal={rewriteProposal}
         onClose={closeRewrite}
         onRewrite={(instruction) => void handleRewrite(instruction)}
+        onAccept={handleAcceptRewrite}
+        onTryAgain={handleTryAgain}
       />
     </div>
   );
