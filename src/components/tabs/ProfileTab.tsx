@@ -74,7 +74,7 @@ export default function ProfileTab() {
             <Button
               variant="outline"
               size="sm"
-              className="dark:bg-surface dark:hover:bg-field"
+              className="bg-background text-foreground dark:bg-surface dark:text-foreground dark:hover:bg-field"
               onClick={() => setImportOpen(true)}
             >
               Import CV
@@ -82,7 +82,7 @@ export default function ProfileTab() {
             <Button
               variant="outline"
               size="sm"
-              className="dark:bg-surface dark:hover:bg-field"
+              className="bg-background text-foreground dark:bg-surface dark:text-foreground dark:hover:bg-field"
               onClick={() => setReordering((value) => !value)}
               aria-expanded={reordering}
             >

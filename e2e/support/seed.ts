@@ -214,4 +214,14 @@ export async function openApp(
   } else if (options.theme !== "system") {
     await expect(page.locator("html")).toHaveClass(/dark/);
   }
+  // Theme variables and the readable accent are applied in effects after the
+  // class lands; give the browser two paints before axe samples the page.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => setTimeout(resolve, 100)),
+        ),
+      ),
+  );
 }
