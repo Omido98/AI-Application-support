@@ -225,6 +225,7 @@ test("exports future deadlines and follow-ups as an ICS calendar", async ({
 test("CV sub-view starts from the profile and exports a Word file", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   const application = makeApplication("cv", "CV Corp", "applied");
   await seed(page, { applications: [application] });
   await page.goto("/");
@@ -240,8 +241,15 @@ test("CV sub-view starts from the profile and exports a Word file", async ({
   await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
   await expect(page.getByText("Saved locally")).toBeVisible();
 
+  await page.getByRole("combobox", { name: "Template", exact: true }).click();
+  await page.getByRole("option", { name: "Compact" }).click();
+
   await page.getByRole("button", { name: "Preview" }).click();
   await expect(page.getByLabel("CV preview")).toBeVisible();
+  await expect(page.getByLabel("CV preview")).toHaveAttribute(
+    "data-template",
+    "compact",
+  );
   await expect(page.getByRole("heading", { name: "Jane Doe" })).toBeVisible();
   await page.getByRole("button", { name: "Edit" }).click();
   const downloadPromise = page.waitForEvent("download");
@@ -249,9 +257,37 @@ test("CV sub-view starts from the profile and exports a Word file", async ({
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.docx$/);
 
+  const pdfDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export PDF" }).click();
+  const pdfDownload = await pdfDownloadPromise;
+  expect(pdfDownload.suggestedFilename()).toMatch(/\.pdf$/);
+
   await page.reload();
   await page.getByRole("button", { name: "Tailored CV" }).click();
   await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
+});
+
+test("CV can explicitly add recent chat details to its context", async ({
+  page,
+}) => {
+  const application = makeApplication(
+    "cv-chat-context",
+    "Chat Corp",
+    "applied",
+  );
+  await seed(page, {
+    applications: [application],
+    withChat: true,
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page.getByRole("button", { name: "Add recent chat details" }).click();
+
+  await expect(
+    page.getByRole("textbox", { name: "Extra context" }),
+  ).toHaveValue(/Recent chat context \(selected manually\):/);
 });
 
 test("CV section rewrite dialog opens with guidance", async ({ page }) => {

@@ -13,6 +13,7 @@ import {
   type CvPageSize,
   type CvProject,
   type CvSectionId,
+  type CvTemplate,
 } from "@/types/cv";
 import { newMessageId } from "@/utils/ids";
 
@@ -143,6 +144,7 @@ export function createCvDocumentFromProfile(
     language: CvLanguage;
     pageSize: CvPageSize;
     extraContext?: string;
+    template?: CvTemplate;
     now?: Date;
   },
 ): CvDocument {
@@ -250,6 +252,7 @@ export function createCvDocumentFromProfile(
     language,
     contentLanguage: language,
     pageSize: options.pageSize,
+    template: options.template ?? "classic",
     generatedAt: now.toISOString(),
     updatedAt: now.toISOString(),
     profileFingerprint: profileFingerprint(profile),
@@ -460,11 +463,14 @@ export function normalizeCvDocument(value: unknown): CvDocument | null {
     record.contentLanguage === "sv" || record.contentLanguage === "en"
       ? record.contentLanguage
       : undefined;
+  const template: CvTemplate =
+    record.template === "compact" ? "compact" : "classic";
   return {
     schemaVersion: 1,
     language,
     ...(contentLanguage ? { contentLanguage } : {}),
     pageSize,
+    template,
     generatedAt: asString(record.generatedAt, now),
     updatedAt: asString(record.updatedAt, now),
     profileFingerprint: asString(record.profileFingerprint),

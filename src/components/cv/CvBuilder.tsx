@@ -8,9 +8,11 @@ import {
   ChevronUp,
   Download,
   Eye,
+  FileDown,
   FileText,
   History,
   Loader2,
+  MessageSquareText,
   Pencil,
   Plus,
   RefreshCw,
@@ -33,10 +35,11 @@ import type {
   CvProject,
   CvRewriteTarget,
   CvSectionId,
+  CvTemplate,
 } from "@/types/cv";
 import { useCvStore } from "@/stores/cvStore";
 import { useProfileStore } from "@/stores/profileStore";
-import { useChatStore } from "@/stores/chatStore";
+import { useChatStore, loadChatMessagesFor } from "@/stores/chatStore";
 import { newMessageId } from "@/utils/ids";
 import {
   createCvDocumentFromProfile,
@@ -45,11 +48,14 @@ import {
 import { analyzeCvAts, extractJobKeywords } from "@/utils/cvAts";
 import { analyzeCvGrounding } from "@/utils/cvGrounding";
 import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
+import { analyzeCoverLetterConsistency } from "@/utils/cvConsistency";
+import CvConsistencyPanel from "@/components/cv/CvConsistencyPanel";
 import BufferedTextarea from "@/components/cv/BufferedTextarea";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
+import { exportCvPdf } from "@/utils/cvPdf";
 import CvPreview from "@/components/cv/CvPreview";
 import CvRewriteDialog from "@/components/cv/CvRewriteDialog";
 import CvHistoryDialog from "@/components/cv/CvHistoryDialog";
@@ -278,9 +284,11 @@ export default function CvBuilder({
     inferLanguage(application),
   );
   const [pageSize, setPageSize] = useState<CvPageSize>("a4");
+  const [template, setTemplate] = useState<CvTemplate>("classic");
   const [extraContext, setExtraContext] = useState("");
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [view, setView] = useState<"edit" | "preview">("edit");
   const [previewPages, setPreviewPages] = useState<number | null>(null);
   const [pendingLanguage, setPendingLanguage] = useState<CvLanguage | null>(
@@ -288,6 +296,7 @@ export default function CvBuilder({
   );
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [chatContextBusy, setChatContextBusy] = useState(false);
   const [previousDocument, setPreviousDocument] = useState<CvDocument | null>(
     null,
   );
@@ -320,6 +329,7 @@ export default function CvBuilder({
     if (!document) return;
     setLanguage(document.language);
     setPageSize(document.pageSize);
+    setTemplate(document.template ?? "classic");
     setExtraContext(document.extraContext);
   }, [document]);
 
@@ -388,6 +398,13 @@ export default function CvBuilder({
   const pageEstimate = useMemo(
     () => (document ? estimateCvPages(document) : null),
     [document],
+  );
+  const consistency = useMemo(
+    () =>
+      document
+        ? analyzeCoverLetterConsistency(document, profile, application)
+        : null,
+    [application, document, profile],
   );
   const visiblePages =
     view === "preview" && previewPages
@@ -480,6 +497,7 @@ export default function CvBuilder({
     const next = createCvDocumentFromProfile(profile, application, {
       language,
       pageSize,
+      template,
       extraContext,
     });
     setCv(application.id, next);
@@ -493,7 +511,7 @@ export default function CvBuilder({
       application,
       profile,
       config: apiConfig,
-      options: { language: nextLanguage, pageSize, extraContext },
+      options: { language: nextLanguage, pageSize, extraContext, template },
     });
     if (ok && before) setPreviousDocument(before);
     if (!ok && before) setLanguage(before.language);
@@ -514,6 +532,43 @@ export default function CvBuilder({
       setHistoryOpen(false);
     } finally {
       setHistoryBusy(false);
+    }
+  };
+
+  const addRecentChatContext = async () => {
+    if (!document) return;
+    setChatContextBusy(true);
+    try {
+      const messages = await loadChatMessagesFor(application.id);
+      const recent = messages
+        .filter((message) => message.content.trim())
+        .slice(-8)
+        .map(
+          (message) =>
+            `${message.role === "user" ? "Candidate" : "Assistant"}: ${message.content
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 500)}`,
+        );
+      if (recent.length === 0) {
+        setExportStatus("No chat messages to add for this application.");
+        return;
+      }
+      const block = [
+        "Recent chat context (selected manually):",
+        ...recent,
+      ].join("\n");
+      updateCv(application.id, (current) => ({
+        ...current,
+        extraContext: [current.extraContext.trim(), block]
+          .filter(Boolean)
+          .join("\n\n"),
+      }));
+      setExportStatus(
+        `Added ${recent.length} recent chat message${recent.length === 1 ? "" : "s"} to the extra context.`,
+      );
+    } finally {
+      setChatContextBusy(false);
     }
   };
   const closeRewrite = () => {
@@ -636,6 +691,25 @@ export default function CvBuilder({
     }
   };
 
+  const handleExportPdf = async () => {
+    if (!document) return;
+    setExportStatus(null);
+    setExportingPdf(true);
+    try {
+      const path = await exportCvPdf(document, application.companyName);
+      if (path) {
+        const name = path.split(/[\\/]/).pop() ?? path;
+        setExportStatus(`Exported ${name}.`);
+      }
+    } catch (err) {
+      setExportStatus(
+        `PDF export failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   const changeLanguage = (value: CvLanguage) => {
     if (!document) {
       setLanguage(value);
@@ -670,6 +744,11 @@ export default function CvBuilder({
   const changePageSize = (value: CvPageSize) => {
     setPageSize(value);
     if (document) setField("pageSize", value);
+  };
+
+  const changeTemplate = (value: CvTemplate) => {
+    setTemplate(value);
+    if (document) setField("template", value);
   };
 
   if (!loaded) {
@@ -1634,6 +1713,19 @@ export default function CvBuilder({
           <Button
             variant="outline"
             size="sm"
+            onClick={() => void handleExportPdf()}
+            disabled={exportingPdf}
+          >
+            {exportingPdf ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <FileDown className="size-3.5" />
+            )}
+            Export PDF
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => void handleGenerate()}
             disabled={!canGenerate || generating}
           >
@@ -1912,6 +2004,9 @@ export default function CvBuilder({
               </CardContent>
             </Card>
             {grounding && <CvGroundingPanel report={grounding} />}
+            {consistency?.hasContext && (
+              <CvConsistencyPanel report={consistency} />
+            )}
             <Card className="bg-surface border-border">
               <CardContent className="space-y-3 pt-4">
                 <div className="flex items-center justify-between gap-2">
@@ -2112,6 +2207,29 @@ export default function CvBuilder({
                   </Select>
                 </div>
                 <div className="space-y-1.5">
+                  <Label htmlFor="cv-template-edit">Template</Label>
+                  <Select
+                    value={document.template ?? "classic"}
+                    onValueChange={(value) =>
+                      value && changeTemplate(value as CvTemplate)
+                    }
+                  >
+                    <SelectTrigger
+                      id="cv-template-edit"
+                      className="w-full bg-field"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="classic">Classic</SelectItem>
+                      <SelectItem value="compact">Compact</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-text-muted">
+                    Both templates are single-column and ATS-safe.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
                   <Label htmlFor="cv-extra-context-edit">Extra context</Label>
                   <BufferedTextarea
                     id="cv-extra-context-edit"
@@ -2119,6 +2237,24 @@ export default function CvBuilder({
                     onCommit={(value) => setField("extraContext", value)}
                     className={textareaClass}
                   />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => void addRecentChatContext()}
+                    disabled={chatContextBusy}
+                  >
+                    {chatContextBusy ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <MessageSquareText className="size-3.5" />
+                    )}
+                    Add recent chat details
+                  </Button>
+                  <p className="text-[10px] text-text-muted">
+                    Appends a short, visible transcript excerpt to the extra
+                    context. Nothing from chat is used unless you add it.
+                  </p>
                 </div>
               </CardContent>
             </Card>

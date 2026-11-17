@@ -12,6 +12,7 @@ import type {
   CvOtherEngagement,
   CvPageSize,
   CvProject,
+  CvTemplate,
 } from "@/types/cv";
 import { newMessageId } from "@/utils/ids";
 import { sendMessage } from "@/utils/api";
@@ -35,6 +36,7 @@ export interface CvGenerationOptions {
   language: CvLanguage;
   pageSize: CvPageSize;
   extraContext: string;
+  template?: CvTemplate;
 }
 
 export class CvGenerationError extends Error {}

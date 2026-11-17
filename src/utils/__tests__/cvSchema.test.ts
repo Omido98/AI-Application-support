@@ -205,6 +205,7 @@ describe("normalizeCvDocument", () => {
       new Set(document.sectionOrder),
     );
     expect(normalized?.experience).toHaveLength(1);
+    expect(normalized?.template).toBe("classic");
   });
 
   it("rejects unknown schemas and drops malformed entries", () => {
@@ -222,6 +223,16 @@ describe("normalizeCvDocument", () => {
     expect(normalized?.pageSize).toBe("letter");
     expect(normalized?.experience).toHaveLength(1);
     expect(normalized?.education).toEqual([]);
+    expect(normalized?.template).toBe("classic");
+  });
+
+  it("preserves the compact template", () => {
+    const document = makeDocument();
+    const normalized = normalizeCvDocument({
+      ...document,
+      template: "compact",
+    });
+    expect(normalized?.template).toBe("compact");
   });
 
   it("changes the profile fingerprint when the profile changes", () => {

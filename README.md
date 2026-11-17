@@ -47,9 +47,9 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   reorder entries and sections, add extra context, preview the formatted page,
   review AI section rewrites with a before/after diff and presets, restore
   earlier CV versions, check phrase/synonym keyword matches and requirement
-  priorities, use a deterministic grounding review, get page-fit feedback, and
-  export a single-column `.docx` in English or Swedish. See
-  [docs/cv-builder.md](docs/cv-builder.md) and the
+  priorities, use a deterministic grounding review, get page-fit feedback,
+  switch between two ATS-safe templates, export Word or PDF, and add recent
+  chat details explicitly. See [docs/cv-builder.md](docs/cv-builder.md) and the
   [improvement plan](docs/cv-improvement-plan.md).
 - **Profile** — education, work experience, certifications, skills, languages,
   previous cover letters, phone and portfolio/GitHub links, per-role

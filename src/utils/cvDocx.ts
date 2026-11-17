@@ -60,9 +60,20 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
   const { AlignmentType, BorderStyle, Document, Packer, Paragraph, TextRun } =
     await import("docx");
 
+  const compact = document.template === "compact";
+  const headingSize = compact ? 20 : 22;
+  const titleSize = compact ? 20 : 22;
+  const nameSize = compact ? 32 : 36;
+  const bodySize = compact ? 20 : 21;
+  const metaSize = compact ? 17 : 18;
+  const lineHeight = compact ? 252 : 264;
+  const margin = compact ? 600 : 720;
+
   const heading = (section: CvSectionId) =>
     new Paragraph({
-      spacing: { before: 240, after: 100 },
+      spacing: compact
+        ? { before: 160, after: 80 }
+        : { before: 240, after: 100 },
       border: {
         bottom: {
           color: "B8B2A7",
@@ -73,9 +84,11 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
       },
       children: [
         new TextRun({
-          text: CV_SECTION_LABELS[document.language][section],
+          text: compact
+            ? CV_SECTION_LABELS[document.language][section].toUpperCase()
+            : CV_SECTION_LABELS[document.language][section],
           bold: true,
-          size: 22,
+          size: headingSize,
           color: "111111",
         }),
       ],
@@ -83,23 +96,28 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
 
   const body = (text: string) =>
     new Paragraph({
-      spacing: { after: 60 },
-      children: [new TextRun({ text })],
+      spacing: { after: compact ? 40 : 60 },
+      children: [new TextRun({ text, size: bodySize })],
     });
 
   const muted = (text: string) =>
     new Paragraph({
-      spacing: { after: 40 },
+      spacing: { after: compact ? 30 : 40 },
       children: [
-        new TextRun({ text, size: 18, color: "555555", italics: true }),
+        new TextRun({
+          text,
+          size: metaSize,
+          color: "555555",
+          italics: true,
+        }),
       ],
     });
 
   const bullet = (text: string) =>
     new Paragraph({
       bullet: { level: 0 },
-      spacing: { after: 30 },
-      children: [new TextRun({ text })],
+      spacing: { after: compact ? 20 : 30 },
+      children: [new TextRun({ text, size: bodySize })],
     });
 
   const children: InstanceType<typeof Paragraph>[] = [];
@@ -107,12 +125,12 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
   children.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 60 },
+      spacing: { after: compact ? 40 : 60 },
       children: [
         new TextRun({
           text: document.contact.fullName.trim() || "Curriculum Vitae",
           bold: true,
-          size: 36,
+          size: nameSize,
           color: "111111",
         }),
       ],
@@ -122,11 +140,11 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
     children.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { after: 60 },
+        spacing: { after: compact ? 40 : 60 },
         children: [
           new TextRun({
             text: document.headline.trim(),
-            size: 22,
+            size: titleSize,
             italics: true,
             color: "333333",
           }),
@@ -138,11 +156,11 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
     children.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { after: 160 },
+        spacing: { after: compact ? 120 : 160 },
         children: [
           new TextRun({
             text: contact.join("  ·  "),
-            size: 18,
+            size: compact ? 17 : 18,
             color: "444444",
           }),
         ],
@@ -269,9 +287,9 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
     styles: {
       default: {
         document: {
-          run: { font: "Calibri", size: 21, color: "1A1A1A" },
+          run: { font: "Calibri", size: bodySize, color: "1A1A1A" },
           paragraph: {
-            spacing: { after: 60, line: 264 },
+            spacing: { after: compact ? 40 : 60, line: lineHeight },
           },
         },
       },
@@ -282,10 +300,10 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
           page: {
             size: page,
             margin: {
-              top: 720,
-              right: 720,
-              bottom: 720,
-              left: 720,
+              top: margin,
+              right: margin,
+              bottom: margin,
+              left: margin,
             },
           },
         },

@@ -3,6 +3,9 @@ export type CvLanguage = "en" | "sv";
 
 export type CvPageSize = "a4" | "letter";
 
+/** The two ATS-safe layouts; both remain single-column and image-free. */
+export type CvTemplate = "classic" | "compact";
+
 export type CvSectionId =
   | "summary"
   | "skills"
@@ -116,6 +119,7 @@ export interface CvDocument {
   /** Language the body prose was generated in; can differ after a headings-only switch. */
   contentLanguage?: CvLanguage;
   pageSize: CvPageSize;
+  template?: CvTemplate;
   generatedAt: string;
   updatedAt: string;
   /** Hash of the profile used for generation; detects stale drafts. */

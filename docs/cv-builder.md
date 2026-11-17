@@ -102,6 +102,23 @@ dismiss the wording as supported. Generation uses a compact set of ATS
 priorities from the job description and requirements, and asks the model to
 prefer the two or three most relevant roles rather than including everything.
 
+## Templates, exports and cross-checks
+
+Two single-column ATS-safe templates are available: **Classic** and
+**Compact**. Compact uses tighter margins, smaller body text and uppercase
+section headings; both export as DOCX or PDF. The PDF is text-based and
+selectable, not a screenshot of the preview.
+
+**Export Word** writes `.docx`; **Export PDF** writes `.pdf`. PDF pagination is
+generated independently of the browser preview and can differ slightly from
+Word, so check the exported file before submitting.
+
+**Add recent chat details** appends up to eight short messages from this
+application's chat to the visible extra context. Nothing from chat is used
+unless you press that button. The **Cover-letter consistency** panel compares
+the CV with your stored cover-letter summary and flags themes or company names
+that do not line up; it never edits either document.
+
 ## Language and page fit
 
 Changing the CV language opens an explicit choice. **Change headings only**
@@ -131,8 +148,7 @@ The single template is deliberately constrained:
 - English or Swedish headings.
 
 ATS software varies; the panel is guidance, not a guarantee. Always open the
-exported Word file once before submitting it. There is no photo, PDF or
-multiple-template option yet.
+exported Word or PDF file once before submitting it. There is no photo option.
 
 ## Stale drafts
 

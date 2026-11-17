@@ -125,4 +125,20 @@ describe("renderCvDocx", () => {
     expect(text).toContain("Utbildning");
     expect(text).toContain("Nuvarande");
   });
+
+  it("uses uppercase compact headings without losing content", async () => {
+    const document = createCvDocumentFromProfile(profile, application, {
+      language: "en",
+      pageSize: "a4",
+      extraContext: "",
+      template: "compact",
+    });
+    document.summary = "Compact summary.";
+
+    const text = await extractText(await renderCvDocx(document));
+    expect(text).toContain("PROFESSIONAL SUMMARY");
+    expect(text).toContain("WORK EXPERIENCE");
+    expect(text).toContain("Jane Doe");
+    expect(text).toContain("Reduced reporting time by 30%");
+  });
 });

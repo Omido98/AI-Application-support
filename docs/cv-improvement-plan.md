@@ -108,13 +108,21 @@ guidance is more actionable without claiming experience the candidate lacks.
 
 ## Phase 7 — Output polish (v1.16.0)
 
-- Second ATS-safe visual template.
-- PDF export alongside DOCX.
-- Optional “use recent chat details” as an explicit context source.
-- Cover-letter/CV narrative consistency helpers.
+**Status: implemented in this release.**
 
-**Why:** lower priority than trust, performance and language/page fit; these
-are output options rather than workflow blockers.
+- Second ATS-safe **Compact** template alongside **Classic**, with matching
+  DOCX and preview styling.
+- Selectable-text **PDF export** alongside DOCX; both use the same structured
+  content and template.
+- Explicit **Add recent chat details** action that appends a short, visible
+  transcript excerpt to extra context. Chat is never read silently.
+- **Cover-letter consistency** panel comparing cover-letter themes and company
+  names with the CV.
+- Tests for compact DOCX, PDF rendering, chat-context insertion and
+  consistency; browser coverage for compact preview and PDF download.
+
+**Why:** output choices and cross-document consistency were the remaining
+workflow gaps after trust, performance and ATS depth.
 
 ## Cross-cutting rules
 
