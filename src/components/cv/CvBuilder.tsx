@@ -7,6 +7,7 @@ import {
   Download,
   Eye,
   FileText,
+  History,
   Loader2,
   Pencil,
   Plus,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import type { JobApplication } from "@/types";
 import type {
+  CvAiUsage,
   CvCertification,
   CvDocument,
   CvEducation,
@@ -43,12 +45,14 @@ import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import CvPreview from "@/components/cv/CvPreview";
 import CvRewriteDialog from "@/components/cv/CvRewriteDialog";
+import CvHistoryDialog from "@/components/cv/CvHistoryDialog";
 import {
   applyRewriteResult,
   buildRewriteProposal,
   rewriteCvSection,
   type CvRewriteProposal,
 } from "@/utils/cvRewrite";
+import { formatCvUsage } from "@/utils/cvUsage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -214,6 +218,8 @@ export default function CvBuilder({
   const loadConfig = useChatStore((state) => state.loadConfig);
 
   const document = useCvStore((state) => state.documents[application.id]);
+  const history = useCvStore((state) => state.history[application.id]);
+  const snapshots = history ?? [];
   const loaded = useCvStore((state) => state.loaded[application.id]);
   const saving = useCvStore((state) => state.saving[application.id]);
   const storeError = useCvStore((state) => state.errors[application.id]);
@@ -224,6 +230,8 @@ export default function CvBuilder({
   const loadCv = useCvStore((state) => state.loadCv);
   const setCv = useCvStore((state) => state.setCv);
   const updateCv = useCvStore((state) => state.updateCv);
+  const snapshotCurrent = useCvStore((state) => state.snapshotCurrent);
+  const restoreSnapshot = useCvStore((state) => state.restoreSnapshot);
   const saveCv = useCvStore((state) => state.saveCv);
   const generateCv = useCvStore((state) => state.generateCv);
   const cancelGeneration = useCvStore((state) => state.cancelGeneration);
@@ -236,6 +244,8 @@ export default function CvBuilder({
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [view, setView] = useState<"edit" | "preview">("edit");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(false);
   const [previousDocument, setPreviousDocument] = useState<CvDocument | null>(
     null,
   );
@@ -274,6 +284,7 @@ export default function CvBuilder({
   useEffect(() => {
     setPreviousDocument(null);
     setView("edit");
+    setHistoryOpen(false);
   }, [application.id]);
 
   const profileHasContent = Boolean(
@@ -397,6 +408,16 @@ export default function CvBuilder({
     setExportStatus("Restored the previous CV.");
   };
 
+  const handleRestoreSnapshot = async (snapshotId: string) => {
+    setHistoryBusy(true);
+    try {
+      await restoreSnapshot(application.id, snapshotId);
+      setExportStatus("Restored a saved CV version.");
+      setHistoryOpen(false);
+    } finally {
+      setHistoryBusy(false);
+    }
+  };
   const closeRewrite = () => {
     rewriteController.current?.abort();
     rewriteController.current = null;
@@ -427,6 +448,7 @@ export default function CvBuilder({
     setRewriteError(null);
     setRewriteProposal(null);
     try {
+      let usage: CvAiUsage | undefined;
       const result = await rewriteCvSection({
         application,
         profile,
@@ -435,6 +457,9 @@ export default function CvBuilder({
         instruction,
         config: apiConfig,
         signal: controller.signal,
+        onUsage: (nextUsage) => {
+          usage = nextUsage;
+        },
       });
       setRewriteProposal(
         buildRewriteProposal(
@@ -443,6 +468,7 @@ export default function CvBuilder({
           rewriteLabel,
           result,
           profile,
+          usage,
         ),
       );
     } catch (error) {
@@ -461,19 +487,29 @@ export default function CvBuilder({
     }
   };
 
-  const handleAcceptRewrite = () => {
+  const handleAcceptRewrite = async () => {
     if (!rewriteProposal) return;
     const before = document;
-    updateCv(application.id, (current) =>
-      applyRewriteResult(
-        current,
-        rewriteProposal.target,
-        rewriteProposal.result,
-      ),
-    );
-    if (before) setPreviousDocument(before);
-    setExportStatus(`Applied ${rewriteProposal.label} rewrite.`);
-    closeRewrite();
+    setRewriteBusy(true);
+    try {
+      await snapshotCurrent(
+        application.id,
+        `Before rewrite: ${rewriteProposal.label}`,
+      );
+      updateCv(application.id, (current) =>
+        applyRewriteResult(
+          current,
+          rewriteProposal.target,
+          rewriteProposal.result,
+          rewriteProposal.usage,
+        ),
+      );
+      if (before) setPreviousDocument(before);
+      setExportStatus(`Applied ${rewriteProposal.label} rewrite.`);
+      closeRewrite();
+    } finally {
+      setRewriteBusy(false);
+    }
   };
 
   const handleTryAgain = () => {
@@ -1403,8 +1439,30 @@ export default function CvBuilder({
             {document.language === "sv" ? "Svenska" : "English"} ·{" "}
             {saving ? "Saving…" : storeError ? "Not saved" : "Saved locally"}
           </p>
+          {document.lastUsage && (
+            <p
+              className="mt-1 font-mono text-[10px] text-text-muted"
+              title={document.lastUsage.model}
+            >
+              Last AI: {formatCvUsage(document.lastUsage)} ·{" "}
+              {document.lastUsage.model}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setHistoryOpen(true)}
+            disabled={snapshots.length === 0}
+            title={
+              snapshots.length === 0
+                ? "Versions are saved before AI regeneration, before an accepted rewrite and before a restore"
+                : "Restore an earlier CV version"
+            }
+          >
+            <History className="size-3.5" /> Versions ({snapshots.length})
+          </Button>
           <div className="flex rounded-md border border-border bg-field p-0.5">
             <Button
               variant={view === "edit" ? "secondary" : "ghost"}
@@ -1820,8 +1878,15 @@ export default function CvBuilder({
         proposal={rewriteProposal}
         onClose={closeRewrite}
         onRewrite={(instruction) => void handleRewrite(instruction)}
-        onAccept={handleAcceptRewrite}
+        onAccept={() => void handleAcceptRewrite()}
         onTryAgain={handleTryAgain}
+      />
+      <CvHistoryDialog
+        open={historyOpen}
+        snapshots={snapshots}
+        busy={historyBusy}
+        onClose={() => setHistoryOpen(false)}
+        onRestore={(snapshotId) => void handleRestoreSnapshot(snapshotId)}
       />
     </div>
   );

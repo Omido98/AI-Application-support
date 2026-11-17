@@ -1,4 +1,5 @@
 import type { JobApplication, ProfileData } from "@/types";
+import type { TokenUsage } from "@/types";
 import type { ChatMessage, ApiConfig } from "@/stores/chatStore";
 import type {
   CvCertification,
@@ -15,6 +16,7 @@ import { newMessageId } from "@/utils/ids";
 import { sendMessage } from "@/utils/api";
 import { buildCvGenerationPrompt } from "@/utils/cvPrompt";
 import { createCvDocumentFromProfile } from "@/utils/cvSchema";
+import { makeCvUsage } from "@/utils/cvUsage";
 
 interface GeneratedCvContent {
   headline?: unknown;
@@ -292,6 +294,7 @@ export async function generateCvDocument({
     "Create the tailored CV now. Return only the JSON object described in the system prompt.",
   );
   const messages: ChatMessage[] = [firstRequest];
+  const usages: (TokenUsage | undefined)[] = [];
 
   let response = await sendMessage(
     messages,
@@ -299,6 +302,7 @@ export async function generateCvDocument({
     systemPrompt,
     { signal, onDelta },
   );
+  usages.push(response.usage);
   if (response.error) throw new CvGenerationError(response.error);
 
   let parsed = parseGeneratedCvJson(response.content);
@@ -320,6 +324,7 @@ export async function generateCvDocument({
       systemPrompt,
       { signal, onDelta },
     );
+    usages.push(response.usage);
     if (response.error) throw new CvGenerationError(response.error);
     parsed = parseGeneratedCvJson(response.content);
   }
@@ -330,5 +335,7 @@ export async function generateCvDocument({
     );
   }
 
-  return mergeGeneratedCv(parsed, base, options);
+  const document = mergeGeneratedCv(parsed, base, options);
+  const lastUsage = makeCvUsage("generate", config, usages);
+  return lastUsage ? { ...document, lastUsage } : document;
 }

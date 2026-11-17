@@ -1,10 +1,12 @@
 import type { JobApplication, ProfileData } from "@/types";
+import type { TokenUsage } from "@/types";
 import type { ChatMessage, ApiConfig } from "@/stores/chatStore";
-import type { CvDocument, CvRewriteTarget } from "@/types/cv";
+import type { CvAiUsage, CvDocument, CvRewriteTarget } from "@/types/cv";
 import { newMessageId } from "@/utils/ids";
 import { sendMessage } from "@/utils/api";
 import { buildCvRewritePrompt } from "@/utils/cvRewritePrompt";
 import { findUnverifiedNumbersInText } from "@/utils/cvAts";
+import { makeCvUsage } from "@/utils/cvUsage";
 
 export type CvRewriteResult =
   | {
@@ -32,6 +34,7 @@ export interface CvRewriteArgs {
   config: ApiConfig;
   signal?: AbortSignal;
   onDelta?: (text: string) => void;
+  onUsage?: (usage: CvAiUsage) => void;
 }
 
 export interface CvRewriteProposal {
@@ -41,6 +44,7 @@ export interface CvRewriteProposal {
   currentText: string;
   proposedText: string;
   warnings: string[];
+  usage?: CvAiUsage;
 }
 
 /** The text a proposal would change, for the before/after diff. */
@@ -78,17 +82,19 @@ export function applyRewriteResult(
   document: CvDocument,
   target: CvRewriteTarget,
   result: CvRewriteResult,
+  usage?: CvAiUsage,
 ): CvDocument {
+  const withUsage = usage ? { ...document, lastUsage: usage } : document;
   if (result.kind === "summary") {
     return {
-      ...document,
+      ...withUsage,
       headline: result.headline || document.headline,
       summary: result.summary || document.summary,
     };
   }
   if (result.kind === "experience") {
     return {
-      ...document,
+      ...withUsage,
       experience: document.experience.map((item) =>
         item.id === target.id ? { ...item, bullets: result.bullets } : item,
       ),
@@ -96,7 +102,7 @@ export function applyRewriteResult(
   }
   if (result.kind === "project") {
     return {
-      ...document,
+      ...withUsage,
       projects: document.projects.map((item) =>
         item.id === target.id
           ? {
@@ -110,7 +116,7 @@ export function applyRewriteResult(
     };
   }
   return {
-    ...document,
+    ...withUsage,
     otherEngagements: document.otherEngagements.map((item) =>
       item.id === target.id ? { ...item, bullets: result.bullets } : item,
     ),
@@ -124,6 +130,7 @@ export function buildRewriteProposal(
   label: string,
   result: CvRewriteResult,
   profile: ProfileData,
+  usage?: CvAiUsage,
 ): CvRewriteProposal {
   const proposed = applyRewriteResult(document, target, result);
   const proposedText = sectionText(proposed, target);
@@ -139,6 +146,7 @@ export function buildRewriteProposal(
       profile,
       document.extraContext,
     ),
+    ...(usage ? { usage } : {}),
   };
 }
 
@@ -251,12 +259,15 @@ export async function rewriteCvSection({
   config,
   signal,
   onDelta,
+  onUsage,
 }: CvRewriteArgs): Promise<CvRewriteResult> {
   if (!config.apiKey.trim()) {
     throw new CvRewriteError(
       "Add an API key in Settings before using AI rewriting.",
     );
   }
+
+  const usages: (TokenUsage | undefined)[] = [];
 
   const systemPrompt = buildCvRewritePrompt(
     application,
@@ -282,6 +293,7 @@ export async function rewriteCvSection({
     aborted.name = "AbortError";
     throw aborted;
   }
+  usages.push(response.usage);
   if (response.error) throw new CvRewriteError(response.error);
 
   let parsed = parseCvRewriteJson(response.content);
@@ -308,6 +320,7 @@ export async function rewriteCvSection({
       aborted.name = "AbortError";
       throw aborted;
     }
+    usages.push(response.usage);
     if (response.error) throw new CvRewriteError(response.error);
     parsed = parseCvRewriteJson(response.content);
   }
@@ -317,5 +330,8 @@ export async function rewriteCvSection({
       "The model did not return a usable rewrite. Try again or edit the section manually.",
     );
   }
-  return validateResult(target, parsed);
+  const result = validateResult(target, parsed);
+  const usage = makeCvUsage("rewrite", config, usages);
+  if (usage) onUsage?.(usage);
+  return result;
 }

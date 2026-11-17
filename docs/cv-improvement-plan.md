@@ -20,13 +20,15 @@ without adding model calls.
 
 ## Phase 2 — Version history and usage feedback (v1.11.0)
 
-- Persist the last 3–5 CV snapshots per application (`cv_history_<id>.json`
-  or a bounded history field), including section rewrites and full
-  regenerations.
-- Restore a previous version after an app restart.
+**Status: implemented in this release.**
+
+- Persist the last five CV snapshots per application in
+  `cv_history_<id>.json`.
+- Snapshots before AI regeneration, accepted rewrites and restores; restore
+  snapshots the current CV first.
 - Include history in backup/prune/reset paths.
 - Show provider token usage and estimated cost for generation and rewrites.
-- Add a “last saved / generated” status in the CV header.
+- Add a “last AI action” line in the CV header and a Versions panel.
 
 **Why:** session-only undo does not protect users who close the app; cost
 visibility makes repeated section rewrites predictable.

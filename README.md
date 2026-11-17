@@ -45,9 +45,9 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
 - **Tailored CV builder** — generate an editable, ATS-friendly Word CV from
   your profile and one application's job description. Edit every section,
   reorder entries and sections, add extra context, preview the formatted page,
-  review AI section rewrites with a before/after diff, check exact keyword
-  matches and numbers that are not grounded in your profile, and export a
-  single-column `.docx` in English or Swedish. See
+  review AI section rewrites with a before/after diff, restore earlier CV
+  versions, check exact keyword matches and numbers that are not grounded in
+  your profile, and export a single-column `.docx` in English or Swedish. See
   [docs/cv-builder.md](docs/cv-builder.md) and the
   [improvement plan](docs/cv-improvement-plan.md).
 - **Profile** — education, work experience, certifications, skills, languages,
@@ -71,8 +71,8 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   log, an **Open data folder** shortcut, and a **Reset all data** action that
   clears everything on the next start.
 - **Backup & restore** — export all your data (applications, chat threads, CV
-  drafts, profile, settings, API config) to a single JSON file and import it
-  back. API keys are never included in a backup.
+  drafts and versions, profile, settings, API config) to a single JSON file and
+  import it back. API keys are never included in a backup.
 - **Update checks** — a silent check runs a few seconds after startup and
   offers newer releases in a dialog. Settings can check manually and turn the
   startup check off.
@@ -107,7 +107,7 @@ All data lives in your system's app-data directory as plain JSON files:
 - `settings.json` — theme and accent
 - `drafts.json` — unsent chat messages, keyed by application
 - `zen-prices.json` — cached model prices from the Zen docs
-- `cv_<applicationId>.json` — saved tailored CV draft per application
+- `cv_history_<applicationId>.json` — last five CV versions per application
 
 Changes are auto-saved (debounced) and flushed when you close the app. Writes
 are atomic and keep a `.bak` copy of the previous version; if a file is

@@ -51,9 +51,13 @@ no AI call.
 Edits autosave to `cv_<applicationId>.json` in the app data folder. The
 document stores structured content, not the DOCX bytes.
 
-Regenerating, replacing a draft or accepting a section rewrite keeps the
-previous version available for **Undo replacement** during the current
-session. The undo is not persisted after restarting the app.
+The **Versions (n)** button keeps the last five CV snapshots per application.
+A snapshot is taken before AI regeneration, before an accepted section rewrite
+and before restoring a version. Restore is therefore reversible: the current
+CV is snapshotted first. History is persisted in
+`cv_history_<applicationId>.json`, included in backups and removed with the
+application. The toolbar shows the token usage and estimated cost of the last
+AI action, and the rewrite review shows the usage of that request.
 
 ## Truthfulness and grounding
 

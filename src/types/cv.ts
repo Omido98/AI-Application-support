@@ -99,6 +99,17 @@ export interface CvOtherEngagement {
   included: boolean;
 }
 
+/** Token/cost metadata for one AI CV action. */
+export interface CvAiUsage {
+  kind: "generate" | "rewrite";
+  at: string;
+  model: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  /** Estimated USD cost when the model has a known price. */
+  costUsd?: number;
+}
+
 export interface CvDocument {
   schemaVersion: 1;
   language: CvLanguage;
@@ -121,6 +132,15 @@ export interface CvDocument {
   languages: CvLanguageSkill[];
   otherEngagements: CvOtherEngagement[];
   sectionOrder: CvSectionId[];
+  lastUsage?: CvAiUsage;
+}
+
+/** A persisted CV version. Stored separately from the active cv_<id>.json. */
+export interface CvSnapshot {
+  id: string;
+  savedAt: string;
+  label: string;
+  document: CvDocument;
 }
 
 /** One textual section the AI can rewrite in place. */

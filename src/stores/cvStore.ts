@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { JobApplication, ProfileData } from "@/types";
-import type { CvDocument } from "@/types/cv";
+import type { CvDocument, CvSnapshot } from "@/types/cv";
 import type { ApiConfig } from "@/stores/chatStore";
 import {
   deleteFile,
@@ -10,6 +10,14 @@ import {
 } from "@/utils/storage";
 import { normalizeCvDocument } from "@/utils/cvSchema";
 import {
+  MAX_CV_HISTORY,
+  cloneCvDocument,
+  createCvSnapshot,
+  cvHistoryFileName,
+  normalizeCvHistory,
+  serializeCvHistory,
+} from "@/utils/cvHistory";
+import {
   CvGenerationError,
   generateCvDocument,
   type CvGenerationOptions,
@@ -17,6 +25,7 @@ import {
 
 interface CvState {
   documents: Record<string, CvDocument>;
+  history: Record<string, CvSnapshot[]>;
   loaded: Record<string, boolean>;
   loading: Record<string, boolean>;
   saving: Record<string, boolean>;
@@ -31,6 +40,8 @@ interface CvState {
     applicationId: string,
     updater: (document: CvDocument) => CvDocument,
   ) => void;
+  snapshotCurrent: (applicationId: string, label: string) => Promise<void>;
+  restoreSnapshot: (applicationId: string, snapshotId: string) => Promise<void>;
   generateCv: (args: {
     application: JobApplication;
     profile: ProfileData;
@@ -79,6 +90,7 @@ export async function flushCvSaves(): Promise<boolean> {
 
 export const useCvStore = create<CvState>((set, get) => ({
   documents: {},
+  history: {},
   loaded: {},
   loading: {},
   saving: {},
@@ -92,7 +104,10 @@ export const useCvStore = create<CvState>((set, get) => ({
       loading: { ...state.loading, [applicationId]: true },
       errors: { ...state.errors, [applicationId]: null },
     }));
-    const raw = await loadJson<unknown>(fileName(applicationId));
+    const [raw, rawHistory] = await Promise.all([
+      loadJson<unknown>(fileName(applicationId)),
+      loadJson<unknown>(cvHistoryFileName(applicationId)),
+    ]);
     let document: CvDocument | null = null;
     let error: string | null = null;
     if (raw != null) {
@@ -103,10 +118,18 @@ export const useCvStore = create<CvState>((set, get) => ({
         reportDataIssue(fileName(applicationId), error);
       }
     }
+    const history = normalizeCvHistory(rawHistory);
+    if (rawHistory != null && history.length === 0) {
+      reportDataIssue(
+        cvHistoryFileName(applicationId),
+        "The saved CV history was unreadable and was ignored.",
+      );
+    }
     set((state) => ({
       documents: document
         ? { ...state.documents, [applicationId]: document }
         : state.documents,
+      history: { ...state.history, [applicationId]: history },
       loaded: { ...state.loaded, [applicationId]: true },
       loading: { ...state.loading, [applicationId]: false },
       errors: { ...state.errors, [applicationId]: error },
@@ -157,6 +180,46 @@ export const useCvStore = create<CvState>((set, get) => ({
     scheduleSave(applicationId);
   },
 
+  snapshotCurrent: async (applicationId, label) => {
+    const current = get().documents[applicationId];
+    if (!current) return;
+    const snapshot = createCvSnapshot(current, label);
+    const history = [snapshot, ...(get().history[applicationId] ?? [])].slice(
+      0,
+      MAX_CV_HISTORY,
+    );
+    set((state) => ({
+      history: { ...state.history, [applicationId]: history },
+    }));
+    const ok = await saveJson(
+      cvHistoryFileName(applicationId),
+      serializeCvHistory(history),
+    );
+    if (!ok) {
+      set((state) => ({
+        errors: {
+          ...state.errors,
+          [applicationId]: "Could not save the CV version history.",
+        },
+      }));
+    }
+  },
+
+  restoreSnapshot: async (applicationId, snapshotId) => {
+    const target = (get().history[applicationId] ?? []).find(
+      (snapshot) => snapshot.id === snapshotId,
+    );
+    if (!target) return;
+    const restored = cloneCvDocument(target.document);
+    await get().snapshotCurrent(applicationId, "Before restoring a version");
+    set((state) => ({
+      documents: { ...state.documents, [applicationId]: restored },
+      loaded: { ...state.loaded, [applicationId]: true },
+      errors: { ...state.errors, [applicationId]: null },
+    }));
+    await get().saveCv(applicationId);
+  },
+
   generateCv: async ({ application, profile, config, options }) => {
     controllers.get(application.id)?.abort();
     const controller = new AbortController();
@@ -173,6 +236,9 @@ export const useCvStore = create<CvState>((set, get) => ({
         options,
         signal: controller.signal,
       });
+      if (get().documents[application.id]) {
+        await get().snapshotCurrent(application.id, "Before AI regeneration");
+      }
       set((state) => ({
         documents: { ...state.documents, [application.id]: document },
         loaded: { ...state.loaded, [application.id]: true },
@@ -217,11 +283,15 @@ export const useCvStore = create<CvState>((set, get) => ({
       saveTimers.delete(applicationId);
     }
     await deleteFile(fileName(applicationId));
+    await deleteFile(cvHistoryFileName(applicationId));
     set((state) => {
       const documents = { ...state.documents };
       delete documents[applicationId];
+      const history = { ...state.history };
+      delete history[applicationId];
       return {
         documents,
+        history,
         loaded: { ...state.loaded, [applicationId]: false },
       };
     });
@@ -234,6 +304,7 @@ export const useCvStore = create<CvState>((set, get) => ({
     saveTimers.clear();
     set({
       documents: {},
+      history: {},
       loaded: {},
       loading: {},
       saving: {},

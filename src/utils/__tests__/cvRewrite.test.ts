@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import type { JobApplication, ProfileData } from "@/types";
 import type { ApiConfig } from "@/stores/chatStore";
+import type { CvAiUsage } from "@/types/cv";
 
 vi.mock("@/utils/api", () => ({
   sendMessage: vi.fn(),
@@ -229,6 +230,7 @@ describe("rewriteCvSection", () => {
   it("rewrites experience bullets while leaving the role identity to the app", async () => {
     const document = makeDocument();
     const experience = document.experience[0];
+    let capturedUsage: CvAiUsage | undefined;
     sendMessageMock.mockResolvedValue({
       content: JSON.stringify({
         company: "Fake Corp",
@@ -238,6 +240,7 @@ describe("rewriteCvSection", () => {
         ],
       }),
       error: null,
+      usage: { inputTokens: 120, outputTokens: 40 },
     });
 
     const result = await rewriteCvSection({
@@ -247,6 +250,9 @@ describe("rewriteCvSection", () => {
       target: { kind: "experience", id: experience.id },
       instruction: "Focus on impact.",
       config,
+      onUsage: (usage) => {
+        capturedUsage = usage;
+      },
     });
 
     expect(result).toEqual({
@@ -255,6 +261,11 @@ describe("rewriteCvSection", () => {
         "Built accessible React components.",
         "Improved reporting flow.",
       ],
+    });
+    expect(capturedUsage).toMatchObject({
+      kind: "rewrite",
+      inputTokens: 120,
+      outputTokens: 40,
     });
   });
 

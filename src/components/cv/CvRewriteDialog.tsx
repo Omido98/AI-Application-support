@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { diffWords } from "@/utils/diff";
 import type { CvRewriteProposal } from "@/utils/cvRewrite";
+import { formatCvUsage } from "@/utils/cvUsage";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -69,6 +70,11 @@ export default function CvRewriteDialog({
                 +{diff.added} added
               </span>
               <span className="text-destructive">−{diff.removed} removed</span>
+              {proposal.usage && (
+                <span className="ml-auto font-mono">
+                  {formatCvUsage(proposal.usage)}
+                </span>
+              )}
             </div>
             <div className="max-h-[45vh] overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-field/50 p-3 text-xs leading-relaxed">
               {diff.segments.map((segment, index) => (
@@ -109,15 +115,20 @@ export default function CvRewriteDialog({
               </p>
             )}
             <DialogFooter className="gap-2 sm:justify-between">
-              <Button variant="outline" onClick={onClose}>
+              <Button variant="outline" onClick={onClose} disabled={busy}>
                 Discard
               </Button>
               <div className="flex flex-wrap justify-end gap-2">
                 <Button variant="ghost" onClick={onTryAgain} disabled={busy}>
                   <RotateCcw className="size-4" /> Try again
                 </Button>
-                <Button onClick={onAccept}>
-                  <Check className="size-4" /> Accept rewrite
+                <Button onClick={onAccept} disabled={busy}>
+                  {busy ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Check className="size-4" />
+                  )}
+                  Accept rewrite
                 </Button>
               </div>
             </DialogFooter>

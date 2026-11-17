@@ -237,8 +237,8 @@ export async function pruneOrphanChatFiles(
   }
 }
 
-/** Application ids are the only variable part of a `cv_<id>.json` name. */
-const CV_FILE_RE = /^cv_([a-zA-Z0-9-]+)\.json(\.bak)?$/;
+/** Application ids are the only variable part of cv/cv_history file names. */
+const CV_FILE_RE = /^cv_(?:history_)?([a-zA-Z0-9-]+)\.json(\.bak)?$/;
 
 /** Delete CV drafts whose application is no longer in `validIds`. */
 export async function pruneOrphanCvFiles(

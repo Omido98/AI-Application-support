@@ -237,7 +237,7 @@ describe("generateCvDocument", () => {
     sendMessageMock.mockResolvedValue({
       content: JSON.stringify(generated),
       error: null,
-      usage: {},
+      usage: { inputTokens: 1_000, outputTokens: 500 },
     });
 
     const document = await generateCvDocument({
@@ -249,6 +249,12 @@ describe("generateCvDocument", () => {
 
     expect(document.summary).toContain("accessible platforms");
     expect(document.experience[0].company).toBe("Fjordline");
+    expect(document.lastUsage).toMatchObject({
+      kind: "generate",
+      inputTokens: 1_000,
+      outputTokens: 500,
+      model: config.model,
+    });
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
 });

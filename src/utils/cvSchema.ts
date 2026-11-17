@@ -1,6 +1,7 @@
 import type { JobApplication, ProfileData } from "@/types";
 import {
   CV_SECTIONS,
+  type CvAiUsage,
   type CvCertification,
   type CvContact,
   type CvDocument,
@@ -411,6 +412,34 @@ function normalizeArray<T>(
     .slice(0, 40);
 }
 
+function normalizeUsage(value: unknown): CvAiUsage | undefined {
+  const record = asObject(value);
+  if (!record) return undefined;
+  const kind = record.kind === "rewrite" ? "rewrite" : "generate";
+  const inputTokens =
+    typeof record.inputTokens === "number" &&
+    Number.isFinite(record.inputTokens)
+      ? Math.max(0, Math.round(record.inputTokens))
+      : undefined;
+  const outputTokens =
+    typeof record.outputTokens === "number" &&
+    Number.isFinite(record.outputTokens)
+      ? Math.max(0, Math.round(record.outputTokens))
+      : undefined;
+  const costUsd =
+    typeof record.costUsd === "number" && Number.isFinite(record.costUsd)
+      ? Math.max(0, record.costUsd)
+      : undefined;
+  return {
+    kind,
+    at: asString(record.at, new Date().toISOString()),
+    model: asString(record.model),
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(costUsd !== undefined ? { costUsd } : {}),
+  };
+}
+
 /** Defensive normalizer for CV files written by older/newer app versions. */
 export function normalizeCvDocument(value: unknown): CvDocument | null {
   const record = asObject(value);
@@ -418,6 +447,7 @@ export function normalizeCvDocument(value: unknown): CvDocument | null {
   const language: CvLanguage = record.language === "sv" ? "sv" : "en";
   const pageSize: CvPageSize = record.pageSize === "letter" ? "letter" : "a4";
   const now = new Date().toISOString();
+  const lastUsage = normalizeUsage(record.lastUsage);
   return {
     schemaVersion: 1,
     language,
@@ -441,6 +471,7 @@ export function normalizeCvDocument(value: unknown): CvDocument | null {
     languages: normalizeArray(record.languages, normalizeLanguage),
     otherEngagements: normalizeArray(record.otherEngagements, normalizeOther),
     sectionOrder: normalizeSectionOrder(record.sectionOrder),
+    ...(lastUsage ? { lastUsage } : {}),
   };
 }
 

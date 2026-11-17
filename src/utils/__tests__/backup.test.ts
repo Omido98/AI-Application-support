@@ -101,19 +101,22 @@ describe("buildBackupBundle", () => {
     expect(JSON.stringify(bundle)).not.toContain("SECRET-KEY");
   });
 
-  it("includes CV drafts for existing applications", async () => {
+  it("includes CV drafts and history for existing applications", async () => {
     const cv = { schemaVersion: 1, headline: "Engineer" };
+    const history = { schemaVersion: 1, snapshots: [] };
     loadJsonMock.mockImplementation(async (name: string) => {
       if (name === "applications.json") {
         return { applications: [app], selectedApplicationId: app.id };
       }
       if (name === `cv_${app.id}.json`) return cv;
+      if (name === `cv_history_${app.id}.json`) return history;
       return null;
     });
 
     const bundle = await buildBackupBundle();
 
     expect(bundle.files[`cv_${app.id}.json`]).toEqual(cv);
+    expect(bundle.files[`cv_history_${app.id}.json`]).toEqual(history);
   });
 
   it("skips application ids that could escape the data directory", async () => {

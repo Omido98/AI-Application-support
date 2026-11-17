@@ -87,7 +87,7 @@ export async function buildBackupBundle(): Promise<BackupBundle> {
   for (const app of appList) {
     if (!isRecord(app) || typeof app.id !== "string") continue;
     if (!SAFE_APPLICATION_ID_RE.test(app.id)) continue;
-    for (const prefix of ["chat", "cv"]) {
+    for (const prefix of ["chat", "cv", "cv_history"]) {
       const name = `${prefix}_${app.id}.json`;
       const data = await loadJson<unknown>(name);
       if (data != null) files[name] = data;

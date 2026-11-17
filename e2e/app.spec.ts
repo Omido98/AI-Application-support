@@ -277,3 +277,96 @@ test("CV section rewrite dialog opens with guidance", async ({ page }) => {
     page.getByRole("heading", { name: "Rewrite summary and headline" }),
   ).toHaveCount(0);
 });
+
+test("CV history restores a saved version and survives reload", async ({
+  page,
+}) => {
+  const application = makeApplication("cv-history", "History Corp", "applied");
+  const now = "2026-01-01T00:00:00.000Z";
+  const document = {
+    schemaVersion: 1,
+    language: "en",
+    pageSize: "a4",
+    generatedAt: now,
+    updatedAt: now,
+    profileFingerprint: "",
+    applicationUpdatedAt: application.updatedAt,
+    extraContext: "",
+    contact: {
+      fullName: "Jane Doe",
+      email: "jane@example.com",
+      phone: "",
+      location: "",
+      linkedinUrl: "",
+      portfolioUrl: "",
+      githubUrl: "",
+    },
+    headline: "",
+    summary: "Current summary",
+    skills: [],
+    experience: [],
+    education: [],
+    projects: [],
+    certifications: [],
+    languages: [],
+    otherEngagements: [],
+    sectionOrder: [
+      "summary",
+      "skills",
+      "experience",
+      "education",
+      "projects",
+      "certifications",
+      "languages",
+      "other",
+    ],
+  };
+  const history = {
+    schemaVersion: 1,
+    snapshots: [
+      {
+        id: "history-1",
+        savedAt: now,
+        label: "Benchmark version",
+        document: { ...document, summary: "Older summary" },
+      },
+    ],
+  };
+  await seed(page, { applications: [application] });
+  await page.addInitScript(
+    ({ cvKey, historyKey, cv, historyValue }) => {
+      if (localStorage.getItem("e2e-cv-history-seeded")) return;
+      localStorage.setItem(cvKey, JSON.stringify(cv));
+      localStorage.setItem(historyKey, JSON.stringify(historyValue));
+      localStorage.setItem("e2e-cv-history-seeded", "1");
+    },
+    {
+      cvKey: `aas:cv_${application.id}.json`,
+      historyKey: `aas:cv_history_${application.id}.json`,
+      cv: document,
+      historyValue: history,
+    },
+  );
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  const versions = page.getByRole("button", { name: "Versions (1)" });
+  await expect(versions).toBeEnabled();
+  await versions.click();
+  await expect(
+    page.getByRole("heading", { name: "CV versions" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Restore" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Professional summary" }),
+  ).toHaveValue("Older summary");
+
+  await page.reload();
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Professional summary" }),
+  ).toHaveValue("Older summary");
+  await expect(
+    page.getByRole("button", { name: "Versions (2)" }),
+  ).toBeEnabled();
+});

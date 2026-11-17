@@ -1727,6 +1727,18 @@ fn cv_draft_id(file_name: &str) -> Option<&str> {
     Some(id)
 }
 
+/// The application id in a `cv_history_<id>.json` (or `.json.bak`) file.
+fn cv_history_id(file_name: &str) -> Option<&str> {
+    let stem = file_name
+        .strip_suffix(".json.bak")
+        .or_else(|| file_name.strip_suffix(".json"))?;
+    let id = stem.strip_prefix("cv_history_")?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some(id)
+}
+
 /// Delete thread files whose application is no longer in the restored data.
 /// Runs against a directory handed in by the caller, never a webview path.
 /// Returns the names it removed, sorted for a stable result.
@@ -1792,7 +1804,7 @@ fn prune_orphan_cv_files_at(dir: &Path, valid_ids: &[String]) -> Result<Vec<Stri
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
-        let Some(id) = cv_draft_id(&name) else {
+        let Some(id) = cv_draft_id(&name).or_else(|| cv_history_id(&name)) else {
             continue;
         };
         if valid.contains(id) {
@@ -2962,6 +2974,10 @@ mod tests {
             "cv_keep.json",
             "cv_keep.json.bak",
             "cv_keep-2.json",
+            "cv_history_keep.json",
+            "cv_history_keep.json.bak",
+            "cv_history_orphan.json",
+            "cv_history_orphan.json.bak",
             "cv_orphan.json",
             "cv_orphan.json.bak",
             "applications.json",
@@ -2974,9 +2990,19 @@ mod tests {
         let removed =
             prune_orphan_cv_files_at(&dir, &["keep".to_string(), "keep-2".to_string()]).unwrap();
 
-        assert_eq!(removed, vec!["cv_orphan.json", "cv_orphan.json.bak"]);
+        assert_eq!(
+            removed,
+            vec![
+                "cv_history_orphan.json",
+                "cv_history_orphan.json.bak",
+                "cv_orphan.json",
+                "cv_orphan.json.bak",
+            ]
+        );
         assert!(dir.join("cv_keep.json").exists());
         assert!(dir.join("cv_keep.json.bak").exists());
+        assert!(dir.join("cv_history_keep.json").exists());
+        assert!(dir.join("cv_history_keep.json.bak").exists());
         assert!(dir.join("applications.json").exists());
         assert!(dir.join("chat_keep.json").exists());
         assert!(dir.join("cv_not a draft.json").exists());
@@ -2992,6 +3018,10 @@ mod tests {
         assert_eq!(cv_draft_id("cv_.json"), None);
         assert_eq!(cv_draft_id("cv_../x.json"), None);
         assert_eq!(cv_draft_id("cv_a b.json"), None);
+        assert_eq!(cv_history_id("cv_history_abc-1.json"), Some("abc-1"));
+        assert_eq!(cv_history_id("cv_history_abc-1.json.bak"), Some("abc-1"));
+        assert_eq!(cv_history_id("cv_history_.json"), None);
+        assert_eq!(cv_history_id("cv_abc-1.json"), None);
     }
 
     #[test]
