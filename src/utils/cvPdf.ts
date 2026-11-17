@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CvDocument, CvSectionId } from "@/types/cv";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
+import { getCvLayout } from "@/utils/cvLayout";
 import { isTauriRuntime } from "@/utils/runtime";
 
 function safePdfName(document: CvDocument, company: string): string {
@@ -41,19 +42,20 @@ function hasSection(document: CvDocument, section: CvSectionId): boolean {
  */
 export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
   const { jsPDF } = await import("jspdf");
-  const compact = document.template === "compact";
+  const layout = getCvLayout(document.pageSize, document.template);
+  const compact = layout.template === "compact";
   const doc = new jsPDF({
     unit: "pt",
     format: document.pageSize === "a4" ? "a4" : "letter",
   });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = compact ? 54 : 60;
+  const margin = layout.marginPt;
   const maxWidth = pageWidth - margin * 2;
-  const bodySize = compact ? 9 : 9.5;
-  const metaSize = compact ? 8 : 8.5;
-  const headingSize = compact ? 9.5 : 10;
-  const lineHeight = compact ? 12 : 13;
+  const bodySize = layout.bodyPt;
+  const metaSize = layout.metaPt;
+  const headingSize = layout.headingPt;
+  const lineHeight = layout.linePt;
 
   let y = margin;
   const ensureSpace = (needed: number) => {
@@ -94,19 +96,19 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
     }
   };
   const heading = (section: CvSectionId) => {
-    ensureSpace(30);
-    y += compact ? 6 : 8;
+    ensureSpace(headingSize + layout.sectionGapPt + lineHeight);
+    y += layout.sectionGapPt;
     doc.setDrawColor(180);
     doc.setLineWidth(0.5);
     doc.line(margin, y, pageWidth - margin, y);
-    y += headingSize + 3;
+    y += headingSize + layout.headingAfterPt;
     write(
       compact
         ? CV_SECTION_LABELS[document.language][section].toUpperCase()
         : CV_SECTION_LABELS[document.language][section],
       { size: headingSize, font: "bold", color: 40 },
     );
-    y += compact ? 2 : 3;
+    y += layout.headingAfterPt;
   };
   const bullet = (text: string) => {
     const lines = doc.splitTextToSize(text, maxWidth - 12) as string[];
@@ -121,17 +123,18 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
       doc.text(lines[index], margin + 12, y);
       y += lineHeight;
     }
+    y += layout.bulletAfterPt;
   };
 
   write(document.contact.fullName.trim() || "Curriculum Vitae", {
-    size: compact ? 17 : 19,
+    size: layout.namePt,
     font: "bold",
     color: 40,
     align: "center",
   });
   if (document.headline.trim()) {
     write(document.headline.trim(), {
-      size: compact ? 10 : 10.5,
+      size: layout.headlinePt,
       font: "italic",
       color: 40,
       align: "center",
@@ -149,12 +152,12 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
     .filter(Boolean);
   if (contact.length > 0) {
     write(contact.join("  ·  "), {
-      size: compact ? 8 : 8.5,
+      size: layout.contactPt,
       color: 40,
       align: "center",
     });
   }
-  y += compact ? 8 : 10;
+  y += layout.headerAfterPt;
 
   for (const section of document.sectionOrder) {
     if (!hasSection(document, section)) continue;
@@ -171,7 +174,7 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
         const title = [item.role, item.company].filter(Boolean).join(" — ");
         if (title) {
           ensureSpace(lineHeight + 2);
-          write(title, { font: "bold", color: 40 });
+          write(title, { size: headingSize, font: "bold", color: 40 });
         }
         const meta = [item.startDate, item.endDate, item.location]
           .filter(Boolean)
@@ -187,7 +190,7 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
         const title = [item.degree, item.field, item.school]
           .filter(Boolean)
           .join(" — ");
-        if (title) write(title, { font: "bold", color: 40 });
+        if (title) write(title, { size: headingSize, font: "bold", color: 40 });
         const meta = [item.startDate, item.endDate]
           .filter(Boolean)
           .join("  ·  ");
@@ -200,7 +203,11 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
       for (const item of document.projects) {
         if (!item.included) continue;
         if (item.title.trim()) {
-          write(item.title.trim(), { font: "bold", color: 40 });
+          write(item.title.trim(), {
+            size: headingSize,
+            font: "bold",
+            color: 40,
+          });
         }
         if (item.description.trim()) write(item.description.trim());
         if (item.period.trim()) {
@@ -236,7 +243,7 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
         const title = [item.role, item.organization]
           .filter(Boolean)
           .join(" — ");
-        if (title) write(title, { font: "bold", color: 40 });
+        if (title) write(title, { size: headingSize, font: "bold", color: 40 });
         const meta = [item.startDate, item.endDate]
           .filter(Boolean)
           .join("  ·  ");

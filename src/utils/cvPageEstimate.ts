@@ -1,12 +1,11 @@
 import type { CvDocument } from "@/types/cv";
+import { getCvLayout } from "@/utils/cvLayout";
 
 export interface CvPageEstimate {
   pages: number;
   pageHeight: number;
   overflow: boolean;
 }
-
-const PAGE_HEIGHT = { a4: 1123, letter: 1056 } as const;
 
 function textLines(text: string, charsPerLine = 92): number {
   if (!text.trim()) return 0;
@@ -21,30 +20,36 @@ function textLines(text: string, charsPerLine = 92): number {
 
 /**
  * A layout estimate for the editor, where the preview is not mounted. It uses
- * the same section order and conservative line heights as the HTML preview;
- * the preview replaces this with a real scroll-height measurement.
+ * the shared template metrics; the preview replaces this with a real
+ * scroll-height measurement.
  */
 export function estimateCvPages(document: CvDocument): CvPageEstimate {
-  let height = 110; // header and top padding
+  const layout = getCvLayout(document.pageSize, document.template);
+  const line = layout.linePx;
+  const sectionHeader = layout.headingPx * 1.25 + layout.headingAfterPx;
+  let height = layout.marginPx * 2 + layout.namePx * 1.2 + line * 2;
   let renderedSections = 0;
 
   const addSection = (contentHeight: number) => {
     renderedSections += 1;
-    height += 30 + contentHeight + 16;
+    height += layout.sectionGapPx + sectionHeader + contentHeight;
   };
 
   for (const section of document.sectionOrder) {
     if (section === "summary" && document.summary.trim()) {
-      addSection(textLines(document.summary) * 19);
+      addSection(textLines(document.summary) * line);
     } else if (section === "skills" && document.skills.length > 0) {
-      addSection(Math.ceil(document.skills.length / 3) * 18);
+      addSection(Math.ceil(document.skills.length / 3) * line);
     } else if (section === "experience") {
       const items = document.experience.filter((item) => item.included);
       if (items.length > 0) {
         addSection(
           items.reduce(
             (sum, item) =>
-              sum + 42 + item.bullets.length * 19 + (item.location ? 10 : 0),
+              sum +
+              line * 2 +
+              item.bullets.length * line +
+              (item.location ? line * 0.5 : 0),
             0,
           ),
         );
@@ -53,7 +58,10 @@ export function estimateCvPages(document: CvDocument): CvPageEstimate {
       const items = document.education.filter((item) => item.included);
       if (items.length > 0) {
         addSection(
-          items.reduce((sum, item) => sum + 38 + item.details.length * 18, 0),
+          items.reduce(
+            (sum, item) => sum + line * 1.8 + item.details.length * line,
+            0,
+          ),
         );
       }
     } else if (section === "projects") {
@@ -63,34 +71,35 @@ export function estimateCvPages(document: CvDocument): CvPageEstimate {
           items.reduce(
             (sum, item) =>
               sum +
-              34 +
-              textLines(item.description) * 18 +
-              item.bullets.length * 19,
+              line * 1.6 +
+              textLines(item.description) * line +
+              item.bullets.length * line,
             0,
           ),
         );
       }
     } else if (section === "certifications") {
       const items = document.certifications.filter((item) => item.included);
-      if (items.length > 0) addSection(items.length * 18);
+      if (items.length > 0) addSection(items.length * line);
     } else if (section === "languages") {
       const items = document.languages.filter((item) => item.included);
-      if (items.length > 0) addSection(18);
+      if (items.length > 0) addSection(line);
     } else if (section === "other") {
       const items = document.otherEngagements.filter((item) => item.included);
       if (items.length > 0) {
         addSection(
-          items.reduce((sum, item) => sum + 34 + item.bullets.length * 19, 0),
+          items.reduce(
+            (sum, item) => sum + line * 1.6 + item.bullets.length * line,
+            0,
+          ),
         );
       }
     }
   }
 
-  // Extra whitespace between cards is not part of the printed page, but the
-  // estimate should not be optimistic when many tiny sections exist.
-  height += Math.max(0, renderedSections - 1) * 4;
+  height += Math.max(0, renderedSections - 1) * layout.sectionGapPx * 0.35;
 
-  const pageHeight = PAGE_HEIGHT[document.pageSize];
+  const pageHeight = layout.pageHeightPx;
   const pages = Math.max(1, Math.ceil(height / pageHeight));
   return { pages, pageHeight, overflow: pages > 2 };
 }

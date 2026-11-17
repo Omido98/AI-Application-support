@@ -166,16 +166,21 @@ replaced a user-edited draft without an explicit accept step.
 
 ## Phase 10 — Layout parity and page accuracy (v1.19.0)
 
-- One shared layout-metrics source for DOCX, PDF, preview and page estimates:
-  page size, margins, font sizes, line heights and section spacing.
-- Align the current mismatch: DOCX uses 30/36 pt margins, PDF uses 54/60 pt,
-  and preview uses 27/39 pt.
-- Make the page estimate template-aware and use the measured preview count
-  for the overflow warning.
-- Add PDF/DOCX text and page-parity tests, including Swedish characters.
+**Status: implemented in this release.**
 
-**Why:** the two templates and three outputs currently do not paginate
-comparably, so the page-fit feedback can be wrong.
+- One shared layout-metrics source (`cvLayout.ts`) now drives DOCX, PDF,
+  preview and page estimates: page size, margins, fonts, line heights and
+  section spacing.
+- DOCX and PDF both use 36 pt (classic) / 30 pt (compact) margins; the preview
+  uses the same points converted to CSS pixels.
+- Page estimates are template-aware and use the shared line/section metrics.
+- The preview measures its real rendered height, and the overflow warning uses
+  the measured count while in Preview.
+- PDF tests now extract selectable text (including Swedish characters) and
+  verify multi-page output; DOCX text tests cover both templates.
+
+**Why:** the two templates and three outputs previously paginated differently,
+so page-fit feedback could contradict the exported file.
 
 ## Phase 11 — Performance at scale (v1.20.0)
 

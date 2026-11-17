@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { CvDocument, CvSectionId } from "@/types/cv";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
+import { getCvLayout, type CvLayout } from "@/utils/cvLayout";
 import HighlightedText from "@/components/cv/HighlightedText";
 
 function hasSection(document: CvDocument, section: CvSectionId): boolean {
@@ -26,34 +27,38 @@ function hasSection(document: CvDocument, section: CvSectionId): boolean {
 
 function Section({
   title,
-  compact,
+  layout,
   children,
 }: {
   title: string;
-  compact: boolean;
+  layout: CvLayout;
   children: ReactNode;
 }) {
   return (
     <section
-      className={
-        compact ? "mt-4 break-inside-avoid" : "mt-5 break-inside-avoid"
-      }
+      className="break-inside-avoid"
+      style={{ marginTop: `${layout.sectionGapPx}px` }}
     >
       <h3
         className={
-          compact
-            ? "border-b border-neutral-400 pb-1 text-[12px] font-bold uppercase tracking-wide text-neutral-900"
-            : "border-b border-neutral-400 pb-1 text-[13px] font-bold text-neutral-900"
+          layout.template === "compact"
+            ? "border-b border-neutral-400 pb-1 font-bold uppercase tracking-wide text-neutral-900"
+            : "border-b border-neutral-400 pb-1 font-bold text-neutral-900"
         }
+        style={{
+          fontSize: `${layout.headingPx}px`,
+          lineHeight: `${layout.headingPx * 1.25}px`,
+        }}
       >
         {title}
       </h3>
       <div
-        className={
-          compact
-            ? "mt-1.5 space-y-1.5 text-[12px] leading-[1.35] text-neutral-800"
-            : "mt-2 space-y-2 text-[12.5px] leading-[1.45] text-neutral-800"
-        }
+        className="space-y-1.5 text-neutral-800"
+        style={{
+          marginTop: `${layout.headingAfterPx}px`,
+          fontSize: `${layout.bodyPx}px`,
+          lineHeight: `${layout.linePx}px`,
+        }}
       >
         {children}
       </div>
@@ -73,7 +78,8 @@ export default function CvPreview({
 }) {
   const articleRef = useRef<HTMLElement | null>(null);
   const [pages, setPages] = useState(1);
-  const pageHeight = document.pageSize === "a4" ? 1123 : 1056;
+  const layout = getCvLayout(document.pageSize, document.template);
+  const pageHeight = layout.pageHeightPx;
   const contact = [
     document.contact.email,
     document.contact.phone,
@@ -85,7 +91,6 @@ export default function CvPreview({
     .map((value) => value.trim())
     .filter(Boolean);
   const labels = CV_SECTION_LABELS[document.language];
-  const compact = document.template === "compact";
 
   useLayoutEffect(() => {
     const article = articleRef.current;
@@ -102,35 +107,38 @@ export default function CvPreview({
   }, [onPageCount, pageHeight]);
 
   return (
-    <div className="relative mx-auto w-full max-w-[794px]">
+    <div
+      className="relative mx-auto w-full"
+      style={{ maxWidth: `${layout.pageWidthPx}px` }}
+    >
       <article
         ref={articleRef}
         aria-label="CV preview"
-        data-template={document.template ?? "classic"}
-        className={
-          compact
-            ? "w-full bg-white px-5 py-6 text-neutral-900 shadow-sm ring-1 ring-black/10 sm:px-[36px] sm:py-[30px]"
-            : "w-full bg-white px-6 py-8 text-neutral-900 shadow-sm ring-1 ring-black/10 sm:px-[52px] sm:py-[48px]"
-        }
-        style={{ minHeight: `${pageHeight}px` }}
+        data-template={layout.template}
+        className="w-full bg-white text-neutral-900 shadow-sm ring-1 ring-black/10"
+        style={{
+          minHeight: `${layout.pageHeightPx}px`,
+          padding: `${layout.marginPx}px`,
+        }}
       >
         <header className="text-center">
           <h2
-            className={
-              compact
-                ? "text-[26px] font-bold leading-tight tracking-tight"
-                : "text-[28px] font-bold leading-tight tracking-tight"
-            }
+            className="font-bold tracking-tight"
+            style={{
+              fontSize: `${layout.namePx}px`,
+              lineHeight: `${layout.namePx * 1.1}px`,
+            }}
           >
             {document.contact.fullName.trim() || "Curriculum Vitae"}
           </h2>
           {document.headline.trim() && (
             <p
-              className={
-                compact
-                  ? "mt-1 text-[12.5px] italic text-neutral-700"
-                  : "mt-1 text-[13px] italic text-neutral-700"
-              }
+              className="italic text-neutral-700"
+              style={{
+                marginTop: `${layout.headerAfterPx / 3}px`,
+                fontSize: `${layout.headlinePx}px`,
+                lineHeight: `${layout.headlinePx * 1.35}px`,
+              }}
             >
               <HighlightedText
                 text={document.headline.trim()}
@@ -140,11 +148,12 @@ export default function CvPreview({
           )}
           {contact.length > 0 && (
             <p
-              className={
-                compact
-                  ? "mt-1.5 text-[10.5px] text-neutral-600"
-                  : "mt-2 text-[11px] text-neutral-600"
-              }
+              className="text-neutral-600"
+              style={{
+                marginTop: `${layout.headerAfterPx / 3}px`,
+                fontSize: `${layout.contactPx}px`,
+                lineHeight: `${layout.contactPx * 1.35}px`,
+              }}
             >
               {contact.join("  ·  ")}
             </p>
@@ -155,7 +164,7 @@ export default function CvPreview({
           if (!hasSection(document, section)) return null;
           if (section === "summary") {
             return (
-              <Section key={section} title={labels[section]} compact={compact}>
+              <Section key={section} title={labels[section]} layout={layout}>
                 <p className="whitespace-pre-line">
                   <HighlightedText
                     text={document.summary.trim()}
@@ -167,7 +176,7 @@ export default function CvPreview({
           }
           if (section === "skills") {
             return (
-              <Section key={section} title={labels[section]} compact={compact}>
+              <Section key={section} title={labels[section]} layout={layout}>
                 <p>
                   <HighlightedText
                     text={document.skills.join("  ·  ")}
@@ -179,7 +188,7 @@ export default function CvPreview({
           }
           if (section === "experience") {
             return (
-              <Section key={section} title={labels[section]} compact={compact}>
+              <Section key={section} title={labels[section]} layout={layout}>
                 {document.experience
                   .filter((item) => item.included)
                   .map((item) => (
@@ -192,7 +201,13 @@ export default function CvPreview({
                           terms={highlightTerms}
                         />
                       </p>
-                      <p className="text-[11px] italic text-neutral-600">
+                      <p
+                        className="italic text-neutral-600"
+                        style={{
+                          fontSize: `${layout.metaPx}px`,
+                          lineHeight: `${layout.metaPx * 1.3}px`,
+                        }}
+                      >
                         {[item.startDate, item.endDate, item.location]
                           .filter(Boolean)
                           .join("  ·  ")}
@@ -214,7 +229,7 @@ export default function CvPreview({
           }
           if (section === "education") {
             return (
-              <Section key={section} title={labels[section]} compact={compact}>
+              <Section key={section} title={labels[section]} layout={layout}>
                 {document.education
                   .filter((item) => item.included)
                   .map((item) => (
@@ -227,7 +242,13 @@ export default function CvPreview({
                           terms={highlightTerms}
                         />
                       </p>
-                      <p className="text-[11px] italic text-neutral-600">
+                      <p
+                        className="italic text-neutral-600"
+                        style={{
+                          fontSize: `${layout.metaPx}px`,
+                          lineHeight: `${layout.metaPx * 1.3}px`,
+                        }}
+                      >
                         {[item.startDate, item.endDate]
                           .filter(Boolean)
                           .join("  ·  ")}
@@ -249,7 +270,7 @@ export default function CvPreview({
           }
           if (section === "projects") {
             return (
-              <Section key={section} title={labels[section]} compact={compact}>
+              <Section key={section} title={labels[section]} layout={layout}>
                 {document.projects
                   .filter((item) => item.included)
                   .map((item) => (
@@ -271,7 +292,13 @@ export default function CvPreview({
                         </p>
                       )}
                       {item.period.trim() && (
-                        <p className="text-[11px] italic text-neutral-600">
+                        <p
+                          className="italic text-neutral-600"
+                          style={{
+                            fontSize: `${layout.metaPx}px`,
+                            lineHeight: `${layout.metaPx * 1.3}px`,
+                          }}
+                        >
                           {item.period.trim()}
                         </p>
                       )}
@@ -292,7 +319,7 @@ export default function CvPreview({
           }
           if (section === "certifications") {
             return (
-              <Section key={section} title={labels[section]} compact={compact}>
+              <Section key={section} title={labels[section]} layout={layout}>
                 {document.certifications
                   .filter((item) => item.included)
                   .map((item) => (
@@ -310,7 +337,7 @@ export default function CvPreview({
           }
           if (section === "languages") {
             return (
-              <Section key={section} title={labels[section]} compact={compact}>
+              <Section key={section} title={labels[section]} layout={layout}>
                 <p>
                   <HighlightedText
                     text={document.languages
@@ -326,7 +353,7 @@ export default function CvPreview({
             );
           }
           return (
-            <Section key={section} title={labels[section]} compact={compact}>
+            <Section key={section} title={labels[section]} layout={layout}>
               {document.otherEngagements
                 .filter((item) => item.included)
                 .map((item) => (
@@ -339,7 +366,13 @@ export default function CvPreview({
                         terms={highlightTerms}
                       />
                     </p>
-                    <p className="text-[11px] italic text-neutral-600">
+                    <p
+                      className="italic text-neutral-600"
+                      style={{
+                        fontSize: `${layout.metaPx}px`,
+                        lineHeight: `${layout.metaPx * 1.3}px`,
+                      }}
+                    >
                       {[item.startDate, item.endDate]
                         .filter(Boolean)
                         .join("  ·  ")}

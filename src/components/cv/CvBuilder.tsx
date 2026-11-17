@@ -419,6 +419,8 @@ export default function CvBuilder({
     view === "preview" && previewPages
       ? previewPages
       : (pageEstimate?.pages ?? 1);
+  const pageOverflow =
+    view === "preview" ? visiblePages > 2 : Boolean(pageEstimate?.overflow);
 
   const atsMissingTerms = ats
     ? [...new Set([...ats.missingKeywords, ...ats.missingPhrases])]
@@ -1880,7 +1882,7 @@ export default function CvBuilder({
           </Button>
         </div>
       )}
-      {pageEstimate?.overflow && (
+      {pageOverflow && (
         <div
           role="status"
           className="flex items-start gap-2 rounded-md border border-amber-600/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300"

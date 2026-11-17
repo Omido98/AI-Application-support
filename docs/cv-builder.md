@@ -133,8 +133,10 @@ may be mixed and offers **Mark body as translated** once you have edited it.
 Versions and writes the new body in the selected language.
 
 The editor shows an estimated page count, and warns above two pages. The
-preview measures its rendered height and draws page-break markers. Both are
-layout estimates: Word pagination can differ slightly because of fonts and
+preview measures its rendered height and draws page-break markers. DOCX, PDF
+and preview share one layout-metrics source, so margins, line heights and
+section spacing follow the selected template. Pagination can still differ
+slightly between Word/PDF and the browser preview because of font metrics and
 printer settings, so always check the exported file.
 
 Sections can be collapsed and the **Jump to section** panel scrolls to a
