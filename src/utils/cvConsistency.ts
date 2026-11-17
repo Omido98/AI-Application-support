@@ -49,6 +49,19 @@ const STOPWORDS = new Set(
     "with",
     "would",
     "your",
+    "writing",
+    "apply",
+    "application",
+    "position",
+    "company",
+    "team",
+    "would",
+    "like",
+    "excited",
+    "opportunity",
+    "dear",
+    "sincerely",
+    "regards",
   ].map((word) => word.toLowerCase()),
 );
 
@@ -80,32 +93,44 @@ export function analyzeCoverLetterConsistency(
   const summary = profile.coverLetterSummary.trim();
   const checks: CvConsistencyCheck[] = [];
 
-  if (summary) {
-    const summaryTerms = [...new Set(words(summary))].slice(0, 12);
+  const relevant = letters.filter(
+    (letter) =>
+      letter.applicationId === application.id ||
+      (letter.company?.trim() &&
+        normalize(letter.company) === normalize(application.companyName)),
+  );
+  const themeSource = [summary, ...relevant.map((letter) => letter.content)]
+    .filter((value) => value.trim())
+    .join("\n");
+
+  if (themeSource) {
+    const applicationWords = new Set(
+      words(`${application.companyName} ${application.jobTitle}`),
+    );
+    const summaryTerms = [...new Set(words(themeSource))]
+      .filter((term) => !applicationWords.has(term))
+      .slice(0, 12);
     const cvWords = new Set(words(cvPlainText(document)));
     const missing = summaryTerms.filter((term) => !cvWords.has(term));
     checks.push({
       id: "cover-summary",
-      label: "Cover-letter summary",
+      label: "Cover-letter themes",
       ok: missing.length === 0,
       detail:
         missing.length === 0
-          ? "The CV mentions the main themes from your cover-letter summary."
+          ? "The CV mentions the main themes from your cover-letter summary and saved letters."
           : `Not mentioned in the CV: ${missing.slice(0, 6).join(", ")}. Add them only if they are true.`,
     });
   } else if (letters.length > 0) {
     checks.push({
       id: "cover-summary",
-      label: "Cover-letter summary",
+      label: "Cover-letter themes",
       ok: true,
       detail:
         "You have cover letters but no summary yet. Add a summary in Profile to compare the main themes.",
     });
   }
 
-  const relevant = letters.filter(
-    (letter) => letter.applicationId === application.id,
-  );
   const companyMismatches: string[] = [];
   for (const letter of relevant) {
     const company = letter.company?.trim();

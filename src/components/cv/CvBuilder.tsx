@@ -54,6 +54,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
 import { flushPendingEdits } from "@/utils/pendingEdits";
 import { clearAiSection } from "@/utils/cvProvenance";
+import { buildChatContextBlock, mergeChatContext } from "@/utils/cvChatContext";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import { exportCvPdf } from "@/utils/cvPdf";
@@ -408,6 +409,9 @@ export default function CvBuilder({
   const atsMatchedTerms = ats
     ? [...new Set([...ats.matchedKeywords, ...ats.matchedPhrases])]
     : [];
+  const atsMatchDetails = new Map(
+    (ats?.matches ?? []).map((match) => [match.term, match]),
+  );
   const mustHaveGaps =
     ats?.requirements.filter(
       (requirement) =>
@@ -600,32 +604,18 @@ export default function CvBuilder({
     setChatContextBusy(true);
     try {
       const messages = await loadChatMessagesFor(application.id);
-      const recent = messages
-        .filter((message) => message.content.trim())
-        .slice(-8)
-        .map(
-          (message) =>
-            `${message.role === "user" ? "Candidate" : "Assistant"}: ${message.content
-              .replace(/\s+/g, " ")
-              .trim()
-              .slice(0, 500)}`,
-        );
-      if (recent.length === 0) {
+      const block = buildChatContextBlock(messages);
+      const recentCount = block ? block.split("\n").length - 1 : 0;
+      if (!block) {
         setExportStatus("No chat messages to add for this application.");
         return;
       }
-      const block = [
-        "Recent chat context (selected manually):",
-        ...recent,
-      ].join("\n");
       updateCv(application.id, (current) => ({
         ...current,
-        extraContext: [current.extraContext.trim(), block]
-          .filter(Boolean)
-          .join("\n\n"),
+        extraContext: mergeChatContext(current.extraContext, block),
       }));
       setExportStatus(
-        `Added ${recent.length} recent chat message${recent.length === 1 ? "" : "s"} to the extra context.`,
+        `Added ${recentCount} recent chat message${recentCount === 1 ? "" : "s"} to the extra context.`,
       );
     } finally {
       setChatContextBusy(false);
@@ -2197,15 +2187,27 @@ export default function CvBuilder({
                       <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
                         Matched ({atsMatchedTerms.length})
                       </p>
+                      <p className="mt-1 text-[10px] text-text-muted">
+                        Chips show the wording found in the CV; hover for the
+                        match type.
+                      </p>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {atsMatchedTerms.slice(0, 12).map((keyword) => (
-                          <span
-                            key={keyword}
-                            className="rounded border border-green-700/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-800 dark:text-green-300"
-                          >
-                            {keyword}
-                          </span>
-                        ))}
+                        {atsMatchedTerms.slice(0, 12).map((keyword) => {
+                          const detail = atsMatchDetails.get(keyword);
+                          return (
+                            <span
+                              key={keyword}
+                              title={`${detail?.type ?? "exact"} match for ${keyword}`}
+                              aria-label={`${keyword} (${detail?.type ?? "exact"} match)`}
+                              className="rounded border border-green-700/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-800 dark:text-green-300"
+                            >
+                              {detail?.matched ?? keyword}
+                              {detail?.type === "synonym" && (
+                                <span className="ml-0.5 opacity-70">≈</span>
+                              )}
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
                     {ats.highlightTerms.length > 0 && (

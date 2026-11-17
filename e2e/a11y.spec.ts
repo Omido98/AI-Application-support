@@ -40,6 +40,30 @@ test.describe("WCAG 2.2 AA", () => {
 
     await scan(page, testInfo, { label: "cv-sub-view" });
 
+    await page.evaluate(async () => {
+      const { useProfileStore } = await import("/src/stores/profileStore.ts");
+      useProfileStore
+        .getState()
+        .setCoverLetterSummary("Accessible design systems and mentoring");
+    });
+    await expect(
+      page.getByRole("heading", { name: "Cover-letter consistency" }),
+    ).toBeVisible();
+    await scan(page, testInfo, { label: "cv-consistency-panel" });
+
+    await page.evaluate(async (applicationId) => {
+      const { useCvStore } = await import("/src/stores/cvStore.ts");
+      await useCvStore
+        .getState()
+        .snapshotCurrent(applicationId, "Acceptance snapshot");
+    }, application.id);
+    await page.getByRole("button", { name: "Versions (1)" }).click();
+    await expect(
+      page.getByRole("heading", { name: "CV versions" }),
+    ).toBeVisible();
+    await scan(page, testInfo, { label: "cv-history-dialog" });
+    await page.getByRole("button", { name: "Close" }).first().click();
+
     await page
       .getByRole("textbox", { name: "Skills, one per line" })
       .fill("Kubernetes");

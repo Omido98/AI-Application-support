@@ -203,27 +203,40 @@ analysis path still repeated expensive profile scans and numbers.
 
 ## Phase 12 — ATS and consistency quality (v1.21.0)
 
-- Harden requirement parsing for multiple requirements per sentence,
-  semicolons, negations and explicit must/preferred language.
-- Reduce generic keyword/highlight noise and label exact vs phrase vs synonym
-  matches.
-- Improve cover-letter consistency using actual letter content and linked
-  applications, not only the summary and company.
-- Replace or deduplicate the appended chat-context block.
+**Status: implemented in this release.**
 
-**Why:** the ATS and consistency layers are useful but still heuristic; the
-next step is precision and explainability.
+- Requirement segmentation now handles semicolons, sentence boundaries,
+  multiple requirements, and explicitly negated lines.
+- Generic role words are excluded from keyword/highlight noise.
+- Match details distinguish **exact**, **phrase** and **synonym** matches; the
+  ATS panel shows the wording found in the CV and labels synonym matches.
+- Cover-letter consistency now compares actual linked letter content, not only
+  the summary, and treats company-matched letters as relevant.
+- The appended chat-context block replaces the previous one instead of
+  accumulating duplicates.
 
-## Phase 13 — Release hardening and acceptance (v1.22.0)
+**Why:** the ATS and consistency layers were useful but still too noisy and
+heuristic; this pass makes the evidence easier to interpret.
 
-- Native e2e for PDF save, template switching, history restore and language
-  flow.
-- Axe scans for history, consistency, template and PDF-highlight states.
-- Live-provider acceptance pass before any merge.
-- Clean up superseded PRs/drafts and publish only after the P0 fixes.
+## Phase 13 — Release hardening and acceptance (v1.21.0)
 
-**Why:** the current green suite does not cover the data-safety and layout
-paths that matter most before release.
+**Status: implemented for automation; live-provider acceptance remains a manual
+release gate.**
+
+- Native smoke coverage now includes the CV template selector and the
+  headings-only language flow.
+- Axe now scans the CV history dialog and cover-letter consistency panel.
+- Browser coverage includes PDF text/page output, compact template, chat-context
+  deduplication and the latest buffered edit.
+- PDF save uses a native OS dialog and is not automatable through
+  tauri-driver; it remains covered by the browser export path, PDF renderer
+  tests and the manual acceptance checklist.
+- Superseded PRs are closed; old draft releases must not be published.
+- Live-provider acceptance is documented in
+  `docs/live-provider-acceptance.md` and must be performed before merge.
+
+**Why:** automated tests cover the code paths, but only a real provider run can
+validate model output quality.
 
 ## Cross-cutting rules
 

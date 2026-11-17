@@ -87,11 +87,13 @@ an automatic export.
 The ATS panel uses deterministic phrase, keyword and curated-synonym matching
 against the job title, description and requirements. It shows matched and
 missing terms, groups requirements with **Must-have** or **Preferred** badges,
-counts must-have gaps, and highlights matched terms in the preview. It never
-inserts a term: add a missing term only if it is true for you. The checklist
-also covers contact details, summary length, experience bullets, skills, dates
-and document length. ATS and grounding share one analysis pass, so editing does
-not run the same profile/number scan twice.
+counts must-have gaps, and highlights matched terms in the preview. Matched
+chips show the wording found in the CV; hover or use a screen reader to hear
+whether the match was exact, a phrase or a synonym. The panel never inserts a
+term: add a missing term only if it is true for you. The checklist also covers
+contact details, summary length, experience bullets, skills, dates and document
+length. ATS and grounding share one analysis pass, so editing does not run the
+same profile/number scan twice.
 
 The **Grounding review** panel is a separate deterministic audit. It flags:
 

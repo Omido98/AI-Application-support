@@ -17,12 +17,20 @@ export interface CvAtsRequirement {
   missingTerms: string[];
 }
 
+export interface CvAtsMatch {
+  term: string;
+  matched: string;
+  type: "exact" | "phrase" | "synonym";
+}
+
 export interface CvAtsReport {
   matchedKeywords: string[];
   missingKeywords: string[];
   matchedPhrases: string[];
   missingPhrases: string[];
   requirements: CvAtsRequirement[];
+  /** Canonical term + actual CV spelling + how it matched. */
+  matches: CvAtsMatch[];
   /** Matched spellings to highlight in the preview. */
   highlightTerms: string[];
   keywordCoverage: number;
@@ -61,6 +69,25 @@ const SYNONYM_GROUPS: string[][] = [
   ["Design systems", "Design system"],
   ["Testing", "Test", "Tests"],
 ];
+
+const GENERIC_TERMS = new Set(
+  [
+    "candidate",
+    "consultant",
+    "developer",
+    "engineer",
+    "engineering",
+    "job",
+    "manager",
+    "position",
+    "senior",
+    "junior",
+    "principal",
+    "staff",
+    "specialist",
+    "role",
+  ].map((word) => word.toLowerCase()),
+);
 
 const STOPWORDS = new Set(
   [
@@ -307,6 +334,7 @@ export function extractJobKeywords(jobText: string, limit = 30): string[] {
     if (token.length < 3 || /^\d+$/.test(token) || STOPWORDS.has(token)) {
       continue;
     }
+    if (GENERIC_TERMS.has(token)) continue;
     counts.set(token, (counts.get(token) ?? 0) + 1);
   }
   return [...counts.entries()]
@@ -327,7 +355,12 @@ function normalizeForMatch(value: string): string {
 }
 
 function isMeaningfulToken(token: string): boolean {
-  return token.length >= 3 && !/^\d+$/.test(token) && !STOPWORDS.has(token);
+  return (
+    token.length >= 3 &&
+    !/^\d+$/.test(token) &&
+    !STOPWORDS.has(token) &&
+    !GENERIC_TERMS.has(token)
+  );
 }
 
 function containsTerm(haystack: string, term: string): boolean {
@@ -382,25 +415,30 @@ export function extractJobPhrases(jobText: string, limit = 12): string[] {
     .map(([phrase]) => phrase);
 }
 
+function isNegatedRequirement(line: string): boolean {
+  const lower = line.toLowerCase();
+  return (
+    /^(?:no need|not required|no experience|without|does not require|doesn't require)\b/.test(
+      lower,
+    ) || /\b(?:is|are) not required\b/.test(lower)
+  );
+}
+
 function requirementLines(requirements: string): string[] {
-  const lines = requirements
+  return requirements
     .split(/\r?\n/)
     .map((line) => line.replace(/^\s*[-*•\d.)]+\s*/, "").trim())
-    .filter((line) => line.length >= 3);
-  if (lines.length > 1) return lines.slice(0, 10);
-  const prose = requirements.trim();
-  if (!prose) return [];
-  return prose
-    .split(/(?<=[.;])\s+/)
+    .filter((line) => line.length >= 3)
+    .flatMap((line) => line.split(/(?<=[;])\s+|(?<=[.!?])\s+(?=[A-Z])/u))
     .map((part) => part.trim())
-    .filter((part) => part.length >= 3)
-    .slice(0, 10);
+    .filter((part) => part.length >= 3 && !isNegatedRequirement(part))
+    .slice(0, 12);
 }
 
 function requirementPriority(line: string): "must" | "preferred" {
   const lower = line.toLowerCase();
   if (
-    /(nice to have|preferred|bonus|advantage|desirable|good to have|a plus)/.test(
+    /(nice to have|preferred|bonus|advantage|desirable|good to have|a plus|\bplus\b)/.test(
       lower,
     )
   ) {
@@ -540,6 +578,28 @@ export interface CvAtsContext {
   phrases?: string[];
 }
 
+function matchType(
+  term: string,
+  spelling: string,
+  phrase = false,
+): CvAtsMatch["type"] {
+  if (phrase) return "phrase";
+  return normalizeForMatch(term) === normalizeForMatch(spelling)
+    ? "exact"
+    : "synonym";
+}
+
+function isNoisyHighlight(term: string): boolean {
+  const parts = normalizeForMatch(term).split(" ").filter(Boolean);
+  return (
+    parts.length === 0 ||
+    parts.every(
+      (part) =>
+        part.length < 3 || GENERIC_TERMS.has(part) || STOPWORDS.has(part),
+    )
+  );
+}
+
 export function analyzeCvAts(
   document: CvDocument,
   application: JobApplication,
@@ -556,6 +616,7 @@ export function analyzeCvAts(
   const phrases = context?.phrases ?? extractJobPhrases(jobText);
   const cvText = normalizeForMatch(cvPlainText(document));
   const highlight = new Set<string>();
+  const matches: CvAtsMatch[] = [];
 
   const matchedKeywords: string[] = [];
   const missingKeywords: string[] = [];
@@ -564,6 +625,11 @@ export function analyzeCvAts(
     if (spelling) {
       matchedKeywords.push(keyword);
       highlight.add(spelling);
+      matches.push({
+        term: keyword,
+        matched: spelling,
+        type: matchType(keyword, spelling),
+      });
     } else {
       missingKeywords.push(keyword);
     }
@@ -576,11 +642,19 @@ export function analyzeCvAts(
     if (spelling) {
       matchedPhrases.push(phrase);
       highlight.add(spelling);
+      matches.push({
+        term: phrase,
+        matched: spelling,
+        type: "phrase",
+      });
     } else {
       missingPhrases.push(phrase);
     }
   }
 
+  const requirementMatches = new Set(
+    matches.map((match) => normalizeForMatch(match.term)),
+  );
   const requirements: CvAtsRequirement[] = requirementLines(
     application.requirements,
   )
@@ -593,6 +667,14 @@ export function analyzeCvAts(
         if (spelling) {
           matchedTerms.push(term);
           highlight.add(spelling);
+          if (!requirementMatches.has(normalizeForMatch(term))) {
+            requirementMatches.add(normalizeForMatch(term));
+            matches.push({
+              term,
+              matched: spelling,
+              type: matchType(term, spelling, term.includes(" ")),
+            });
+          }
         } else {
           missingTerms.push(term);
         }
@@ -613,7 +695,7 @@ export function analyzeCvAts(
   const allTerms = [...new Set([...resolvedKeywords, ...phrases])];
   const matchedCount = matchedKeywords.length + matchedPhrases.length;
   const highlightTerms = [...highlight]
-    .filter((term) => term.length >= 2)
+    .filter((term) => term.length >= 2 && !isNoisyHighlight(term))
     .sort((a, b) => b.length - a.length)
     .slice(0, 40);
 
@@ -683,6 +765,7 @@ export function analyzeCvAts(
     matchedPhrases,
     missingPhrases,
     requirements,
+    matches,
     highlightTerms,
     keywordCoverage: allTerms.length === 0 ? 0 : matchedCount / allTerms.length,
     wordCount,

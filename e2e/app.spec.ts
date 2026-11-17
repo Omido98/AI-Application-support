@@ -286,10 +286,16 @@ test("CV can explicitly add recent chat details to its context", async ({
   await page.getByRole("button", { name: "Tailored CV" }).click();
   await page.getByRole("button", { name: "Start from profile" }).click();
   await page.getByRole("button", { name: "Add recent chat details" }).click();
+  await page.getByRole("button", { name: "Add recent chat details" }).click();
 
-  await expect(
-    page.getByRole("textbox", { name: "Extra context" }),
-  ).toHaveValue(/Recent chat context \(selected manually\):/);
+  const context = page.getByRole("textbox", { name: "Extra context" });
+  await expect(context).toHaveValue(
+    /Recent chat context \(selected manually\):/,
+  );
+  const value = await context.inputValue();
+  expect(
+    value.match(/Recent chat context \(selected manually\):/g),
+  ).toHaveLength(1);
 });
 
 test("CV export includes the latest buffered edit", async ({ page }) => {

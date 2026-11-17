@@ -120,4 +120,50 @@ describe("analyzeCoverLetterConsistency", () => {
     expect(report.hasContext).toBe(false);
     expect(report.checks).toEqual([]);
   });
+
+  it("uses actual linked letter content when there is no summary", () => {
+    const data = profile({
+      coverLetters: [
+        {
+          id: "cl-1",
+          content:
+            "I build accessible design systems and mentoring programmes.",
+          addedAt: "2026-01-01T00:00:00.000Z",
+          applicationId: application.id,
+          company: "Acme",
+        },
+      ],
+    });
+    const report = analyzeCoverLetterConsistency(
+      document("Built accessible design systems."),
+      data,
+      application,
+    );
+
+    const themes = report.checks.find((check) => check.id === "cover-summary");
+    expect(themes?.ok).toBe(false);
+    expect(themes?.detail).toContain("mentoring");
+  });
+
+  it("treats a company-matched letter as relevant without an application id", () => {
+    const data = profile({
+      coverLetters: [
+        {
+          id: "cl-1",
+          content: "I build accessible design systems.",
+          addedAt: "2026-01-01T00:00:00.000Z",
+          company: "acme",
+        },
+      ],
+    });
+    const report = analyzeCoverLetterConsistency(
+      document("Built accessible design systems."),
+      data,
+      application,
+    );
+
+    expect(
+      report.checks.find((check) => check.id === "cover-company")?.ok,
+    ).toBe(true);
+  });
 });

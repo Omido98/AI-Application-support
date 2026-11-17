@@ -290,6 +290,65 @@ test("tab shortcuts and settings persist", { timeout: 90_000 }, async () => {
 });
 
 test(
+  "CV template and language controls work in the native window",
+  { timeout: 120_000 },
+  async () => {
+    await pressShortcut(
+      "2",
+      tabIsSelected("Application"),
+      "Ctrl+2 did not open Application",
+    );
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Tailored CV')]",
+    );
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Start from profile')]",
+    );
+    await driver.waitFor(
+      "return !!document.querySelector('#cv-template-edit');",
+      { message: "CV editor did not open" },
+    );
+
+    await driver.clickXPath("//*[@id='cv-template-edit']");
+    await driver.waitFor(
+      "return !!document.querySelector('[role=\"option\"]');",
+      { message: "template options did not open" },
+    );
+    await driver.clickXPath(
+      "//*[@role='option' and contains(normalize-space(.), 'Compact')]",
+    );
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Preview')]",
+    );
+    await driver.waitFor(
+      "return document.querySelector('[aria-label=\"CV preview\"]')?.getAttribute('data-template') === 'compact';",
+      { message: "compact template did not reach the preview" },
+    );
+    await driver.clickXPath("//button[normalize-space(.)='Edit']");
+
+    await driver.clickXPath("//*[@id='cv-language-edit']");
+    await driver.waitFor(
+      "return !!document.querySelector('[role=\"option\"]');",
+      { message: "language options did not open" },
+    );
+    await driver.clickXPath(
+      "//*[@role='option' and contains(normalize-space(.), 'Svenska')]",
+    );
+    await driver.waitFor(
+      "return document.querySelector('[role=\"dialog\"]')?.textContent.includes('Change CV language to Swedish?');",
+      { message: "language review dialog did not open" },
+    );
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Change headings only')]",
+    );
+    await driver.waitFor(
+      "return document.body.textContent.includes('Headings are Swedish');",
+      { message: "mixed-language warning did not appear" },
+    );
+  },
+);
+
+test(
   "a second launch focuses the running instance instead of starting another",
   { timeout: 60_000 },
   async () => {

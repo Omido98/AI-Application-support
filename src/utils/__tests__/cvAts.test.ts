@@ -178,9 +178,44 @@ describe("analyzeCvAts", () => {
     expect(report.requirements[1].priority).toBe("preferred");
     expect(report.requirements[1].missingTerms).toContain("aws");
     expect(report.requirements[1].missingTerms).not.toContain("nice");
+    expect(report.matches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          term: "javascript",
+          matched: "JS",
+          type: "synonym",
+        }),
+        expect.objectContaining({
+          term: "design systems",
+          type: "phrase",
+        }),
+      ]),
+    );
     expect(report.highlightTerms).toEqual(
       expect.arrayContaining(["Design systems"]),
     );
     expect(report.keywordCoverage).toBeGreaterThan(0);
+  });
+
+  it("splits semicolon requirements, skips negated lines and filters generic role words", () => {
+    const job = {
+      ...application,
+      requirements:
+        "Must have TypeScript; nice to have AWS. No need for Kubernetes.",
+    };
+    const report = analyzeCvAts(document(), job, profile);
+
+    expect(report.requirements).toHaveLength(2);
+    expect(report.requirements[0].priority).toBe("must");
+    expect(report.requirements[1].priority).toBe("preferred");
+    expect(
+      report.requirements.some((requirement) =>
+        requirement.label.toLowerCase().includes("kubernetes"),
+      ),
+    ).toBe(false);
+    expect(
+      extractJobKeywords("Platform Engineer with TypeScript"),
+    ).not.toContain("engineer");
+    expect(report.highlightTerms).not.toContain("engineer");
   });
 });
