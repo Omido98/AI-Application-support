@@ -42,13 +42,14 @@ no AI call.
    - education, projects, certifications, languages and other experience;
    - section order and entry order.
 6. Switch to **Preview** for a formatted page view that matches the Word
-   layout, then back to **Edit**.
+   layout, including measured page-break markers, then back to **Edit**.
 7. Use **AI rewrite** on the summary, a role, a project or other experience to
-   rewrite only that section. Add optional guidance such as “make it shorter”
-   or “lead with the accessibility work”; the rest of the CV stays untouched.
-   The model's result is not applied automatically: review the before/after
-   diff, any numbers that could not be grounded in the profile, then
-   **Accept**, **Discard** or **Try again**.
+   rewrite only that section. Pick a preset such as **Shorter**, **More
+   senior**, **More technical**, **Stronger verbs** or **Match requirements**,
+   or add your own guidance. The rest of the CV stays untouched. The model's
+   result is not applied automatically: review the before/after diff, any
+   numbers that could not be grounded in the profile, then **Accept**,
+   **Discard** or **Try again**.
 8. **Export Word** saves a `.docx` through the native save dialog.
 
 Edits autosave to `cv_<applicationId>.json` in the app data folder. Long text
@@ -98,6 +99,23 @@ export. Review the flags, then correct the CV, add a true profile detail or
 dismiss the wording as supported. Generation uses a compact set of ATS
 priorities from the job description and requirements, and asks the model to
 prefer the two or three most relevant roles rather than including everything.
+
+## Language and page fit
+
+Changing the CV language opens an explicit choice. **Change headings only**
+keeps the body text in the old language; the editor then warns that the export
+may be mixed and offers **Mark body as translated** once you have edited it.
+**Regenerate in the new language** makes a new AI request, keeps the old CV in
+Versions and writes the new body in the selected language.
+
+The editor shows an estimated page count, and warns above two pages. The
+preview measures its rendered height and draws page-break markers. Both are
+layout estimates: Word pagination can differ slightly because of fonts and
+printer settings, so always check the exported file.
+
+Sections can be collapsed and the **Jump to section** panel scrolls to a
+section without leaving the editor. AI-assisted sections carry a small marker
+so you can see which content was generated or rewritten.
 
 ## Word and ATS format
 

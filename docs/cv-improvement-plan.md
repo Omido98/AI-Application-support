@@ -72,15 +72,19 @@ analysis targets that hot path directly.
 
 ## Phase 5 — Language, page fit and editor UX (v1.14.0)
 
-- Explicit language-change flow: headings only vs regenerate content in the
-  new language; warn about mixed-language exports.
-- Page-count estimate or page-break markers in preview, with an overflow
-  warning when the CV likely exceeds two pages.
-- Collapsible entries, sticky section navigation and clearer AI action
-  placement.
-- Rewrite presets: shorter, more senior, more technical, stronger verbs,
-  requirement-focused (truthfully).
-- Show an “AI-assisted” marker per rewritten section.
+**Status: implemented in this release.**
+
+- Explicit language-change dialog: **Change headings only** vs **Regenerate in
+  the new language**, with a persistent mixed-language warning and a
+  “Mark body as translated” action.
+- Page-count estimate in the editor, overflow guidance above two pages, and
+  measured page-break markers in the preview.
+- Section navigation and collapsible section cards for long CVs.
+- Rewrite presets: shorter, more senior, more technical, stronger verbs and
+  requirement-focused.
+- AI-assisted markers on sections written or rewritten by AI.
+- Collapsible individual entries remain a possible later refinement; section
+  collapse and navigation cover the initial long-CV need.
 
 **Why:** these are the most visible day-to-day friction points after the
 review workflow.

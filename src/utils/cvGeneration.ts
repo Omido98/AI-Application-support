@@ -1,5 +1,6 @@
 import type { JobApplication, ProfileData } from "@/types";
 import type { TokenUsage } from "@/types";
+import { CV_SECTIONS } from "@/types/cv";
 import type { ChatMessage, ApiConfig } from "@/stores/chatStore";
 import type {
   CvCertification,
@@ -337,5 +338,10 @@ export async function generateCvDocument({
 
   const document = mergeGeneratedCv(parsed, base, options);
   const lastUsage = makeCvUsage("generate", config, usages);
-  return lastUsage ? { ...document, lastUsage } : document;
+  return {
+    ...document,
+    contentLanguage: options.language,
+    aiSections: [...CV_SECTIONS],
+    ...(lastUsage ? { lastUsage } : {}),
+  };
 }

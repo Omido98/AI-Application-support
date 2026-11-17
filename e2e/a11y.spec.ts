@@ -55,6 +55,14 @@ test.describe("WCAG 2.2 AA", () => {
     await scan(page, testInfo, { label: "cv-rewrite-dialog" });
     await page.getByRole("button", { name: "Cancel" }).click();
 
+    await page.getByRole("combobox", { name: "Language", exact: true }).click();
+    await page.getByRole("option", { name: "Svenska" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Change CV language to Swedish?" }),
+    ).toBeVisible();
+    await scan(page, testInfo, { label: "cv-language-dialog" });
+    await page.getByRole("button", { name: "Cancel" }).click();
+
     await page.getByRole("button", { name: "Preview" }).click();
     await expect(page.getByLabel("CV preview")).toBeVisible();
     await scan(page, testInfo, { label: "cv-preview" });

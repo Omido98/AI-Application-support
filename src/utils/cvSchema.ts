@@ -248,6 +248,7 @@ export function createCvDocumentFromProfile(
   return {
     schemaVersion: 1,
     language,
+    contentLanguage: language,
     pageSize: options.pageSize,
     generatedAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -298,6 +299,13 @@ function normalizeSectionOrder(value: unknown): CvSectionId[] {
       )
     : [];
   return [...new Set([...provided, ...CV_SECTIONS])];
+}
+
+function normalizeAiSections(value: unknown): CvSectionId[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value)].filter((item): item is CvSectionId =>
+    CV_SECTIONS.includes(item as CvSectionId),
+  );
 }
 
 function normalizeContact(value: unknown): CvContact {
@@ -448,9 +456,14 @@ export function normalizeCvDocument(value: unknown): CvDocument | null {
   const pageSize: CvPageSize = record.pageSize === "letter" ? "letter" : "a4";
   const now = new Date().toISOString();
   const lastUsage = normalizeUsage(record.lastUsage);
+  const contentLanguage =
+    record.contentLanguage === "sv" || record.contentLanguage === "en"
+      ? record.contentLanguage
+      : undefined;
   return {
     schemaVersion: 1,
     language,
+    ...(contentLanguage ? { contentLanguage } : {}),
     pageSize,
     generatedAt: asString(record.generatedAt, now),
     updatedAt: asString(record.updatedAt, now),
@@ -471,6 +484,7 @@ export function normalizeCvDocument(value: unknown): CvDocument | null {
     languages: normalizeArray(record.languages, normalizeLanguage),
     otherEngagements: normalizeArray(record.otherEngagements, normalizeOther),
     sectionOrder: normalizeSectionOrder(record.sectionOrder),
+    aiSections: normalizeAiSections(record.aiSections),
     ...(lastUsage ? { lastUsage } : {}),
   };
 }

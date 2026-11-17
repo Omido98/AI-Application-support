@@ -272,6 +272,10 @@ test("CV section rewrite dialog opens with guidance", async ({ page }) => {
   await page
     .getByLabel("Guidance for the rewrite (optional)")
     .fill("Make it more concise.");
+  await page.getByRole("button", { name: "Shorter" }).click();
+  await expect(
+    page.getByLabel("Guidance for the rewrite (optional)"),
+  ).toHaveValue("Make it shorter and tighter without losing important facts.");
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(
     page.getByRole("heading", { name: "Rewrite summary and headline" }),
@@ -300,6 +304,78 @@ test("CV buffered edits commit and survive reload", async ({ page }) => {
   ).toHaveValue("Buffered summary survives the pause.");
 });
 
+test("CV language change offers headings-only or regeneration", async ({
+  page,
+}) => {
+  const application = makeApplication(
+    "cv-language",
+    "Language Corp",
+    "applied",
+  );
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  const summary = page.getByRole("textbox", { name: "Professional summary" });
+  await page
+    .getByRole("button", { name: "Collapse Professional Summary" })
+    .click();
+  await expect(summary).toBeHidden();
+  await page
+    .getByRole("button", { name: "Expand Professional Summary" })
+    .click();
+  await expect(summary).toBeVisible();
+  await page.getByRole("combobox", { name: "Language", exact: true }).click();
+  await page.getByRole("option", { name: "Svenska" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Change CV language to Swedish?" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Change headings only" }).click();
+  await expect(
+    page.getByText(/Headings are Swedish, but the body was written in English/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Mark body as translated" }).click();
+  await expect(
+    page.getByText(/Headings are Swedish, but the body was written in English/),
+  ).toHaveCount(0);
+});
+
+test("CV preview marks page boundaries on a long CV", async ({ page }) => {
+  const application = makeApplication("cv-pages", "Pages Corp", "applied");
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page.evaluate(async (applicationId) => {
+    const { useCvStore } = await import("/src/stores/cvStore.ts");
+    const roles = Array.from({ length: 12 }, (_, index) => ({
+      id: `pages-role-${index}`,
+      company: `Company ${index}`,
+      role: `Engineer ${index}`,
+      location: "Remote",
+      startDate: "Jan 2020",
+      endDate: "Dec 2022",
+      current: false,
+      bullets: Array.from(
+        { length: 8 },
+        (_, bullet) =>
+          `Delivered measurable reporting improvement ${index}-${bullet}.`,
+      ),
+      included: true,
+    }));
+    useCvStore.getState().updateCv(applicationId, (current) => ({
+      ...current,
+      experience: [...current.experience, ...roles],
+    }));
+  }, application.id);
+
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+});
+
 test("CV history restores a saved version and survives reload", async ({
   page,
 }) => {
@@ -326,6 +402,7 @@ test("CV history restores a saved version and survives reload", async ({
     headline: "",
     summary: "Current summary",
     skills: ["Kubernetes"],
+    aiSections: ["summary"],
     experience: [],
     education: [],
     projects: [],
@@ -375,6 +452,7 @@ test("CV history restores a saved version and survives reload", async ({
   await expect(
     page.getByRole("heading", { name: "Grounding review" }),
   ).toBeVisible();
+  await expect(page.getByText("AI-assisted")).toBeVisible();
   await expect(
     page.getByText(/is not in your profile skills or extra context/),
   ).toBeVisible();

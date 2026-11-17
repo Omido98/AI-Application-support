@@ -16,6 +16,33 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
+const PRESETS = [
+  {
+    label: "Shorter",
+    instruction: "Make it shorter and tighter without losing important facts.",
+  },
+  {
+    label: "More senior",
+    instruction:
+      "Sound more senior and outcome-focused without changing any facts.",
+  },
+  {
+    label: "More technical",
+    instruction:
+      "Emphasise technical depth and concrete tools only where the profile supports them.",
+  },
+  {
+    label: "Stronger verbs",
+    instruction:
+      "Use stronger, more specific action verbs without exaggerating the work.",
+  },
+  {
+    label: "Match requirements",
+    instruction:
+      "Mirror the most relevant job requirements where they are genuinely supported by the evidence.",
+  },
+] as const;
+
 export default function CvRewriteDialog({
   open,
   label,
@@ -147,6 +174,25 @@ export default function CvRewriteDialog({
                 placeholder="e.g. make it shorter, lead with the accessibility work, sound more senior…"
                 className="min-h-[90px] bg-field"
               />
+              <div
+                className="flex flex-wrap gap-1.5 pt-1"
+                aria-label="Rewrite presets"
+              >
+                {PRESETS.map((preset) => (
+                  <Button
+                    key={preset.label}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 rounded-full px-2.5 text-[11px]"
+                    aria-pressed={instruction === preset.instruction}
+                    disabled={busy}
+                    onClick={() => setInstruction(preset.instruction)}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             {error && (

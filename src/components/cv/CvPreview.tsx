@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { CvDocument, CvSectionId } from "@/types/cv";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
 
@@ -37,7 +37,16 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /** Print-like HTML preview of the structured CV, matching the DOCX layout. */
-export default function CvPreview({ document }: { document: CvDocument }) {
+export default function CvPreview({
+  document,
+  onPageCount,
+}: {
+  document: CvDocument;
+  onPageCount?: (pages: number) => void;
+}) {
+  const articleRef = useRef<HTMLElement | null>(null);
+  const [pages, setPages] = useState(1);
+  const pageHeight = document.pageSize === "a4" ? 1123 : 1056;
   const contact = [
     document.contact.email,
     document.contact.phone,
@@ -50,78 +59,177 @@ export default function CvPreview({ document }: { document: CvDocument }) {
     .filter(Boolean);
   const labels = CV_SECTION_LABELS[document.language];
 
-  return (
-    <article
-      aria-label="CV preview"
-      className="mx-auto w-full max-w-[794px] bg-white px-6 py-8 text-neutral-900 shadow-sm ring-1 ring-black/10 sm:px-[52px] sm:py-[48px]"
-      style={{ minHeight: document.pageSize === "a4" ? "1123px" : "1056px" }}
-    >
-      <header className="text-center">
-        <h2 className="text-[28px] font-bold leading-tight tracking-tight">
-          {document.contact.fullName.trim() || "Curriculum Vitae"}
-        </h2>
-        {document.headline.trim() && (
-          <p className="mt-1 text-[13px] italic text-neutral-700">
-            {document.headline.trim()}
-          </p>
-        )}
-        {contact.length > 0 && (
-          <p className="mt-2 text-[11px] text-neutral-600">
-            {contact.join("  ·  ")}
-          </p>
-        )}
-      </header>
+  useLayoutEffect(() => {
+    const article = articleRef.current;
+    if (!article) return;
+    const measure = () => {
+      const next = Math.max(1, Math.ceil(article.scrollHeight / pageHeight));
+      setPages(next);
+      onPageCount?.(next);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(article);
+    return () => observer.disconnect();
+  }, [onPageCount, pageHeight]);
 
-      {document.sectionOrder.map((section) => {
-        if (!hasSection(document, section)) return null;
-        if (section === "summary") {
-          return (
-            <Section key={section} title={labels[section]}>
-              <p className="whitespace-pre-line">{document.summary.trim()}</p>
-            </Section>
-          );
-        }
-        if (section === "skills") {
-          return (
-            <Section key={section} title={labels[section]}>
-              <p>{document.skills.join("  ·  ")}</p>
-            </Section>
-          );
-        }
-        if (section === "experience") {
-          return (
-            <Section key={section} title={labels[section]}>
-              {document.experience
-                .filter((item) => item.included)
-                .map((item) => (
-                  <div key={item.id} className="break-inside-avoid">
-                    <p className="font-bold">
-                      {[item.role, item.company].filter(Boolean).join(" — ")}
-                    </p>
-                    <p className="text-[11px] italic text-neutral-600">
-                      {[item.startDate, item.endDate, item.location]
+  return (
+    <div className="relative mx-auto w-full max-w-[794px]">
+      <article
+        ref={articleRef}
+        aria-label="CV preview"
+        className="w-full bg-white px-6 py-8 text-neutral-900 shadow-sm ring-1 ring-black/10 sm:px-[52px] sm:py-[48px]"
+        style={{ minHeight: `${pageHeight}px` }}
+      >
+        <header className="text-center">
+          <h2 className="text-[28px] font-bold leading-tight tracking-tight">
+            {document.contact.fullName.trim() || "Curriculum Vitae"}
+          </h2>
+          {document.headline.trim() && (
+            <p className="mt-1 text-[13px] italic text-neutral-700">
+              {document.headline.trim()}
+            </p>
+          )}
+          {contact.length > 0 && (
+            <p className="mt-2 text-[11px] text-neutral-600">
+              {contact.join("  ·  ")}
+            </p>
+          )}
+        </header>
+
+        {document.sectionOrder.map((section) => {
+          if (!hasSection(document, section)) return null;
+          if (section === "summary") {
+            return (
+              <Section key={section} title={labels[section]}>
+                <p className="whitespace-pre-line">{document.summary.trim()}</p>
+              </Section>
+            );
+          }
+          if (section === "skills") {
+            return (
+              <Section key={section} title={labels[section]}>
+                <p>{document.skills.join("  ·  ")}</p>
+              </Section>
+            );
+          }
+          if (section === "experience") {
+            return (
+              <Section key={section} title={labels[section]}>
+                {document.experience
+                  .filter((item) => item.included)
+                  .map((item) => (
+                    <div key={item.id} className="break-inside-avoid">
+                      <p className="font-bold">
+                        {[item.role, item.company].filter(Boolean).join(" — ")}
+                      </p>
+                      <p className="text-[11px] italic text-neutral-600">
+                        {[item.startDate, item.endDate, item.location]
+                          .filter(Boolean)
+                          .join("  ·  ")}
+                      </p>
+                      <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                        {item.bullets.map((bullet, index) => (
+                          <li key={`${item.id}-${index}`}>{bullet}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+              </Section>
+            );
+          }
+          if (section === "education") {
+            return (
+              <Section key={section} title={labels[section]}>
+                {document.education
+                  .filter((item) => item.included)
+                  .map((item) => (
+                    <div key={item.id} className="break-inside-avoid">
+                      <p className="font-bold">
+                        {[item.degree, item.field, item.school]
+                          .filter(Boolean)
+                          .join(" — ")}
+                      </p>
+                      <p className="text-[11px] italic text-neutral-600">
+                        {[item.startDate, item.endDate]
+                          .filter(Boolean)
+                          .join("  ·  ")}
+                      </p>
+                      <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                        {item.details.map((detail, index) => (
+                          <li key={`${item.id}-${index}`}>{detail}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+              </Section>
+            );
+          }
+          if (section === "projects") {
+            return (
+              <Section key={section} title={labels[section]}>
+                {document.projects
+                  .filter((item) => item.included)
+                  .map((item) => (
+                    <div key={item.id} className="break-inside-avoid">
+                      {item.title.trim() && (
+                        <p className="font-bold">{item.title.trim()}</p>
+                      )}
+                      {item.description.trim() && (
+                        <p>{item.description.trim()}</p>
+                      )}
+                      {item.period.trim() && (
+                        <p className="text-[11px] italic text-neutral-600">
+                          {item.period.trim()}
+                        </p>
+                      )}
+                      <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                        {item.bullets.map((bullet, index) => (
+                          <li key={`${item.id}-${index}`}>{bullet}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+              </Section>
+            );
+          }
+          if (section === "certifications") {
+            return (
+              <Section key={section} title={labels[section]}>
+                {document.certifications
+                  .filter((item) => item.included)
+                  .map((item) => (
+                    <p key={item.id}>
+                      {[item.name, item.issuer, item.date]
                         .filter(Boolean)
                         .join("  ·  ")}
                     </p>
-                    <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                      {item.bullets.map((bullet, index) => (
-                        <li key={`${item.id}-${index}`}>{bullet}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-            </Section>
-          );
-        }
-        if (section === "education") {
+                  ))}
+              </Section>
+            );
+          }
+          if (section === "languages") {
+            return (
+              <Section key={section} title={labels[section]}>
+                <p>
+                  {document.languages
+                    .filter((item) => item.included)
+                    .map((item) =>
+                      [item.name, item.level].filter(Boolean).join(" — "),
+                    )
+                    .join("  ·  ")}
+                </p>
+              </Section>
+            );
+          }
           return (
             <Section key={section} title={labels[section]}>
-              {document.education
+              {document.otherEngagements
                 .filter((item) => item.included)
                 .map((item) => (
                   <div key={item.id} className="break-inside-avoid">
                     <p className="font-bold">
-                      {[item.degree, item.field, item.school]
+                      {[item.role, item.organization]
                         .filter(Boolean)
                         .join(" — ")}
                     </p>
@@ -131,34 +239,6 @@ export default function CvPreview({ document }: { document: CvDocument }) {
                         .join("  ·  ")}
                     </p>
                     <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                      {item.details.map((detail, index) => (
-                        <li key={`${item.id}-${index}`}>{detail}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-            </Section>
-          );
-        }
-        if (section === "projects") {
-          return (
-            <Section key={section} title={labels[section]}>
-              {document.projects
-                .filter((item) => item.included)
-                .map((item) => (
-                  <div key={item.id} className="break-inside-avoid">
-                    {item.title.trim() && (
-                      <p className="font-bold">{item.title.trim()}</p>
-                    )}
-                    {item.description.trim() && (
-                      <p>{item.description.trim()}</p>
-                    )}
-                    {item.period.trim() && (
-                      <p className="text-[11px] italic text-neutral-600">
-                        {item.period.trim()}
-                      </p>
-                    )}
-                    <ul className="mt-1 list-disc space-y-0.5 pl-5">
                       {item.bullets.map((bullet, index) => (
                         <li key={`${item.id}-${index}`}>{bullet}</li>
                       ))}
@@ -167,60 +247,21 @@ export default function CvPreview({ document }: { document: CvDocument }) {
                 ))}
             </Section>
           );
-        }
-        if (section === "certifications") {
-          return (
-            <Section key={section} title={labels[section]}>
-              {document.certifications
-                .filter((item) => item.included)
-                .map((item) => (
-                  <p key={item.id}>
-                    {[item.name, item.issuer, item.date]
-                      .filter(Boolean)
-                      .join("  ·  ")}
-                  </p>
-                ))}
-            </Section>
-          );
-        }
-        if (section === "languages") {
-          return (
-            <Section key={section} title={labels[section]}>
-              <p>
-                {document.languages
-                  .filter((item) => item.included)
-                  .map((item) =>
-                    [item.name, item.level].filter(Boolean).join(" — "),
-                  )
-                  .join("  ·  ")}
-              </p>
-            </Section>
-          );
-        }
-        return (
-          <Section key={section} title={labels[section]}>
-            {document.otherEngagements
-              .filter((item) => item.included)
-              .map((item) => (
-                <div key={item.id} className="break-inside-avoid">
-                  <p className="font-bold">
-                    {[item.role, item.organization].filter(Boolean).join(" — ")}
-                  </p>
-                  <p className="text-[11px] italic text-neutral-600">
-                    {[item.startDate, item.endDate]
-                      .filter(Boolean)
-                      .join("  ·  ")}
-                  </p>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                    {item.bullets.map((bullet, index) => (
-                      <li key={`${item.id}-${index}`}>{bullet}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-          </Section>
-        );
-      })}
-    </article>
+        })}
+      </article>
+      <div aria-hidden="true">
+        {Array.from({ length: Math.max(0, pages - 1) }, (_, index) => (
+          <div
+            key={index}
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-amber-500/70"
+            style={{ top: `${(index + 1) * pageHeight}px` }}
+          >
+            <span className="absolute right-0 -top-5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
+              Page {index + 2}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

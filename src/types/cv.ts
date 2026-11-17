@@ -113,6 +113,8 @@ export interface CvAiUsage {
 export interface CvDocument {
   schemaVersion: 1;
   language: CvLanguage;
+  /** Language the body prose was generated in; can differ after a headings-only switch. */
+  contentLanguage?: CvLanguage;
   pageSize: CvPageSize;
   generatedAt: string;
   updatedAt: string;
@@ -132,6 +134,8 @@ export interface CvDocument {
   languages: CvLanguageSkill[];
   otherEngagements: CvOtherEngagement[];
   sectionOrder: CvSectionId[];
+  /** Sections last written or rewritten with AI. */
+  aiSections?: CvSectionId[];
   lastUsage?: CvAiUsage;
 }
 

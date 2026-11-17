@@ -84,7 +84,17 @@ export function applyRewriteResult(
   result: CvRewriteResult,
   usage?: CvAiUsage,
 ): CvDocument {
-  const withUsage = usage ? { ...document, lastUsage: usage } : document;
+  const section: CvDocument["sectionOrder"][number] =
+    target.kind === "project"
+      ? "projects"
+      : target.kind === "other"
+        ? "other"
+        : target.kind;
+  const withUsage: CvDocument = {
+    ...document,
+    aiSections: [...new Set([...(document.aiSections ?? []), section])],
+    ...(usage ? { lastUsage: usage } : {}),
+  };
   if (result.kind === "summary") {
     return {
       ...withUsage,

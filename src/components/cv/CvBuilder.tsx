@@ -4,6 +4,8 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Download,
   Eye,
   FileText,
@@ -45,11 +47,13 @@ import { analyzeCvGrounding } from "@/utils/cvGrounding";
 import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
 import BufferedTextarea from "@/components/cv/BufferedTextarea";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { estimateCvPages } from "@/utils/cvPageEstimate";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import CvPreview from "@/components/cv/CvPreview";
 import CvRewriteDialog from "@/components/cv/CvRewriteDialog";
 import CvHistoryDialog from "@/components/cv/CvHistoryDialog";
+import CvLanguageDialog from "@/components/cv/CvLanguageDialog";
 import {
   applyRewriteResult,
   buildRewriteProposal,
@@ -99,6 +103,7 @@ function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
 function SectionCard({
   section,
   language,
+  aiAssisted,
   onMove,
   canMoveUp,
   canMoveDown,
@@ -107,26 +112,52 @@ function SectionCard({
 }: {
   section: CvSectionId;
   language: CvLanguage;
+  aiAssisted: boolean;
   onMove: (direction: -1 | 1) => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
   action?: ReactNode;
   children: ReactNode;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const label = CV_SECTION_LABELS[language][section];
   return (
-    <Card className="bg-surface border-border">
+    <Card
+      id={`cv-section-${section}`}
+      className="scroll-mt-20 bg-surface border-border"
+    >
       <CardContent className="space-y-3 pt-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-text-primary">
-            {CV_SECTION_LABELS[language][section]}
-          </h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-text-primary">{label}</h3>
+            {aiAssisted && (
+              <span className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] text-text-secondary">
+                <Sparkles className="size-2.5 text-primary" /> AI-assisted
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1">
             {action}
             <Button
               variant="ghost"
               size="icon-sm"
+              title={collapsed ? "Expand section" : "Collapse section"}
+              aria-label={`${collapsed ? "Expand" : "Collapse"} ${label}`}
+              aria-expanded={!collapsed}
+              aria-controls={`cv-section-body-${section}`}
+              onClick={() => setCollapsed((value) => !value)}
+            >
+              {collapsed ? (
+                <ChevronDown className="size-3.5" />
+              ) : (
+                <ChevronUp className="size-3.5" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
               title="Move section up"
-              aria-label={`Move ${CV_SECTION_LABELS[language][section]} up`}
+              aria-label={`Move ${label} up`}
               disabled={!canMoveUp}
               onClick={() => onMove(-1)}
             >
@@ -136,7 +167,7 @@ function SectionCard({
               variant="ghost"
               size="icon-sm"
               title="Move section down"
-              aria-label={`Move ${CV_SECTION_LABELS[language][section]} down`}
+              aria-label={`Move ${label} down`}
               disabled={!canMoveDown}
               onClick={() => onMove(1)}
             >
@@ -144,7 +175,9 @@ function SectionCard({
             </Button>
           </div>
         </div>
-        {children}
+        <div id={`cv-section-body-${section}`} hidden={collapsed}>
+          {children}
+        </div>
       </CardContent>
     </Card>
   );
@@ -248,6 +281,10 @@ export default function CvBuilder({
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [view, setView] = useState<"edit" | "preview">("edit");
+  const [previewPages, setPreviewPages] = useState<number | null>(null);
+  const [pendingLanguage, setPendingLanguage] = useState<CvLanguage | null>(
+    null,
+  );
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [previousDocument, setPreviousDocument] = useState<CvDocument | null>(
@@ -347,6 +384,15 @@ export default function CvBuilder({
     [analysisDocument, profile],
   );
 
+  const pageEstimate = useMemo(
+    () => (document ? estimateCvPages(document) : null),
+    [document],
+  );
+  const visiblePages =
+    view === "preview" && previewPages
+      ? previewPages
+      : (pageEstimate?.pages ?? 1);
+
   const patch = (updater: (current: CvDocument) => CvDocument) => {
     updateCv(application.id, updater);
   };
@@ -426,16 +472,18 @@ export default function CvBuilder({
     setCv(application.id, next);
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (nextLanguage: CvLanguage = language) => {
     setExportStatus(null);
+    setLanguage(nextLanguage);
     const before = document;
     const ok = await generateCv({
       application,
       profile,
       config: apiConfig,
-      options: { language, pageSize, extraContext },
+      options: { language: nextLanguage, pageSize, extraContext },
     });
     if (ok && before) setPreviousDocument(before);
+    if (!ok && before) setLanguage(before.language);
   };
 
   const handleUndo = () => {
@@ -576,8 +624,34 @@ export default function CvBuilder({
   };
 
   const changeLanguage = (value: CvLanguage) => {
-    setLanguage(value);
-    if (document) setField("language", value);
+    if (!document) {
+      setLanguage(value);
+      return;
+    }
+    if (document.language === value) return;
+    setPendingLanguage(value);
+  };
+
+  const applyHeadingsOnlyLanguage = () => {
+    const next = pendingLanguage;
+    if (!next) return;
+    setLanguage(next);
+    patch((current) => ({
+      ...current,
+      language: next,
+      contentLanguage: current.contentLanguage ?? current.language,
+    }));
+    setPendingLanguage(null);
+    setExportStatus(
+      `Headings changed to ${next === "sv" ? "Swedish" : "English"}; body content was kept.`,
+    );
+  };
+
+  const regenerateLanguage = () => {
+    const next = pendingLanguage;
+    if (!next) return;
+    setPendingLanguage(null);
+    void handleGenerate(next);
   };
 
   const changePageSize = (value: CvPageSize) => {
@@ -750,6 +824,7 @@ export default function CvBuilder({
         key={section}
         section={section}
         language={document.language}
+        aiAssisted={document.aiSections?.includes(section) ?? false}
         onMove={(direction) => moveSection(section, direction)}
         canMoveUp={index > 0}
         canMoveDown={index < document.sectionOrder.length - 1}
@@ -1472,7 +1547,8 @@ export default function CvBuilder({
           <p className="mt-1 text-xs text-text-muted">
             {document.pageSize === "a4" ? "A4" : "US Letter"} ·{" "}
             {document.language === "sv" ? "Svenska" : "English"} ·{" "}
-            {saving ? "Saving…" : storeError ? "Not saved" : "Saved locally"}
+            {saving ? "Saving…" : storeError ? "Not saved" : "Saved locally"} ·{" "}
+            ~{visiblePages} {visiblePages === 1 ? "page" : "pages"}
           </p>
           {document.lastUsage && (
             <p
@@ -1598,6 +1674,40 @@ export default function CvBuilder({
           </Button>
         </div>
       )}
+      {pageEstimate?.overflow && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-md border border-amber-600/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300"
+        >
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            Estimated {visiblePages} pages. Most tailored CVs should fit on one
+            or two pages; trim older or less relevant material before exporting.
+          </span>
+        </div>
+      )}
+      {document.contentLanguage &&
+        document.contentLanguage !== document.language && (
+          <div
+            role="status"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-600/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300"
+          >
+            <span>
+              Headings are {document.language === "sv" ? "Swedish" : "English"},
+              but the body was written in{" "}
+              {document.contentLanguage === "sv" ? "Swedish" : "English"}.
+              Regenerate to translate it, or mark it once you have translated
+              the body yourself.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setField("contentLanguage", document.language)}
+            >
+              Mark body as translated
+            </Button>
+          </div>
+        )}
       {grounding && grounding.warnings.length > 0 && (
         <div
           role="status"
@@ -1614,7 +1724,7 @@ export default function CvBuilder({
       )}
 
       {view === "preview" ? (
-        <CvPreview document={document} />
+        <CvPreview document={document} onPageCount={setPreviewPages} />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
@@ -1753,6 +1863,37 @@ export default function CvBuilder({
           </div>
 
           <aside className="space-y-4 lg:sticky lg:top-0 lg:self-start">
+            <Card className="bg-surface border-border">
+              <CardContent className="space-y-2 pt-4">
+                <h3 className="text-sm font-semibold text-text-primary">
+                  Jump to section
+                </h3>
+                <nav aria-label="CV sections" className="grid gap-0.5">
+                  {document.sectionOrder.map((section) => (
+                    <Button
+                      key={section}
+                      variant="ghost"
+                      size="sm"
+                      className="justify-start"
+                      onClick={() => {
+                        const target = globalThis.document.getElementById(
+                          `cv-section-${section}`,
+                        );
+                        const reduceMotion = globalThis.matchMedia?.(
+                          "(prefers-reduced-motion: reduce)",
+                        ).matches;
+                        target?.scrollIntoView({
+                          behavior: reduceMotion ? "auto" : "smooth",
+                          block: "start",
+                        });
+                      }}
+                    >
+                      {CV_SECTION_LABELS[document.language][section]}
+                    </Button>
+                  ))}
+                </nav>
+              </CardContent>
+            </Card>
             {grounding && <CvGroundingPanel report={grounding} />}
             <Card className="bg-surface border-border">
               <CardContent className="space-y-3 pt-4">
@@ -1914,6 +2055,16 @@ export default function CvBuilder({
         busy={historyBusy}
         onClose={() => setHistoryOpen(false)}
         onRestore={(snapshotId) => void handleRestoreSnapshot(snapshotId)}
+      />
+      <CvLanguageDialog
+        open={pendingLanguage !== null}
+        current={document.language}
+        next={pendingLanguage}
+        busy={generating}
+        canRegenerate={canGenerate}
+        onClose={() => setPendingLanguage(null)}
+        onHeadingsOnly={applyHeadingsOnlyLanguage}
+        onRegenerate={regenerateLanguage}
       />
     </div>
   );
