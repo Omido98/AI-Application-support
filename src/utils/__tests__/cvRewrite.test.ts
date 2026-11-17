@@ -197,6 +197,50 @@ describe("buildCvRewritePrompt", () => {
     expect(prompt).toContain("Reduced reporting time by 30%");
     expect(prompt).toContain("Make it more concise.");
     expect(prompt).toContain('"bullets": []');
+    expect(prompt).toContain("TypeScript");
+  });
+
+  it("omits unrelated roles and truncates a very long job description", () => {
+    const secondRole = {
+      ...profile.workExperience[0],
+      id: "work-2",
+      company: "Unrelated Corp",
+      role: "Unrelated Role",
+      jobDescription: "Unrelated work.",
+      achievements: [],
+      projects: [],
+    };
+    const longDescription = `${"x".repeat(1_200)}SHOULD_NOT_APPEAR`;
+    const document = makeDocument();
+    const prompt = buildCvRewritePrompt(
+      { ...application, jobDescription: longDescription },
+      { ...profile, workExperience: [...profile.workExperience, secondRole] },
+      document,
+      { kind: "experience", id: document.experience[0].id },
+      "",
+    );
+
+    expect(prompt).not.toContain("Unrelated Corp");
+    expect(prompt).not.toContain("Unrelated Role");
+    expect(prompt).not.toContain("SHOULD_NOT_APPEAR");
+    expect(prompt).toContain("truncated");
+    expect(prompt).toContain("Fjordline");
+  });
+
+  it("includes skills and all roles for a summary rewrite", () => {
+    const document = makeDocument();
+    const prompt = buildCvRewritePrompt(
+      application,
+      profile,
+      document,
+      { kind: "summary" },
+      "",
+    );
+
+    expect(prompt).toContain('"skills"');
+    expect(prompt).toContain("TypeScript");
+    expect(prompt).toContain("Fjordline");
+    expect(prompt).not.toContain('"education"');
   });
 });
 

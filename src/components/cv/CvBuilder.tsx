@@ -40,9 +40,11 @@ import {
   createCvDocumentFromProfile,
   profileFingerprint,
 } from "@/utils/cvSchema";
-import { analyzeCvAts } from "@/utils/cvAts";
+import { analyzeCvAts, extractJobKeywords } from "@/utils/cvAts";
 import { analyzeCvGrounding } from "@/utils/cvGrounding";
 import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
+import BufferedTextarea from "@/components/cv/BufferedTextarea";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import CvPreview from "@/components/cv/CvPreview";
@@ -301,20 +303,48 @@ export default function CvBuilder({
   const hasApiKey = apiConfig.apiKey.trim().length > 0;
   const canGenerate = profileHasContent && hasJobDescription && hasApiKey;
 
+  const profileFingerprintValue = useMemo(
+    () => profileFingerprint(profile),
+    [profile],
+  );
+
   const stale = Boolean(
     document &&
-    (document.profileFingerprint !== profileFingerprint(profile) ||
+    (document.profileFingerprint !== profileFingerprintValue ||
       document.applicationUpdatedAt !== application.updatedAt),
   );
 
+  const jobKeywords = useMemo(
+    () =>
+      extractJobKeywords(
+        [
+          application.jobTitle,
+          application.jobDescription,
+          application.requirements,
+        ].join("\n"),
+      ),
+    [
+      application.jobDescription,
+      application.jobTitle,
+      application.requirements,
+    ],
+  );
+
+  // ATS and grounding are advisory and expensive to recompute. Use a deferred
+  // document snapshot while typing; the editor remains fully responsive.
+  const analysisDocument = useDebouncedValue(document, 250);
   const ats = useMemo(
-    () => (document ? analyzeCvAts(document, application, profile) : null),
-    [document, application, profile],
+    () =>
+      analysisDocument
+        ? analyzeCvAts(analysisDocument, application, profile, jobKeywords)
+        : null,
+    [analysisDocument, application, profile, jobKeywords],
   );
 
   const grounding = useMemo(
-    () => (document ? analyzeCvGrounding(document, profile) : null),
-    [document, profile],
+    () =>
+      analysisDocument ? analyzeCvGrounding(analysisDocument, profile) : null,
+    [analysisDocument, profile],
   );
 
   const patch = (updater: (current: CvDocument) => CvDocument) => {
@@ -732,9 +762,9 @@ export default function CvBuilder({
     switch (section) {
       case "summary":
         return card(
-          <Textarea
+          <BufferedTextarea
             value={document.summary}
-            onChange={(event) => setField("summary", event.target.value)}
+            onCommit={(value) => setField("summary", value)}
             placeholder="Professional summary tailored to this role…"
             className={textareaClass}
             aria-label="Professional summary"
@@ -744,11 +774,9 @@ export default function CvBuilder({
       case "skills":
         return card(
           <div className="space-y-1.5">
-            <Textarea
+            <BufferedTextarea
               value={document.skills.join("\n")}
-              onChange={(event) =>
-                setField("skills", lines(event.target.value))
-              }
+              onCommit={(value) => setField("skills", lines(value))}
               placeholder="One skill per line"
               className={textareaClass}
               aria-label="Skills, one per line"
@@ -869,11 +897,11 @@ export default function CvBuilder({
                 </label>
                 <div className="space-y-1">
                   <Label className="text-xs">Bullets (one per line)</Label>
-                  <Textarea
+                  <BufferedTextarea
                     value={item.bullets.join("\n")}
-                    onChange={(event) =>
+                    onCommit={(value) =>
                       updateExperience(item.id, {
-                        bullets: lines(event.target.value),
+                        bullets: lines(value),
                       })
                     }
                     className={textareaClass}
@@ -992,11 +1020,11 @@ export default function CvBuilder({
                     />
                   </div>
                 </div>
-                <Textarea
+                <BufferedTextarea
                   value={item.details.join("\n")}
-                  onChange={(event) =>
+                  onCommit={(value) =>
                     updateEducation(item.id, {
-                      details: lines(event.target.value),
+                      details: lines(value),
                     })
                   }
                   placeholder="Details (one per line)"
@@ -1084,20 +1112,20 @@ export default function CvBuilder({
                   placeholder="Dates (e.g. Jan 2024 – Jun 2025)"
                   className={fieldClass}
                 />
-                <Textarea
+                <BufferedTextarea
                   value={item.description}
-                  onChange={(event) =>
-                    updateProject(item.id, { description: event.target.value })
+                  onCommit={(value) =>
+                    updateProject(item.id, { description: value })
                   }
                   placeholder="Project description"
                   className={textareaClass}
                   aria-label={`Description for ${item.title || "project"}`}
                 />
-                <Textarea
+                <BufferedTextarea
                   value={item.bullets.join("\n")}
-                  onChange={(event) =>
+                  onCommit={(value) =>
                     updateProject(item.id, {
-                      bullets: lines(event.target.value),
+                      bullets: lines(value),
                     })
                   }
                   placeholder="Achievement bullets (one per line)"
@@ -1388,11 +1416,11 @@ export default function CvBuilder({
                   />
                   Ongoing
                 </label>
-                <Textarea
+                <BufferedTextarea
                   value={item.bullets.join("\n")}
-                  onChange={(event) =>
+                  onCommit={(value) =>
                     updateOther(item.id, {
-                      bullets: lines(event.target.value),
+                      bullets: lines(value),
                     })
                   }
                   placeholder="Bullets (one per line)"
@@ -1857,12 +1885,10 @@ export default function CvBuilder({
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="cv-extra-context-edit">Extra context</Label>
-                  <Textarea
+                  <BufferedTextarea
                     id="cv-extra-context-edit"
                     value={document.extraContext}
-                    onChange={(event) =>
-                      setField("extraContext", event.target.value)
-                    }
+                    onCommit={(value) => setField("extraContext", value)}
                     className={textareaClass}
                   />
                 </div>

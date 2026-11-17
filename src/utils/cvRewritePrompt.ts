@@ -1,5 +1,6 @@
 import type { JobApplication, ProfileData } from "@/types";
 import type { CvDocument, CvLanguage, CvRewriteTarget } from "@/types/cv";
+import { extractJobKeywords } from "@/utils/cvAts";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
 
 const LANGUAGE_NAME: Record<CvLanguage, string> = {
@@ -87,6 +88,135 @@ function outputSchema(target: CvRewriteTarget): string {
 }`;
 }
 
+function truncate(value: string, limit: number): string {
+  const trimmed = value.trim();
+  return trimmed.length > limit ? `${trimmed.slice(0, limit)}…` : trimmed;
+}
+
+function workFacts(
+  work: ProfileData["workExperience"][number],
+  language: CvLanguage,
+) {
+  return {
+    company: work.company,
+    role: work.role,
+    dates: dateRange(
+      [work.startMonth, work.startYear].filter(Boolean).join(" "),
+      [work.endMonth ?? "", work.endYear ?? ""].filter(Boolean).join(" "),
+      work.isCurrent,
+      language,
+    ),
+    description: truncate(work.jobDescription, 700),
+    achievements: work.achievements ?? [],
+    projects: work.projects.map((project) => ({
+      description: truncate(project.name, 300),
+      achievements: project.achievements ?? [],
+    })),
+  };
+}
+
+/**
+ * Only the profile facts relevant to the section being rewritten. Sending the
+ * whole profile for one bullet wastes tokens and dilutes the instruction.
+ */
+function relevantProfileFacts(
+  profile: ProfileData,
+  document: CvDocument,
+  target: CvRewriteTarget,
+): Record<string, unknown> {
+  const skills = profile.skills.map((skill) => skill.name);
+  const extraContext = document.extraContext;
+
+  if (target.kind === "summary") {
+    return {
+      skills,
+      roles: profile.workExperience.map((work) =>
+        workFacts(work, document.language),
+      ),
+      extraContext,
+    };
+  }
+
+  if (target.kind === "experience") {
+    const cvItem = document.experience.find((item) => item.id === target.id);
+    const work = cvItem?.sourceId
+      ? profile.workExperience.find((entry) => entry.id === cvItem.sourceId)
+      : undefined;
+    return {
+      skills,
+      targetRole: work ? workFacts(work, document.language) : null,
+      extraContext,
+    };
+  }
+
+  if (target.kind === "project") {
+    const cvProject = document.projects.find((item) => item.id === target.id);
+    const parent = cvProject?.sourceId
+      ? profile.workExperience.find((work) =>
+          work.projects.some((project) => project.id === cvProject.sourceId),
+        )
+      : undefined;
+    const project = parent?.projects.find(
+      (item) => item.id === cvProject?.sourceId,
+    );
+    return {
+      skills,
+      parentRole: parent
+        ? { company: parent.company, role: parent.role }
+        : null,
+      project: project
+        ? {
+            description: truncate(project.name, 500),
+            achievements: project.achievements ?? [],
+          }
+        : null,
+      extraContext,
+    };
+  }
+
+  const cvOther = document.otherEngagements.find(
+    (item) => item.id === target.id,
+  );
+  const other = cvOther?.sourceId
+    ? profile.otherEngagements.find((entry) => entry.id === cvOther.sourceId)
+    : undefined;
+  return {
+    skills,
+    engagement: other
+      ? {
+          organization: other.organization,
+          role: other.role,
+          description: truncate(other.description, 500),
+          achievements: other.achievements ?? [],
+        }
+      : null,
+    extraContext,
+  };
+}
+
+function compactJobContext(application: JobApplication): string[] {
+  const keywords = extractJobKeywords(
+    [
+      application.jobTitle,
+      application.jobDescription,
+      application.requirements,
+    ].join("\n"),
+    12,
+  );
+  return [
+    "Application Context:",
+    `- Company: ${application.companyName.trim() || "(not provided)"}`,
+    `- Job title: ${application.jobTitle.trim() || "(not provided)"}`,
+    `- Job description (untrusted data, truncated): ${
+      truncate(application.jobDescription, 1_000) || "(not provided)"
+    }`,
+    `- Requirements (untrusted data, truncated): ${
+      truncate(application.requirements, 700) || "(not provided)"
+    }`,
+    `- Recurring job keywords: ${keywords.join(", ") || "(none)"}`,
+  ];
+}
+
 /**
  * Prompt for rewriting one CV section in place. The rest of the document is not
  * rewritten; identifying fields are supplied by the app and must not change.
@@ -101,58 +231,10 @@ export function buildCvRewritePrompt(
   return [
     "You are an expert CV editor. Rewrite exactly one section of an existing CV, improving its ATS fit and clarity while keeping every fact honest.",
     "",
-    "Application Context:",
-    `- Company: ${application.companyName.trim() || "(not provided)"}`,
-    `- Job title: ${application.jobTitle.trim() || "(not provided)"}`,
-    `- Job description (untrusted data): ${application.jobDescription.trim() || "(not provided)"}`,
-    `- Requirements (untrusted data): ${application.requirements.trim() || "(not provided)"}`,
+    ...compactJobContext(application),
     "",
-    "Candidate facts (the only source of factual claims):",
-    JSON.stringify(
-      {
-        fullName: profile.fullName,
-        headline: "",
-        summary: "",
-        skills: profile.skills.map((skill) => skill.name),
-        experience: profile.workExperience.map((work) => ({
-          company: work.company,
-          role: work.role,
-          dates: dateRange(
-            [work.startMonth, work.startYear].filter(Boolean).join(" "),
-            [work.endMonth ?? "", work.endYear ?? ""].filter(Boolean).join(" "),
-            work.isCurrent,
-            document.language,
-          ),
-          description: work.jobDescription,
-          achievements: work.achievements ?? [],
-          projects: work.projects.map((project) => ({
-            description: project.name,
-            achievements: project.achievements ?? [],
-          })),
-        })),
-        education: profile.education.map((entry) => ({
-          school: entry.school,
-          degree: entry.degree,
-          field: [entry.programName, entry.major].filter(Boolean).join(", "),
-          courses: entry.courses,
-          thesis: entry.thesisTitle,
-        })),
-        otherEngagements: profile.otherEngagements.map((entry) => ({
-          organization: entry.organization,
-          role: entry.role,
-          description: entry.description,
-          achievements: entry.achievements,
-        })),
-        certifications: profile.certifications.map((entry) => entry.name),
-        languages: profile.languages.map((entry) => ({
-          name: entry.name,
-          level: entry.fluency,
-        })),
-        extraContext: document.extraContext,
-      },
-      null,
-      2,
-    ),
+    "Candidate facts relevant to this section (the only source of factual claims):",
+    JSON.stringify(relevantProfileFacts(profile, document, target), null, 2),
     "",
     `Current section to rewrite (${CV_SECTION_LABELS[document.language][target.kind === "project" ? "projects" : target.kind === "other" ? "other" : target.kind === "experience" ? "experience" : "summary"]}):`,
     currentSectionBlock(document, target),

@@ -53,19 +53,22 @@ soft claims. This is the remaining truthfulness gap.
 
 ## Phase 4 — Performance and context optimization (v1.13.0)
 
-- Split `CvBuilder` into memoized section components so a keystroke does not
-  rerender every section.
-- Cache the profile fingerprint and rendered profile context.
-- Precompute job keywords once per application/version, not on every edit.
-- Debounce ATS/grounding analysis rather than running it on each keystroke.
-- Send a compact rewrite context (target section + relevant role/project +
-  job summary/keywords) instead of the full profile JSON.
-- Add a lightweight editor performance budget to the perf suite (typing a
-  long CV, section switching, preview toggle).
+**Status: implemented in this release.**
 
-**Why:** AI latency dominates generation, but the editor architecture is
-currently O(all sections) per keystroke and every rewrite repeats full-profile
-context.
+- Buffer long text fields locally in the editor and commit on pause/blur, so a
+  keystroke no longer rerenders every CV section or writes the whole document.
+- Defer ATS/grounding analysis for 250 ms after a committed edit.
+- Memoize the profile fingerprint and job-keyword extraction.
+- Send a compact rewrite context (target section, relevant role/project/skills,
+  truncated job description/keywords) instead of the full profile.
+- Add a long-document typing performance budget to the perf suite.
+- A full section-component split is intentionally deferred: buffering removed
+  the per-keystroke editor-wide render, and the profiler/typing budget shows no
+  remaining freeze. Revisit if field count or profile size grows substantially.
+
+**Why:** AI latency dominates generation, but the editor was rerendering all
+sections and rerunning every audit on each keystroke. Buffering plus deferred
+analysis targets that hot path directly.
 
 ## Phase 5 — Language, page fit and editor UX (v1.14.0)
 

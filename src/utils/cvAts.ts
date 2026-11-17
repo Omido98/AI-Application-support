@@ -368,17 +368,22 @@ export function analyzeCvAts(
   document: CvDocument,
   application: JobApplication,
   profile: ProfileData,
+  keywords?: string[],
 ): CvAtsReport {
   const jobText = [
     application.jobTitle,
     application.jobDescription,
     application.requirements,
   ].join("\n");
-  const keywords = extractJobKeywords(jobText);
+  const resolvedKeywords = keywords ?? extractJobKeywords(jobText);
   const cvText = normalizeForMatch(cvPlainText(document));
   const cvWords = new Set(tokens(cvText));
-  const matchedKeywords = keywords.filter((keyword) => cvWords.has(keyword));
-  const missingKeywords = keywords.filter((keyword) => !cvWords.has(keyword));
+  const matchedKeywords = resolvedKeywords.filter((keyword) =>
+    cvWords.has(keyword),
+  );
+  const missingKeywords = resolvedKeywords.filter(
+    (keyword) => !cvWords.has(keyword),
+  );
   const wordCount = tokens(cvText).length;
 
   const experience = document.experience.filter((item) => item.included);
@@ -443,7 +448,9 @@ export function analyzeCvAts(
     matchedKeywords,
     missingKeywords,
     keywordCoverage:
-      keywords.length === 0 ? 0 : matchedKeywords.length / keywords.length,
+      resolvedKeywords.length === 0
+        ? 0
+        : matchedKeywords.length / resolvedKeywords.length,
     wordCount,
     checks,
     unverifiedNumbers: findUnverifiedNumbers(document, profile),

@@ -278,6 +278,28 @@ test("CV section rewrite dialog opens with guidance", async ({ page }) => {
   ).toHaveCount(0);
 });
 
+test("CV buffered edits commit and survive reload", async ({ page }) => {
+  const application = makeApplication(
+    "cv-buffered",
+    "Buffered Corp",
+    "applied",
+  );
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  const summary = page.getByRole("textbox", { name: "Professional summary" });
+  await summary.fill("Buffered summary survives the pause.");
+  await page.waitForTimeout(1_200);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Professional summary" }),
+  ).toHaveValue("Buffered summary survives the pause.");
+});
+
 test("CV history restores a saved version and survives reload", async ({
   page,
 }) => {
