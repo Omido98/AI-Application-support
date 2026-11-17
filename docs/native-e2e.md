@@ -17,11 +17,18 @@ tauri-driver; macOS UI stays covered by browser Playwright plus Rust tests.
    verifying the JSON on disk each time.
 3. Tab shortcuts (`Ctrl+1/2/4`, `Ctrl+,`), theme selection and `lastTab`
    persistence.
-4. A second launch exits and focuses the running instance (single-instance
+4. Tab shortcuts (`Ctrl+1/2/4`, `Ctrl+,`), theme selection and `lastTab`
+   persistence.
+5. CV template selection, a restored saved version and the headings-only
+   language flow in the real Tauri window.
+6. A second launch exits and focuses the running instance (single-instance
    lock).
 
 Native file dialogs, updater dialogs and keychain prompts are not automatable
 through WebDriver; they remain covered by Rust unit tests and manual smoke.
+PDF save opens a native save dialog, and history restore has no provider-free
+native setup; the browser export path, PDF renderer tests, browser history flow
+and axe history scan cover those code paths.
 
 ## Building and running
 

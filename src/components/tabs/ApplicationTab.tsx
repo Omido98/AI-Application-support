@@ -12,8 +12,10 @@ import {
 import { openExternalUrl } from "@/utils/links";
 import { exportApplicationsCsv } from "@/utils/csv";
 import { exportApplicationTimeline } from "@/utils/timeline";
+import CvBuilder from "@/components/cv/CvBuilder";
 import { useApplicationStore } from "@/stores/applicationStore";
 import { useChatStore } from "@/stores/chatStore";
+import { useCvStore } from "@/stores/cvStore";
 import { useAppStore, type ApplicationSortMode } from "@/stores/useAppStore";
 import type {
   ApplicationPriority,
@@ -233,6 +235,7 @@ export default function ApplicationTab() {
   const resetFilters = useAppStore((s) => s.resetApplicationFilters);
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [detailView, setDetailView] = useState<"details" | "cv">("details");
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [deletedApp, setDeletedApp] = useState<JobApplication | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -242,6 +245,7 @@ export default function ApplicationTab() {
   const finalizeDeletion = (app: JobApplication) => {
     useChatStore.getState().discardDraft(app.id);
     void deleteApplicationThread(app.id);
+    void useCvStore.getState().deleteCv(app.id);
   };
 
   const handleDelete = () => {
@@ -731,531 +735,574 @@ export default function ApplicationTab() {
               </Button>
             </div>
 
-            {/* Status */}
-            {exportStatus && (
-              <p className="text-xs text-text-muted">{exportStatus}</p>
-            )}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-status"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  Status
-                </Label>
-                <Select
-                  value={selected.status}
-                  onValueChange={(v) => {
-                    if (v) {
-                      updateApplication(selected.id, {
-                        status: v as ApplicationStatus,
-                      });
-                    }
-                  }}
-                >
-                  <SelectTrigger
-                    id="app-status"
-                    className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_ORDER.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {STATUS_LABELS[s]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </CardContent>
-            </Card>
+            <div
+              role="group"
+              aria-label="Application view"
+              className="flex w-fit gap-1 rounded-lg border border-border bg-field p-1"
+            >
+              <button
+                type="button"
+                aria-pressed={detailView === "details"}
+                onClick={() => setDetailView("details")}
+                className={cn(
+                  "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                  detailView === "details"
+                    ? "bg-surface text-text-primary shadow-sm"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                Details
+              </button>
+              <button
+                type="button"
+                aria-pressed={detailView === "cv"}
+                onClick={() => setDetailView("cv")}
+                className={cn(
+                  "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                  detailView === "cv"
+                    ? "bg-surface text-text-primary shadow-sm"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                Tailored CV
+              </button>
+            </div>
 
-            {/* Timeline, priority & history */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="space-y-4 pt-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="space-y-1.5">
+            {detailView === "cv" ? (
+              <CvBuilder application={selected} />
+            ) : (
+              <>
+                {/* Status */}
+                {exportStatus && (
+                  <p className="text-xs text-text-muted">{exportStatus}</p>
+                )}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
                     <Label
-                      htmlFor="app-applied-at"
-                      className="text-text-secondary text-xs"
+                      htmlFor="app-status"
+                      className="text-text-secondary text-sm font-medium"
                     >
-                      Applied on
-                    </Label>
-                    <Input
-                      id="app-applied-at"
-                      type="date"
-                      value={selected.appliedAt}
-                      onChange={(e) =>
-                        updateApplication(selected.id, {
-                          appliedAt: e.target.value,
-                        })
-                      }
-                      className={fieldClass}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="app-deadline"
-                      className="text-text-secondary text-xs"
-                    >
-                      Deadline
-                    </Label>
-                    <Input
-                      id="app-deadline"
-                      type="date"
-                      value={selected.deadline}
-                      onChange={(e) =>
-                        updateApplication(selected.id, {
-                          deadline: e.target.value,
-                        })
-                      }
-                      className={fieldClass}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="app-follow-up"
-                      className="text-text-secondary text-xs"
-                    >
-                      Follow-up on
-                    </Label>
-                    <Input
-                      id="app-follow-up"
-                      type="date"
-                      value={selected.followUpAt}
-                      onChange={(e) =>
-                        updateApplication(selected.id, {
-                          followUpAt: e.target.value,
-                        })
-                      }
-                      className={fieldClass}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="app-priority"
-                      className="text-text-secondary text-xs"
-                    >
-                      Priority
+                      Status
                     </Label>
                     <Select
-                      value={selected.priority}
-                      onValueChange={(v) =>
-                        updateApplication(selected.id, {
-                          priority: (v ?? "medium") as ApplicationPriority,
-                        })
-                      }
+                      value={selected.status}
+                      onValueChange={(v) => {
+                        if (v) {
+                          updateApplication(selected.id, {
+                            status: v as ApplicationStatus,
+                          });
+                        }
+                      }}
                     >
                       <SelectTrigger
-                        id="app-priority"
+                        id="app-status"
                         className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
                       >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="low">Low</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
+                        {STATUS_ORDER.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {STATUS_LABELS[s]}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="app-work-mode"
-                      className="text-text-secondary text-xs"
-                    >
-                      Work mode
-                    </Label>
-                    <Select
-                      value={selected.workMode || "none"}
-                      onValueChange={(v) =>
-                        updateApplication(selected.id, {
-                          workMode:
-                            v === "none" || v === null ? "" : (v as WorkMode),
-                        })
-                      }
-                    >
-                      <SelectTrigger
-                        id="app-work-mode"
-                        className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
-                      >
-                        <SelectValue>
-                          {(v) =>
-                            v === "onsite"
-                              ? "On-site"
-                              : v === "hybrid"
-                                ? "Hybrid"
-                                : v === "remote"
-                                  ? "Remote"
-                                  : "Not set"
-                          }
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Not set</SelectItem>
-                        <SelectItem value="onsite">On-site</SelectItem>
-                        <SelectItem value="hybrid">Hybrid</SelectItem>
-                        <SelectItem value="remote">Remote</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
 
-                {selected.statusHistory.length > 0 && (
-                  <div className="border-t border-border pt-2">
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
-                      Status history
-                    </p>
-                    <ol className="mt-1 space-y-1">
-                      {selected.statusHistory.slice(-6).map((entry) => (
-                        <li
-                          key={`${entry.at}-${entry.status}`}
-                          className="flex items-center justify-between gap-2 text-[11px] text-text-secondary"
+                {/* Timeline, priority & history */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="space-y-4 pt-4">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-applied-at"
+                          className="text-text-secondary text-xs"
                         >
-                          <span>{STATUS_LABELS[entry.status]}</span>
-                          <time
-                            dateTime={entry.at}
-                            className="font-mono text-[10px] text-text-muted"
+                          Applied on
+                        </Label>
+                        <Input
+                          id="app-applied-at"
+                          type="date"
+                          value={selected.appliedAt}
+                          onChange={(e) =>
+                            updateApplication(selected.id, {
+                              appliedAt: e.target.value,
+                            })
+                          }
+                          className={fieldClass}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-deadline"
+                          className="text-text-secondary text-xs"
+                        >
+                          Deadline
+                        </Label>
+                        <Input
+                          id="app-deadline"
+                          type="date"
+                          value={selected.deadline}
+                          onChange={(e) =>
+                            updateApplication(selected.id, {
+                              deadline: e.target.value,
+                            })
+                          }
+                          className={fieldClass}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-follow-up"
+                          className="text-text-secondary text-xs"
+                        >
+                          Follow-up on
+                        </Label>
+                        <Input
+                          id="app-follow-up"
+                          type="date"
+                          value={selected.followUpAt}
+                          onChange={(e) =>
+                            updateApplication(selected.id, {
+                              followUpAt: e.target.value,
+                            })
+                          }
+                          className={fieldClass}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-priority"
+                          className="text-text-secondary text-xs"
+                        >
+                          Priority
+                        </Label>
+                        <Select
+                          value={selected.priority}
+                          onValueChange={(v) =>
+                            updateApplication(selected.id, {
+                              priority: (v ?? "medium") as ApplicationPriority,
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            id="app-priority"
+                            className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
                           >
-                            {formatHistoryDate(entry.at)}
-                          </time>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-work-mode"
+                          className="text-text-secondary text-xs"
+                        >
+                          Work mode
+                        </Label>
+                        <Select
+                          value={selected.workMode || "none"}
+                          onValueChange={(v) =>
+                            updateApplication(selected.id, {
+                              workMode:
+                                v === "none" || v === null
+                                  ? ""
+                                  : (v as WorkMode),
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            id="app-work-mode"
+                            className="w-full bg-field border-border focus-visible:ring-primary/50 data-[size=default]:h-9"
+                          >
+                            <SelectValue>
+                              {(v) =>
+                                v === "onsite"
+                                  ? "On-site"
+                                  : v === "hybrid"
+                                    ? "Hybrid"
+                                    : v === "remote"
+                                      ? "Remote"
+                                      : "Not set"
+                              }
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Not set</SelectItem>
+                            <SelectItem value="onsite">On-site</SelectItem>
+                            <SelectItem value="hybrid">Hybrid</SelectItem>
+                            <SelectItem value="remote">Remote</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
 
-            {/* Role details & contact */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="space-y-3 pt-4">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
+                    {selected.statusHistory.length > 0 && (
+                      <div className="border-t border-border pt-2">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                          Status history
+                        </p>
+                        <ol className="mt-1 space-y-1">
+                          {selected.statusHistory.slice(-6).map((entry) => (
+                            <li
+                              key={`${entry.at}-${entry.status}`}
+                              className="flex items-center justify-between gap-2 text-[11px] text-text-secondary"
+                            >
+                              <span>{STATUS_LABELS[entry.status]}</span>
+                              <time
+                                dateTime={entry.at}
+                                className="font-mono text-[10px] text-text-muted"
+                              >
+                                {formatHistoryDate(entry.at)}
+                              </time>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Role details & contact */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="space-y-3 pt-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-location"
+                          className="text-text-secondary text-xs"
+                        >
+                          Location
+                        </Label>
+                        <Input
+                          id="app-location"
+                          value={selected.location}
+                          onChange={(e) =>
+                            updateApplication(selected.id, {
+                              location: e.target.value,
+                            })
+                          }
+                          placeholder="e.g. Copenhagen, Denmark"
+                          className={fieldClass}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-salary"
+                          className="text-text-secondary text-xs"
+                        >
+                          Salary
+                        </Label>
+                        <Input
+                          id="app-salary"
+                          value={selected.salary}
+                          onChange={(e) =>
+                            updateApplication(selected.id, {
+                              salary: e.target.value,
+                            })
+                          }
+                          placeholder="e.g. EUR 65–80k"
+                          className={fieldClass}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-source"
+                          className="text-text-secondary text-xs"
+                        >
+                          Source
+                        </Label>
+                        <Input
+                          id="app-source"
+                          value={selected.source}
+                          onChange={(e) =>
+                            updateApplication(selected.id, {
+                              source: e.target.value,
+                            })
+                          }
+                          placeholder="e.g. LinkedIn, referral, company site"
+                          className={fieldClass}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="app-contact-name"
+                          className="text-text-secondary text-xs"
+                        >
+                          Contact name
+                        </Label>
+                        <Input
+                          id="app-contact-name"
+                          value={selected.contactName}
+                          onChange={(e) =>
+                            updateApplication(selected.id, {
+                              contactName: e.target.value,
+                            })
+                          }
+                          placeholder="e.g. Hiring manager"
+                          className={fieldClass}
+                        />
+                      </div>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label
+                          htmlFor="app-contact-email"
+                          className="text-text-secondary text-xs"
+                        >
+                          Contact email
+                        </Label>
+                        <Input
+                          id="app-contact-email"
+                          type="email"
+                          value={selected.contactEmail}
+                          onChange={(e) =>
+                            updateApplication(selected.id, {
+                              contactEmail: e.target.value,
+                            })
+                          }
+                          placeholder="e.g. careers@example.com"
+                          className={fieldClass}
+                        />
+                      </div>
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label
+                          htmlFor="app-tags"
+                          className="text-text-secondary text-xs"
+                        >
+                          Tags
+                        </Label>
+                        <TagsEditor
+                          key={selected.id}
+                          id="app-tags"
+                          tags={selected.tags}
+                          onChange={(tags) =>
+                            updateApplication(selected.id, { tags })
+                          }
+                        />
+                        <p
+                          id="app-tags-help"
+                          className="text-[11px] text-text-muted"
+                        >
+                          Comma-separated. Search matches tags too.
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <FitMatrixCard
+                  application={selected}
+                  onOpenChat={() => setActiveTab("chat")}
+                />
+
+                {/* Company Name */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
                     <Label
-                      htmlFor="app-location"
-                      className="text-text-secondary text-xs"
+                      htmlFor="app-company"
+                      className="text-text-secondary text-sm font-medium"
                     >
-                      Location
+                      Company Name
                     </Label>
                     <Input
-                      id="app-location"
-                      value={selected.location}
+                      id="app-company"
+                      value={selected.companyName}
                       onChange={(e) =>
                         updateApplication(selected.id, {
-                          location: e.target.value,
+                          companyName: e.target.value,
                         })
                       }
-                      placeholder="e.g. Copenhagen, Denmark"
-                      className={fieldClass}
+                      placeholder="e.g., Acme Corp"
+                      className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
                     />
-                  </div>
-                  <div className="space-y-1.5">
+                  </CardContent>
+                </Card>
+
+                {/* Job Title */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
                     <Label
-                      htmlFor="app-salary"
-                      className="text-text-secondary text-xs"
+                      htmlFor="app-job-title"
+                      className="text-text-secondary text-sm font-medium"
                     >
-                      Salary
+                      Job Title
                     </Label>
                     <Input
-                      id="app-salary"
-                      value={selected.salary}
+                      id="app-job-title"
+                      value={selected.jobTitle}
                       onChange={(e) =>
                         updateApplication(selected.id, {
-                          salary: e.target.value,
+                          jobTitle: e.target.value,
                         })
                       }
-                      placeholder="e.g. EUR 65–80k"
-                      className={fieldClass}
+                      placeholder="e.g., Senior Frontend Developer"
+                      className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
                     />
-                  </div>
-                  <div className="space-y-1.5">
+                  </CardContent>
+                </Card>
+
+                {/* Application URL */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
                     <Label
-                      htmlFor="app-source"
-                      className="text-text-secondary text-xs"
+                      htmlFor="app-url"
+                      className="text-text-secondary text-sm font-medium"
                     >
-                      Source
+                      Application URL
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="app-url"
+                        value={selected.applicationUrl}
+                        onChange={(e) =>
+                          updateApplication(selected.id, {
+                            applicationUrl: e.target.value,
+                          })
+                        }
+                        placeholder="https://…"
+                        className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
+                      />
+                      <Button
+                        variant="secondary"
+                        size="icon-sm"
+                        title="Open in browser"
+                        aria-label="Open application URL in browser"
+                        disabled={!selected.applicationUrl.trim()}
+                        onClick={() =>
+                          void openInBrowser(selected.applicationUrl.trim())
+                        }
+                      >
+                        <ExternalLink className="size-3.5" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Job Description */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
+                    <Label
+                      htmlFor="app-description"
+                      className="text-text-secondary text-sm font-medium"
+                    >
+                      Job Description
+                    </Label>
+                    <Textarea
+                      id="app-description"
+                      value={selected.jobDescription}
+                      onChange={(e) =>
+                        updateApplication(selected.id, {
+                          jobDescription: e.target.value,
+                        })
+                      }
+                      placeholder="Paste the full job description here..."
+                      className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[200px] transition-[border-color,box-shadow] hover:border-primary/30"
+                    />
+                  </CardContent>
+                </Card>
+
+                {/* Application Language */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
+                    <Label
+                      htmlFor="app-language"
+                      className="text-text-secondary text-sm font-medium"
+                    >
+                      Application Language
                     </Label>
                     <Input
-                      id="app-source"
-                      value={selected.source}
+                      id="app-language"
+                      value={selected.applicationLanguage}
                       onChange={(e) =>
                         updateApplication(selected.id, {
-                          source: e.target.value,
+                          applicationLanguage: e.target.value,
                         })
                       }
-                      placeholder="e.g. LinkedIn, referral, company site"
-                      className={fieldClass}
+                      placeholder="e.g., English, Danish"
+                      className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
                     />
-                  </div>
-                  <div className="space-y-1.5">
+                  </CardContent>
+                </Card>
+
+                {/* Requirements */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
                     <Label
-                      htmlFor="app-contact-name"
-                      className="text-text-secondary text-xs"
+                      htmlFor="app-requirements"
+                      className="text-text-secondary text-sm font-medium"
                     >
-                      Contact name
+                      What does the application require?
                     </Label>
-                    <Input
-                      id="app-contact-name"
-                      value={selected.contactName}
+                    <Textarea
+                      id="app-requirements"
+                      value={selected.requirements}
                       onChange={(e) =>
                         updateApplication(selected.id, {
-                          contactName: e.target.value,
+                          requirements: e.target.value,
                         })
                       }
-                      placeholder="e.g. Hiring manager"
-                      className={fieldClass}
+                      placeholder="e.g., Cover letter, Answer to 3 specific questions..."
+                      className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[150px] transition-[border-color,box-shadow] hover:border-primary/30"
                     />
-                  </div>
-                  <div className="space-y-1.5 sm:col-span-2">
+                  </CardContent>
+                </Card>
+
+                {/* Company Research (optional) */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
                     <Label
-                      htmlFor="app-contact-email"
-                      className="text-text-secondary text-xs"
+                      htmlFor="app-research"
+                      className="text-text-secondary text-sm font-medium"
                     >
-                      Contact email
+                      Company Research (optional)
                     </Label>
-                    <Input
-                      id="app-contact-email"
-                      type="email"
-                      value={selected.contactEmail}
+                    <Textarea
+                      id="app-research"
+                      value={selected.companyResearch}
                       onChange={(e) =>
                         updateApplication(selected.id, {
-                          contactEmail: e.target.value,
+                          companyResearch: e.target.value,
                         })
                       }
-                      placeholder="e.g. careers@example.com"
-                      className={fieldClass}
+                      placeholder="Paste any information you have about the company — website content, news articles, annual reports, etc. The AI will use this context to tailor your application."
+                      className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[150px] transition-[border-color,box-shadow] hover:border-primary/30"
                     />
-                  </div>
-                  <div className="space-y-1.5 sm:col-span-2">
+                  </CardContent>
+                </Card>
+
+                {/* Notes */}
+                <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
+                  <CardContent className="pt-4 space-y-2">
                     <Label
-                      htmlFor="app-tags"
-                      className="text-text-secondary text-xs"
+                      htmlFor="app-notes"
+                      className="text-text-secondary text-sm font-medium"
                     >
-                      Tags
+                      Notes
                     </Label>
-                    <TagsEditor
-                      key={selected.id}
-                      id="app-tags"
-                      tags={selected.tags}
-                      onChange={(tags) =>
-                        updateApplication(selected.id, { tags })
+                    <Textarea
+                      id="app-notes"
+                      value={selected.notes}
+                      onChange={(e) =>
+                        updateApplication(selected.id, {
+                          notes: e.target.value,
+                        })
                       }
+                      placeholder="Deadlines, contacts, follow-ups…"
+                      className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[100px] transition-[border-color,box-shadow] hover:border-primary/30"
                     />
-                    <p
-                      id="app-tags-help"
-                      className="text-[11px] text-text-muted"
-                    >
-                      Comma-separated. Search matches tags too.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <FitMatrixCard
-              application={selected}
-              onOpenChat={() => setActiveTab("chat")}
-            />
-
-            {/* Company Name */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-company"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  Company Name
-                </Label>
-                <Input
-                  id="app-company"
-                  value={selected.companyName}
-                  onChange={(e) =>
-                    updateApplication(selected.id, {
-                      companyName: e.target.value,
-                    })
-                  }
-                  placeholder="e.g., Acme Corp"
-                  className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
-                />
-              </CardContent>
-            </Card>
-
-            {/* Job Title */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-job-title"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  Job Title
-                </Label>
-                <Input
-                  id="app-job-title"
-                  value={selected.jobTitle}
-                  onChange={(e) =>
-                    updateApplication(selected.id, {
-                      jobTitle: e.target.value,
-                    })
-                  }
-                  placeholder="e.g., Senior Frontend Developer"
-                  className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
-                />
-              </CardContent>
-            </Card>
-
-            {/* Application URL */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-url"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  Application URL
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="app-url"
-                    value={selected.applicationUrl}
-                    onChange={(e) =>
-                      updateApplication(selected.id, {
-                        applicationUrl: e.target.value,
-                      })
-                    }
-                    placeholder="https://…"
-                    className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
-                  />
-                  <Button
-                    variant="secondary"
-                    size="icon-sm"
-                    title="Open in browser"
-                    aria-label="Open application URL in browser"
-                    disabled={!selected.applicationUrl.trim()}
-                    onClick={() =>
-                      void openInBrowser(selected.applicationUrl.trim())
-                    }
-                  >
-                    <ExternalLink className="size-3.5" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Job Description */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-description"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  Job Description
-                </Label>
-                <Textarea
-                  id="app-description"
-                  value={selected.jobDescription}
-                  onChange={(e) =>
-                    updateApplication(selected.id, {
-                      jobDescription: e.target.value,
-                    })
-                  }
-                  placeholder="Paste the full job description here..."
-                  className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[200px] transition-[border-color,box-shadow] hover:border-primary/30"
-                />
-              </CardContent>
-            </Card>
-
-            {/* Application Language */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-language"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  Application Language
-                </Label>
-                <Input
-                  id="app-language"
-                  value={selected.applicationLanguage}
-                  onChange={(e) =>
-                    updateApplication(selected.id, {
-                      applicationLanguage: e.target.value,
-                    })
-                  }
-                  placeholder="e.g., English, Danish"
-                  className="bg-field text-text-primary border-border focus-visible:ring-primary/50 transition-[border-color,box-shadow] hover:border-primary/30"
-                />
-              </CardContent>
-            </Card>
-
-            {/* Requirements */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-requirements"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  What does the application require?
-                </Label>
-                <Textarea
-                  id="app-requirements"
-                  value={selected.requirements}
-                  onChange={(e) =>
-                    updateApplication(selected.id, {
-                      requirements: e.target.value,
-                    })
-                  }
-                  placeholder="e.g., Cover letter, Answer to 3 specific questions..."
-                  className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[150px] transition-[border-color,box-shadow] hover:border-primary/30"
-                />
-              </CardContent>
-            </Card>
-
-            {/* Company Research (optional) */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-research"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  Company Research (optional)
-                </Label>
-                <Textarea
-                  id="app-research"
-                  value={selected.companyResearch}
-                  onChange={(e) =>
-                    updateApplication(selected.id, {
-                      companyResearch: e.target.value,
-                    })
-                  }
-                  placeholder="Paste any information you have about the company — website content, news articles, annual reports, etc. The AI will use this context to tailor your application."
-                  className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[150px] transition-[border-color,box-shadow] hover:border-primary/30"
-                />
-              </CardContent>
-            </Card>
-
-            {/* Notes */}
-            <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">
-              <CardContent className="pt-4 space-y-2">
-                <Label
-                  htmlFor="app-notes"
-                  className="text-text-secondary text-sm font-medium"
-                >
-                  Notes
-                </Label>
-                <Textarea
-                  id="app-notes"
-                  value={selected.notes}
-                  onChange={(e) =>
-                    updateApplication(selected.id, { notes: e.target.value })
-                  }
-                  placeholder="Deadlines, contacts, follow-ups…"
-                  className="bg-field text-text-primary border-border focus-visible:ring-primary/50 min-h-[100px] transition-[border-color,box-shadow] hover:border-primary/30"
-                />
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1273,7 +1320,8 @@ export default function ApplicationTab() {
               <span className="text-text-primary font-medium">
                 {pendingDelete?.companyName.trim() || "this application"}
               </span>{" "}
-              and its entire chat history. You can undo for 8 seconds.
+              and its entire chat history and tailored CV. You can undo for 8
+              seconds.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

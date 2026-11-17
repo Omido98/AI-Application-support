@@ -505,6 +505,7 @@ function renderProfileSections(profile: ProfileData): string[] {
   const details: string[] = [];
   if (profile.fullName.trim()) details.push(`name: ${profile.fullName.trim()}`);
   if (profile.email.trim()) details.push(`email: ${profile.email.trim()}`);
+  if (profile.phone?.trim()) details.push(`phone: ${profile.phone.trim()}`);
   if (profile.city.trim() && profile.country.trim()) {
     details.push(`location: ${profile.city.trim()}, ${profile.country.trim()}`);
   } else if (profile.city.trim()) {
@@ -514,6 +515,12 @@ function renderProfileSections(profile: ProfileData): string[] {
   }
   if (profile.linkedinUrl.trim()) {
     details.push(`LinkedIn: ${profile.linkedinUrl.trim()}`);
+  }
+  if (profile.portfolioUrl?.trim()) {
+    details.push(`Portfolio: ${profile.portfolioUrl.trim()}`);
+  }
+  if (profile.githubUrl?.trim()) {
+    details.push(`GitHub: ${profile.githubUrl.trim()}`);
   }
   if (details.length > 0) {
     sections.push("- Personal Details:", ...details.map((d) => `  * ${d}`));
@@ -546,6 +553,9 @@ function renderProfileSections(profile: ProfileData): string[] {
       if (w.jobDescription) {
         parts.push(`    Responsibilities: ${w.jobDescription}`);
       }
+      if ((w.achievements ?? []).length > 0) {
+        parts.push(`    Achievements: ${(w.achievements ?? []).join(" | ")}`);
+      }
       const projects = w.projects.filter((p) => p.name.trim().length > 0);
       if (projects.length > 0) {
         parts.push("    Projects/Initiatives:");
@@ -562,6 +572,11 @@ function renderProfileSections(profile: ProfileData): string[] {
                 .join(" – ")})`
             : "";
           parts.push(`      - ${p.name.trim()}${range}`);
+          if ((p.achievements ?? []).length > 0) {
+            parts.push(
+              `        Achievements: ${(p.achievements ?? []).join(" | ")}`,
+            );
+          }
         });
       }
       sections.push(parts.join("\n"));
@@ -674,9 +689,12 @@ export function buildCvExtractionPrompt(): string {
     `{
   "fullName": "",
   "email": "",
+  "phone": "",
   "city": "",
   "country": "",
   "linkedinUrl": "",
+  "portfolioUrl": "",
+  "githubUrl": "",
   "education": [
     {
       "school": "",
@@ -702,6 +720,7 @@ export function buildCvExtractionPrompt(): string {
       "endYear": "",
       "isCurrent": false,
       "jobDescription": "",
+      "achievements": [],
       "projects": [
         {
           "name": "",
@@ -709,7 +728,8 @@ export function buildCvExtractionPrompt(): string {
           "startYear": "",
           "endMonth": "",
           "endYear": "",
-          "isCurrent": false
+          "isCurrent": false,
+          "achievements": []
         }
       ]
     }
@@ -742,6 +762,7 @@ export function buildCvExtractionPrompt(): string {
     "- isCurrent is true only when the CV says the role/engagement is ongoing.",
     "- fluency must be one of: Beginner, Elementary, Intermediate, Upper Intermediate, Advanced, Fluent, Native. Use Intermediate when the CV does not state a level.",
     "- Keep job descriptions factual and compact; preserve technologies, metrics and named achievements.",
+    "- Put concrete outcomes in achievements only when the CV states them; do not invent metrics or achievements.",
     "- Escape quotes and newlines so the result is valid JSON. Do not wrap the JSON in a code fence.",
   ].join("\n");
 }

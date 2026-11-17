@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import fs from "node:fs/promises";
+import mammoth from "mammoth";
 import {
   dateFromNow,
   makeApplication,
@@ -220,4 +222,370 @@ test("exports future deadlines and follow-ups as an ICS calendar", async ({
   expect(download.suggestedFilename()).toMatch(
     /^applications-calendar-\d{4}-\d{2}-\d{2}\.ics$/,
   );
+});
+
+test("CV sub-view starts from the profile and exports a Word file", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const application = makeApplication("cv", "CV Corp", "applied");
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Tailor a CV for this application" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Tailored CV" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
+  await expect(page.getByText("Saved locally")).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Template", exact: true }).click();
+  await page.getByRole("option", { name: "Compact" }).click();
+
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByLabel("CV preview")).toBeVisible();
+  await expect(page.getByLabel("CV preview")).toHaveAttribute(
+    "data-template",
+    "compact",
+  );
+  await expect(page.getByRole("heading", { name: "Jane Doe" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit" }).click();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Word" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.docx$/);
+
+  const pdfDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export PDF" }).click();
+  const pdfDownload = await pdfDownloadPromise;
+  expect(pdfDownload.suggestedFilename()).toMatch(/\.pdf$/);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
+});
+
+test("CV can explicitly add recent chat details to its context", async ({
+  page,
+}) => {
+  const application = makeApplication(
+    "cv-chat-context",
+    "Chat Corp",
+    "applied",
+  );
+  await seed(page, {
+    applications: [application],
+    withChat: true,
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page.getByRole("button", { name: "Add recent chat details" }).click();
+
+  const context = page.getByRole("textbox", { name: "Extra context" });
+  await expect(context).toHaveValue(
+    /Recent chat context \(selected manually\):/,
+  );
+  const firstBlock = await context.inputValue();
+  await context.fill(`${firstBlock}\n\nMy own note.`);
+  await page.getByRole("button", { name: "Add recent chat details" }).click();
+
+  await expect(context).toHaveValue(/My own note\./);
+  const value = await context.inputValue();
+  expect(
+    value.match(/Recent chat context \(selected manually\):/g),
+  ).toHaveLength(1);
+});
+
+test("CV export includes the latest buffered edit", async ({ page }) => {
+  const application = makeApplication(
+    "cv-buffered-export",
+    "Export Corp",
+    "applied",
+  );
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page
+    .getByRole("textbox", { name: "Professional summary" })
+    .fill("Buffered export summary with TypeScript evidence.");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Word" }).click();
+  const download = await downloadPromise;
+  const path = await download.path();
+  expect(path).toBeTruthy();
+  const bytes = await fs.readFile(path as string);
+  const text = await mammoth.extractRawText({
+    buffer: Buffer.from(bytes),
+  });
+  expect(text.value).toContain(
+    "Buffered export summary with TypeScript evidence.",
+  );
+});
+
+test("CV section rewrite dialog opens with guidance", async ({ page }) => {
+  const application = makeApplication("cv-rewrite", "Rewrite Corp", "applied");
+  await seed(page, { applications: [application], withChat: true });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await expect(page.getByText("Saved locally")).toBeVisible();
+
+  const rewrite = page.getByRole("button", { name: "AI rewrite" });
+  await expect(rewrite).toBeEnabled();
+  await rewrite.click();
+  await expect(
+    page.getByRole("heading", { name: "Rewrite summary and headline" }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Guidance for the rewrite (optional)")
+    .fill("Make it more concise.");
+  await page.getByRole("button", { name: "Shorter" }).click();
+  await expect(
+    page.getByLabel("Guidance for the rewrite (optional)"),
+  ).toHaveValue("Make it shorter and tighter without losing important facts.");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Rewrite summary and headline" }),
+  ).toHaveCount(0);
+});
+
+test("CV buffered edits commit and survive reload", async ({ page }) => {
+  const application = makeApplication(
+    "cv-buffered",
+    "Buffered Corp",
+    "applied",
+  );
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  const summary = page.getByRole("textbox", { name: "Professional summary" });
+  await summary.fill("Buffered summary survives the pause.");
+  await page.waitForTimeout(1_200);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Professional summary" }),
+  ).toHaveValue("Buffered summary survives the pause.");
+});
+
+test("CV language change offers headings-only or regeneration", async ({
+  page,
+}) => {
+  const application = makeApplication(
+    "cv-language",
+    "Language Corp",
+    "applied",
+  );
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  const summary = page.getByRole("textbox", { name: "Professional summary" });
+  await page
+    .getByRole("button", { name: "Collapse Professional Summary" })
+    .click();
+  await expect(summary).toBeHidden();
+  await page
+    .getByRole("button", { name: "Expand Professional Summary" })
+    .click();
+  await expect(summary).toBeVisible();
+  await page.getByRole("combobox", { name: "Language", exact: true }).click();
+  await page.getByRole("option", { name: "Svenska" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Change CV language to Swedish?" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Change headings only" }).click();
+  await expect(
+    page.getByText(/Headings are Swedish, but the body was written in English/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Mark body as translated" }).click();
+  await expect(
+    page.getByText(/Headings are Swedish, but the body was written in English/),
+  ).toHaveCount(0);
+});
+
+test("CV preview marks page boundaries on a long CV", async ({ page }) => {
+  const application = makeApplication("cv-pages", "Pages Corp", "applied");
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page.evaluate(async (applicationId) => {
+    const { useCvStore } = await import("/src/stores/cvStore.ts");
+    const roles = Array.from({ length: 12 }, (_, index) => ({
+      id: `pages-role-${index}`,
+      company: `Company ${index}`,
+      role: `Engineer ${index}`,
+      location: "Remote",
+      startDate: "Jan 2020",
+      endDate: "Dec 2022",
+      current: false,
+      bullets: Array.from(
+        { length: 8 },
+        (_, bullet) =>
+          `Delivered measurable reporting improvement ${index}-${bullet}.`,
+      ),
+      included: true,
+    }));
+    useCvStore.getState().updateCv(applicationId, (current) => ({
+      ...current,
+      experience: [...current.experience, ...roles],
+    }));
+  }, application.id);
+
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+});
+
+test("CV ATS groups priorities and highlights matches", async ({ page }) => {
+  const application = makeApplication("cv-ats", "ATS Corp", "applied", {
+    jobDescription:
+      "Build design systems with TypeScript and accessibility testing.",
+    requirements:
+      "Must have TypeScript and accessibility testing.\nNice to have AWS.",
+  });
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page.evaluate(async (applicationId) => {
+    const { useCvStore } = await import("/src/stores/cvStore.ts");
+    useCvStore.getState().updateCv(applicationId, (current) => ({
+      ...current,
+      summary:
+        "Built TypeScript design systems with accessibility testing for reporting teams.",
+      skills: ["TypeScript", "Accessibility", "Testing"],
+    }));
+  }, application.id);
+
+  await expect(page.getByText("Must-have").first()).toBeVisible();
+  await expect(page.getByText("Preferred").first()).toBeVisible();
+  await expect(page.getByText(/aws/i).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(
+    page.locator("mark").filter({ hasText: "TypeScript" }).first(),
+  ).toBeVisible();
+});
+
+test("CV history restores a saved version and survives reload", async ({
+  page,
+}) => {
+  const application = makeApplication("cv-history", "History Corp", "applied");
+  const now = "2026-01-01T00:00:00.000Z";
+  const document = {
+    schemaVersion: 1,
+    language: "en",
+    pageSize: "a4",
+    generatedAt: now,
+    updatedAt: now,
+    profileFingerprint: "",
+    applicationUpdatedAt: application.updatedAt,
+    extraContext: "",
+    contact: {
+      fullName: "Jane Doe",
+      email: "jane@example.com",
+      phone: "",
+      location: "",
+      linkedinUrl: "",
+      portfolioUrl: "",
+      githubUrl: "",
+    },
+    headline: "",
+    summary: "Current summary",
+    skills: ["Kubernetes"],
+    aiSections: ["summary"],
+    experience: [],
+    education: [],
+    projects: [],
+    certifications: [],
+    languages: [],
+    otherEngagements: [],
+    sectionOrder: [
+      "summary",
+      "skills",
+      "experience",
+      "education",
+      "projects",
+      "certifications",
+      "languages",
+      "other",
+    ],
+  };
+  const history = {
+    schemaVersion: 1,
+    snapshots: [
+      {
+        id: "history-1",
+        savedAt: now,
+        label: "Benchmark version",
+        document: { ...document, summary: "Older summary" },
+      },
+    ],
+  };
+  await seed(page, { applications: [application] });
+  await page.addInitScript(
+    ({ cvKey, historyKey, cv, historyValue }) => {
+      if (localStorage.getItem("e2e-cv-history-seeded")) return;
+      localStorage.setItem(cvKey, JSON.stringify(cv));
+      localStorage.setItem(historyKey, JSON.stringify(historyValue));
+      localStorage.setItem("e2e-cv-history-seeded", "1");
+    },
+    {
+      cvKey: `aas:cv_${application.id}.json`,
+      historyKey: `aas:cv_history_${application.id}.json`,
+      cv: document,
+      historyValue: history,
+    },
+  );
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Grounding review" }),
+  ).toBeVisible();
+  await expect(page.getByText("AI-assisted")).toBeVisible();
+  await page
+    .getByRole("textbox", { name: "Professional summary" })
+    .fill("Manually edited summary.");
+  await expect(page.getByText("AI-assisted")).toHaveCount(0);
+  await expect(
+    page.getByText(/is not in your profile skills or extra context/),
+  ).toBeVisible();
+  const versions = page.getByRole("button", { name: "Versions (1)" });
+  await expect(versions).toBeEnabled();
+  await versions.click();
+  await expect(
+    page.getByRole("heading", { name: "CV versions" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Restore" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Professional summary" }),
+  ).toHaveValue("Older summary");
+
+  await page.reload();
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Professional summary" }),
+  ).toHaveValue("Older summary");
+  await expect(
+    page.getByRole("button", { name: "Versions (2)" }),
+  ).toBeEnabled();
 });

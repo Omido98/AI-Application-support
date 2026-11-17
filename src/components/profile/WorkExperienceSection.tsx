@@ -40,6 +40,7 @@ function createEmptyWorkExperience(): WorkExperience {
     endMonth: "June",
     endYear: "2024",
     jobDescription: "",
+    achievements: [],
     projects: [],
   };
 }
@@ -53,6 +54,7 @@ function createEmptyProject(): Project {
     isCurrent: false,
     endMonth: "June",
     endYear: "2024",
+    achievements: [],
   };
 }
 
@@ -69,7 +71,11 @@ function isWorkExperienceEmpty(w: WorkExperience): boolean {
     !w.company.trim() &&
     !w.role.trim() &&
     !w.jobDescription.trim() &&
-    w.projects.every((p) => !p.name.trim())
+    (w.achievements ?? []).every((item) => !item.trim()) &&
+    w.projects.every(
+      (p) =>
+        !p.name.trim() && (p.achievements ?? []).every((item) => !item.trim()),
+    )
   );
 }
 
@@ -404,6 +410,34 @@ export default function WorkExperienceSection() {
                       />
                     </div>
 
+                    {/* Achievements */}
+                    <div className="grid gap-1.5">
+                      <Label
+                        htmlFor={`work-${index}-achievements`}
+                        className="text-text-secondary text-xs"
+                      >
+                        Key achievements (one per line)
+                      </Label>
+                      <Textarea
+                        id={`work-${index}-achievements`}
+                        className={textareaClass}
+                        value={(we.achievements ?? []).join("\n")}
+                        onChange={(e) =>
+                          updateWorkExperience(we.id, {
+                            achievements: e.target.value
+                              .split("\n")
+                              .map((item) => item.trim())
+                              .filter(Boolean),
+                          })
+                        }
+                        placeholder="Shipped a feature that reduced response time by 30%…"
+                      />
+                      <p className="text-[11px] text-text-muted">
+                        Concrete outcomes help the CV builder without inventing
+                        details.
+                      </p>
+                    </div>
+
                     {/* Projects */}
                     <div className="grid gap-2">
                       <div className="flex items-center justify-between">
@@ -459,6 +493,34 @@ export default function WorkExperienceSection() {
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
+                          </div>
+
+                          <div className="grid gap-1.5">
+                            <Label
+                              htmlFor={`work-${index}-project-${pi}-achievements`}
+                              className="text-text-secondary text-xs"
+                            >
+                              Project achievements (one per line)
+                            </Label>
+                            <Textarea
+                              id={`work-${index}-project-${pi}-achievements`}
+                              className={textareaClass}
+                              value={(proj.achievements ?? []).join("\n")}
+                              onChange={(e) => {
+                                const next = [...we.projects];
+                                next[pi] = {
+                                  ...proj,
+                                  achievements: e.target.value
+                                    .split("\n")
+                                    .map((item) => item.trim())
+                                    .filter(Boolean),
+                                };
+                                updateWorkExperience(we.id, {
+                                  projects: next,
+                                });
+                              }}
+                              placeholder="Optional concrete outcomes for this project…"
+                            />
                           </div>
 
                           <div className="grid grid-cols-2 gap-4">

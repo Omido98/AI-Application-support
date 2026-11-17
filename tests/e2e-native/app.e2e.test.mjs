@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import {
@@ -288,6 +294,142 @@ test("tab shortcuts and settings persist", { timeout: 90_000 }, async () => {
 
   await closeDialogWithEscape();
 });
+
+test(
+  "CV template, history and language controls work in the native window",
+  { timeout: 120_000 },
+  async () => {
+    const applications = JSON.parse(readFileSync(applicationsFilePath, "utf8"));
+    const app =
+      applications.applications.find(
+        (application) => application.companyName === "Acme Updated",
+      ) ?? applications.applications[0];
+    const snapshotDocument = {
+      schemaVersion: 1,
+      language: "en",
+      pageSize: "a4",
+      template: "classic",
+      generatedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      profileFingerprint: "native-e2e",
+      applicationUpdatedAt: "",
+      extraContext: "",
+      contact: {
+        fullName: "Native Tester",
+        email: "native@example.com",
+        phone: "",
+        location: "",
+        linkedinUrl: "",
+        portfolioUrl: "",
+        githubUrl: "",
+      },
+      headline: "Native snapshot",
+      summary: "Native snapshot summary.",
+      skills: ["TypeScript"],
+      experience: [],
+      education: [],
+      projects: [],
+      certifications: [],
+      languages: [],
+      otherEngagements: [],
+      sectionOrder: ["summary", "skills"],
+    };
+    writeFileSync(
+      path.join(dataDir, `cv_history_${app.id}.json`),
+      JSON.stringify([
+        {
+          id: "native-snapshot",
+          savedAt: new Date().toISOString(),
+          label: "Native fixture",
+          document: snapshotDocument,
+        },
+      ]),
+    );
+
+    await pressShortcut(
+      "2",
+      tabIsSelected("Application"),
+      "Ctrl+2 did not open Application",
+    );
+    await driver.clickXPath(
+      `//aside//button[contains(normalize-space(.), ${JSON.stringify(app.companyName)})]`,
+    );
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Tailored CV')]",
+    );
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Start from profile')]",
+    );
+    await driver.waitFor(
+      "return !!document.querySelector('#cv-template-edit');",
+      { message: "CV editor did not open" },
+    );
+
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Versions')]",
+    );
+    await driver.waitFor(
+      "return document.body.textContent.includes('Native fixture');",
+      { message: "native history snapshot was not loaded" },
+    );
+    await driver.clickXPath(
+      "//li[contains(normalize-space(.), 'Native fixture')]//button[contains(normalize-space(.), 'Restore')]",
+    );
+    await driver.waitFor(
+      "return document.querySelector('textarea[aria-label=\"Professional summary\"]')?.value.includes('Native snapshot summary.');",
+      { message: "native history restore did not replace the CV" },
+    );
+
+    await driver.clickXPath("//*[@id='cv-template-edit']");
+    await driver.waitFor(
+      "return !!document.querySelector('[role=\"option\"]');",
+      { message: "template options did not open" },
+    );
+    const choseCompact = await driver.execute(`
+      const option = [...document.querySelectorAll('[role="option"]')]
+        .find((node) =>
+          node.textContent.includes("Compact") &&
+          node.getBoundingClientRect().width > 0);
+      option?.click();
+      return !!option;
+    `);
+    assert.equal(choseCompact, true, "Compact option was not visible");
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Preview')]",
+    );
+    await driver.waitFor(
+      "return document.querySelector('[aria-label=\"CV preview\"]')?.getAttribute('data-template') === 'compact';",
+      { message: "compact template did not reach the preview" },
+    );
+    await driver.clickXPath("//button[normalize-space(.)='Edit']");
+
+    await driver.clickXPath("//*[@id='cv-language-edit']");
+    await driver.waitFor(
+      "return !!document.querySelector('[role=\"option\"]');",
+      { message: "language options did not open" },
+    );
+    const choseSwedish = await driver.execute(`
+      const option = [...document.querySelectorAll('[role="option"]')]
+        .find((node) =>
+          node.textContent.includes("Svenska") &&
+          node.getBoundingClientRect().width > 0);
+      option?.click();
+      return !!option;
+    `);
+    assert.equal(choseSwedish, true, "Svenska option was not visible");
+    await driver.waitFor(
+      "return document.querySelector('[role=\"dialog\"]')?.textContent.includes('Change CV language to Swedish?');",
+      { message: "language review dialog did not open" },
+    );
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Change headings only')]",
+    );
+    await driver.waitFor(
+      "return document.body.textContent.includes('Headings are Swedish');",
+      { message: "mixed-language warning did not appear" },
+    );
+  },
+);
 
 test(
   "a second launch focuses the running instance instead of starting another",

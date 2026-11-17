@@ -925,3 +925,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     scheduleDraftsSave();
   },
 }));
+
+/** Load a thread without switching the active chat tab (used by the CV builder). */
+export async function loadChatMessagesFor(
+  applicationId: string,
+): Promise<ChatMessage[]> {
+  await loadThread(applicationId);
+  return useChatStore.getState().threads[applicationId]?.messages ?? [];
+}

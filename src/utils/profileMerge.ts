@@ -49,9 +49,12 @@ export function applyImportedProfile(
     ...current,
     fullName: fill(current.fullName, imported.fullName),
     email: fill(current.email, imported.email),
+    phone: fill(current.phone ?? "", imported.phone ?? ""),
     city: fill(current.city, imported.city),
     country: fill(current.country, imported.country),
     linkedinUrl: fill(current.linkedinUrl, imported.linkedinUrl),
+    portfolioUrl: fill(current.portfolioUrl ?? "", imported.portfolioUrl ?? ""),
+    githubUrl: fill(current.githubUrl ?? "", imported.githubUrl ?? ""),
     education: [
       ...current.education,
       ...dedupe(current.education, imported.education, (item) =>

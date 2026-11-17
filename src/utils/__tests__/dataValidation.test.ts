@@ -123,6 +123,36 @@ describe("normalizeProfileData", () => {
     expect(normalizeProfileData(null)).toBeNull();
   });
 
+  it("normalizes new contact fields and achievement lists", () => {
+    const profile = normalizeProfileData({
+      fullName: "Jane",
+      phone: "+45 12 34 56 78",
+      portfolioUrl: "https://jane.example",
+      githubUrl: "https://github.com/jane",
+      workExperience: [
+        {
+          company: "Acme",
+          role: "Engineer",
+          achievements: [" Shipped X ", "", 42, "Shipped X"],
+          projects: [
+            {
+              name: "Project",
+              achievements: [" Improved Y "],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(profile?.phone).toBe("+45 12 34 56 78");
+    expect(profile?.portfolioUrl).toBe("https://jane.example");
+    expect(profile?.githubUrl).toBe("https://github.com/jane");
+    expect(profile?.workExperience[0].achievements).toEqual(["Shipped X"]);
+    expect(profile?.workExperience[0].projects[0].achievements).toEqual([
+      "Improved Y",
+    ]);
+  });
+
   it("coerces every collection and drops malformed entries", () => {
     const profile = normalizeProfileData({
       fullName: "Jane",

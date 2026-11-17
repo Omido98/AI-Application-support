@@ -190,3 +190,164 @@ test("@perf stream deltas coalesce into very few updates", async ({
   expect(result.flushes).toBeLessThanOrEqual(2);
   expect(result.mutations).toBeLessThanOrEqual(100);
 });
+
+test("@perf CV typing stays responsive with a long document", async ({
+  page,
+}, testInfo) => {
+  await instrument(page);
+  await openApp(page, { applications: [application], lastTab: "application" });
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Professional summary" }),
+  ).toBeVisible();
+
+  await page.evaluate(async (applicationId) => {
+    const { useCvStore } = await import("/src/stores/cvStore.ts");
+    const extraRoles = Array.from({ length: 8 }, (_, roleIndex) => ({
+      id: `perf-role-${roleIndex}`,
+      company: `Perf Company ${roleIndex}`,
+      role: `Engineer ${roleIndex}`,
+      location: "Remote",
+      startDate: "Jan 2020",
+      endDate: "Dec 2022",
+      current: false,
+      bullets: Array.from(
+        { length: 8 },
+        (_, bulletIndex) =>
+          `Delivered measurable reporting improvement ${roleIndex}-${bulletIndex} for internal teams.`,
+      ),
+      included: true,
+    }));
+    useCvStore.getState().updateCv(applicationId, (current) => ({
+      ...current,
+      experience: [...current.experience, ...extraRoles],
+    }));
+  }, application.id);
+  await expect(
+    page.getByRole("textbox", { name: "Company for Engineer 7" }),
+  ).toHaveValue("Perf Company 7");
+
+  const before = await page.evaluate(
+    () =>
+      (window as unknown as { __perf: { longTasks: unknown[] } }).__perf
+        .longTasks.length,
+  );
+  const start = Date.now();
+  await page
+    .getByRole("textbox", { name: "Professional summary" })
+    .pressSequentially(
+      "Accessible systems, reporting tools and reliable delivery.",
+      { delay: 0 },
+    );
+  const elapsed = Date.now() - start;
+  const after = await page.evaluate(() => {
+    const perf = (
+      window as unknown as {
+        __perf: { longTasks: { start: number; duration: number }[] };
+      }
+    ).__perf;
+    return {
+      count: perf.longTasks.length,
+      longest: perf.longTasks
+        .slice(-10)
+        .reduce((max, task) => Math.max(max, task.duration), 0),
+    };
+  });
+
+  await testInfo.attach("cv-typing.json", {
+    body: JSON.stringify(
+      {
+        elapsed,
+        tasksDuringTyping: after.count - before,
+        longest: after.longest,
+      },
+      null,
+      2,
+    ),
+    contentType: "application/json",
+  });
+  console.log(
+    "[perf] CV typing",
+    JSON.stringify({ elapsed, tasksDuringTyping: after.count - before }),
+  );
+
+  // Generous ceilings for the unminified dev server; catch a real freeze.
+  expect(elapsed).toBeLessThan(8_000);
+  expect(after.count - before).toBeLessThanOrEqual(10);
+  expect(after.longest).toBeLessThan(1_000);
+});
+
+test("@perf CV navigation, preview and PDF stay within budgets", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  await instrument(page);
+  await openApp(page, { applications: [application], lastTab: "application" });
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Professional summary" }),
+  ).toBeVisible();
+
+  const nav = page.getByRole("navigation", { name: "CV sections" });
+  const navStart = Date.now();
+  for (const name of [
+    "Work Experience",
+    "Education",
+    "Skills",
+    "Professional Summary",
+  ]) {
+    await nav.getByRole("button", { name, exact: true }).click();
+  }
+  const navElapsed = Date.now() - navStart;
+
+  const previewStart = Date.now();
+  for (let index = 0; index < 4; index += 1) {
+    await page.getByRole("button", { name: "Preview" }).click();
+    await expect(page.getByLabel("CV preview")).toBeVisible();
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(
+      page.getByRole("textbox", { name: "Professional summary" }),
+    ).toBeVisible();
+  }
+  const previewElapsed = Date.now() - previewStart;
+
+  const pdfStart = Date.now();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export PDF" }).click();
+  await downloadPromise;
+  const pdfElapsed = Date.now() - pdfStart;
+
+  const perf = await page.evaluate(() => {
+    const value = (
+      window as unknown as {
+        __perf: { longTasks: { duration: number }[]; cls: number };
+      }
+    ).__perf;
+    return {
+      longTaskCount: value.longTasks.length,
+      longestTask: value.longTasks.reduce(
+        (max, task) => Math.max(max, task.duration),
+        0,
+      ),
+    };
+  });
+
+  const metrics = {
+    navElapsed,
+    previewElapsed,
+    pdfElapsed,
+    ...perf,
+  };
+  await testInfo.attach("cv-navigation-preview-pdf.json", {
+    body: JSON.stringify(metrics, null, 2),
+    contentType: "application/json",
+  });
+  console.log("[perf] CV navigation/preview/PDF", JSON.stringify(metrics));
+
+  expect(navElapsed).toBeLessThan(8_000);
+  expect(previewElapsed).toBeLessThan(12_000);
+  expect(pdfElapsed).toBeLessThan(30_000);
+  expect(perf.longestTask).toBeLessThan(2_000);
+});

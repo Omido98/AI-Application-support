@@ -1715,6 +1715,30 @@ fn chat_thread_id(file_name: &str) -> Option<&str> {
     Some(id)
 }
 
+/// The application id in a `cv_<id>.json` (or `.json.bak`) CV draft file.
+fn cv_draft_id(file_name: &str) -> Option<&str> {
+    let stem = file_name
+        .strip_suffix(".json.bak")
+        .or_else(|| file_name.strip_suffix(".json"))?;
+    let id = stem.strip_prefix("cv_")?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some(id)
+}
+
+/// The application id in a `cv_history_<id>.json` (or `.json.bak`) file.
+fn cv_history_id(file_name: &str) -> Option<&str> {
+    let stem = file_name
+        .strip_suffix(".json.bak")
+        .or_else(|| file_name.strip_suffix(".json"))?;
+    let id = stem.strip_prefix("cv_history_")?;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some(id)
+}
+
 /// Delete thread files whose application is no longer in the restored data.
 /// Runs against a directory handed in by the caller, never a webview path.
 /// Returns the names it removed, sorted for a stable result.
@@ -1761,6 +1785,51 @@ async fn prune_orphan_chat_files(
     tauri::async_runtime::spawn_blocking(move || prune_orphan_chat_files_at(&dir, &valid_ids))
         .await
         .map_err(|err| format!("Orphan chat cleanup task failed: {err}"))?
+}
+
+/// Delete CV drafts whose application is no longer in the restored data.
+fn prune_orphan_cv_files_at(dir: &Path, valid_ids: &[String]) -> Result<Vec<String>, String> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(format!("Could not read {}: {err}", dir.display())),
+    };
+    let valid: HashSet<&str> = valid_ids.iter().map(String::as_str).collect();
+    let mut removed = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(id) = cv_draft_id(&name).or_else(|| cv_history_id(&name)) else {
+            continue;
+        };
+        if valid.contains(id) {
+            continue;
+        }
+        fs::remove_file(entry.path())
+            .map_err(|err| format!("Could not delete orphan CV file {name}: {err}"))?;
+        removed.push(name);
+    }
+    removed.sort();
+    Ok(removed)
+}
+
+#[tauri::command]
+async fn prune_orphan_cv_files(
+    app: tauri::AppHandle,
+    valid_ids: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("Could not resolve the app data directory: {err}"))?;
+    tauri::async_runtime::spawn_blocking(move || prune_orphan_cv_files_at(&dir, &valid_ids))
+        .await
+        .map_err(|err| format!("Orphan CV cleanup task failed: {err}"))?
 }
 
 // ──────────────────────────────────────────────
@@ -2415,6 +2484,7 @@ pub fn run() {
             save_data_file,
             delete_data_file,
             prune_orphan_chat_files,
+            prune_orphan_cv_files,
             export_backup_file,
             export_csv_file,
             export_ics_file,
@@ -2895,6 +2965,63 @@ mod tests {
         assert!(dir.join("chat_not a thread.json").exists());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn orphan_cv_cleanup_keeps_known_drafts_and_ignores_unrelated_files() {
+        let dir = test_data_dir("prune-cv");
+        for name in [
+            "cv_keep.json",
+            "cv_keep.json.bak",
+            "cv_keep-2.json",
+            "cv_history_keep.json",
+            "cv_history_keep.json.bak",
+            "cv_history_orphan.json",
+            "cv_history_orphan.json.bak",
+            "cv_orphan.json",
+            "cv_orphan.json.bak",
+            "applications.json",
+            "chat_keep.json",
+            "cv_not a draft.json",
+        ] {
+            fs::write(dir.join(name), b"{}").unwrap();
+        }
+
+        let removed =
+            prune_orphan_cv_files_at(&dir, &["keep".to_string(), "keep-2".to_string()]).unwrap();
+
+        assert_eq!(
+            removed,
+            vec![
+                "cv_history_orphan.json",
+                "cv_history_orphan.json.bak",
+                "cv_orphan.json",
+                "cv_orphan.json.bak",
+            ]
+        );
+        assert!(dir.join("cv_keep.json").exists());
+        assert!(dir.join("cv_keep.json.bak").exists());
+        assert!(dir.join("cv_history_keep.json").exists());
+        assert!(dir.join("cv_history_keep.json.bak").exists());
+        assert!(dir.join("applications.json").exists());
+        assert!(dir.join("chat_keep.json").exists());
+        assert!(dir.join("cv_not a draft.json").exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cv_draft_id_only_accepts_cv_file_names() {
+        assert_eq!(cv_draft_id("cv_abc-1.json"), Some("abc-1"));
+        assert_eq!(cv_draft_id("cv_abc-1.json.bak"), Some("abc-1"));
+        assert_eq!(cv_draft_id("applications.json"), None);
+        assert_eq!(cv_draft_id("cv_.json"), None);
+        assert_eq!(cv_draft_id("cv_../x.json"), None);
+        assert_eq!(cv_draft_id("cv_a b.json"), None);
+        assert_eq!(cv_history_id("cv_history_abc-1.json"), Some("abc-1"));
+        assert_eq!(cv_history_id("cv_history_abc-1.json.bak"), Some("abc-1"));
+        assert_eq!(cv_history_id("cv_history_.json"), None);
+        assert_eq!(cv_history_id("cv_abc-1.json"), None);
     }
 
     #[test]

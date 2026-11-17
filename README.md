@@ -42,11 +42,22 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
     are omitted from requests, and can be summarized into a compact hidden
     context note when needed.
   - Choose between the built-in standard prompt or your own custom prompt.
+- **Tailored CV builder** — generate an editable, ATS-friendly Word or PDF CV
+  from your profile and one application's job description. Edit every section,
+  reorder entries and sections, add extra context, preview the formatted page,
+  review the generated roles, skills and sections before accepting it, rewrite
+  sections with a before/after diff and presets, restore earlier CV versions,
+  check phrase/synonym keyword matches and requirement priorities, use a
+  deterministic grounding review, get page-fit feedback, switch between two
+  ATS-safe templates, export Word or PDF, and add recent chat details
+  explicitly. See [docs/cv-builder.md](docs/cv-builder.md) and the
+  [improvement plan](docs/cv-improvement-plan.md).
 - **Profile** — education, work experience, certifications, skills, languages,
-  previous cover letters, and a public profile (e.g. LinkedIn) URL that the
-  AI can reference. Sections can be reordered, year pickers cover the relevant
-  range automatically, date ranges are validated, and cover letters saved from
-  chat link back to their application. **Import CV** reads a PDF, DOCX or TXT
+  previous cover letters, phone and portfolio/GitHub links, per-role
+  achievements, and a public profile (e.g. LinkedIn) URL that the AI can
+  reference. Sections can be reordered, year pickers cover the relevant range
+  automatically, date ranges are validated, and cover letters saved from chat
+  link back to their application. **Import CV** reads a PDF, DOCX or TXT
   locally, structures it with your AI provider, and offers merge or replace
   after a preview.
 - **Deadline reminders** — opt-in desktop notifications for overdue,
@@ -61,9 +72,9 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   **Copy diagnostics** report with versions, data-file sizes and the recent
   log, an **Open data folder** shortcut, and a **Reset all data** action that
   clears everything on the next start.
-- **Backup & restore** — export all your data (applications, chat threads,
-  drafts, profile, settings, API config) to a single JSON file and import it
-  back. API keys are never included in a backup.
+- **Backup & restore** — export all your data (applications, chat threads, CV
+  drafts and versions, profile, settings, API config) to a single JSON file and
+  import it back. API keys are never included in a backup.
 - **Update checks** — a silent check runs a few seconds after startup and
   offers newer releases in a dialog. Settings can check manually and turn the
   startup check off.
@@ -91,12 +102,14 @@ All data lives in your system's app-data directory as plain JSON files:
 
 - `applications.json` — applications + selection state
 - `chat_<applicationId>.json` — one chat thread per application
+- `cv_<applicationId>.json` — saved tailored CV draft per application
 - `profile.json` — your profile sections and saved cover letters
 - `config.json` — provider, base URL, model, prompt settings (no API key
   when the keychain works)
 - `settings.json` — theme and accent
 - `drafts.json` — unsent chat messages, keyed by application
 - `zen-prices.json` — cached model prices from the Zen docs
+- `cv_history_<applicationId>.json` — last five CV versions per application
 
 Changes are auto-saved (debounced) and flushed when you close the app. Writes
 are atomic and keep a `.bak` copy of the previous version; if a file is
