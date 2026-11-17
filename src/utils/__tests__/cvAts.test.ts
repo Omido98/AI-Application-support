@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { JobApplication, ProfileData } from "@/types";
 import { createCvDocumentFromProfile } from "@/utils/cvSchema";
-import { analyzeCvAts, cvPlainText, extractJobKeywords } from "@/utils/cvAts";
+import {
+  analyzeCvAts,
+  cvPlainText,
+  extractJobKeywords,
+  extractJobPhrases,
+} from "@/utils/cvAts";
 
 const application: JobApplication = {
   id: "app-1",
@@ -97,6 +102,15 @@ describe("extractJobKeywords", () => {
   });
 });
 
+describe("extractJobPhrases", () => {
+  it("keeps repeated meaningful multi-word phrases", () => {
+    const phrases = extractJobPhrases(
+      "We build design systems. Our design systems team owns design systems.",
+    );
+    expect(phrases).toContain("design systems");
+  });
+});
+
 describe("analyzeCvAts", () => {
   it("reports exact matches and missing terms without claiming them", () => {
     const doc = document();
@@ -142,5 +156,31 @@ describe("analyzeCvAts", () => {
     expect(report.checks.find((check) => check.id === "skills")?.ok).toBe(
       false,
     );
+  });
+
+  it("matches phrases, curated synonyms and requirement priorities", () => {
+    const job = {
+      ...application,
+      jobDescription:
+        "We build design systems. Our design systems team builds design systems with JavaScript and accessibility testing.",
+      requirements:
+        "Must have JavaScript, design systems and accessibility testing.\nNice to have AWS.",
+    };
+    const doc = document();
+    doc.skills = ["JS", "a11y", "Design system"];
+    const report = analyzeCvAts(doc, job, profile);
+
+    expect(report.matchedKeywords).toEqual(
+      expect.arrayContaining(["javascript", "accessibility"]),
+    );
+    expect(report.matchedPhrases).toContain("design systems");
+    expect(report.requirements[0].priority).toBe("must");
+    expect(report.requirements[1].priority).toBe("preferred");
+    expect(report.requirements[1].missingTerms).toContain("aws");
+    expect(report.requirements[1].missingTerms).not.toContain("nice");
+    expect(report.highlightTerms).toEqual(
+      expect.arrayContaining(["Design systems"]),
+    );
+    expect(report.keywordCoverage).toBeGreaterThan(0);
   });
 });

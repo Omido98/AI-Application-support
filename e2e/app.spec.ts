@@ -376,6 +376,38 @@ test("CV preview marks page boundaries on a long CV", async ({ page }) => {
   await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
 });
 
+test("CV ATS groups priorities and highlights matches", async ({ page }) => {
+  const application = makeApplication("cv-ats", "ATS Corp", "applied", {
+    jobDescription:
+      "Build design systems with TypeScript and accessibility testing.",
+    requirements:
+      "Must have TypeScript and accessibility testing.\nNice to have AWS.",
+  });
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page.evaluate(async (applicationId) => {
+    const { useCvStore } = await import("/src/stores/cvStore.ts");
+    useCvStore.getState().updateCv(applicationId, (current) => ({
+      ...current,
+      summary:
+        "Built TypeScript design systems with accessibility testing for reporting teams.",
+      skills: ["TypeScript", "Accessibility", "Testing"],
+    }));
+  }, application.id);
+
+  await expect(page.getByText("Must-have").first()).toBeVisible();
+  await expect(page.getByText("Preferred").first()).toBeVisible();
+  await expect(page.getByText(/aws/i).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(
+    page.locator("mark").filter({ hasText: "TypeScript" }).first(),
+  ).toBeVisible();
+});
+
 test("CV history restores a saved version and survives reload", async ({
   page,
 }) => {

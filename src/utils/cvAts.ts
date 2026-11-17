@@ -8,14 +8,58 @@ export interface CvAtsCheck {
   detail: string;
 }
 
+export interface CvAtsRequirement {
+  id: string;
+  label: string;
+  priority: "must" | "preferred";
+  matchedTerms: string[];
+  missingTerms: string[];
+}
+
 export interface CvAtsReport {
   matchedKeywords: string[];
   missingKeywords: string[];
+  matchedPhrases: string[];
+  missingPhrases: string[];
+  requirements: CvAtsRequirement[];
+  /** Matched spellings to highlight in the preview. */
+  highlightTerms: string[];
   keywordCoverage: number;
   wordCount: number;
   checks: CvAtsCheck[];
   unverifiedNumbers: string[];
 }
+
+/**
+ * Curated, conservative synonym groups for ATS matching. Each group is
+ * bidirectional and displayed as written here when highlighted.
+ */
+const SYNONYM_GROUPS: string[][] = [
+  ["JavaScript", "JS"],
+  ["TypeScript", "TS"],
+  ["React", "React.js"],
+  ["Node.js", "NodeJS", "Node"],
+  ["Accessibility", "a11y"],
+  ["User experience", "UX"],
+  ["User interface", "UI"],
+  ["Continuous integration", "CI"],
+  ["Continuous delivery", "CD"],
+  ["Amazon Web Services", "AWS"],
+  ["Google Cloud Platform", "GCP"],
+  ["Machine learning", "ML"],
+  ["Artificial intelligence", "AI"],
+  ["Search engine optimization", "SEO"],
+  ["Customer relationship management", "CRM"],
+  ["Quality assurance", "QA"],
+  ["Test driven development", "TDD"],
+  ["Representational state transfer", "REST"],
+  ["Application programming interface", "API"],
+  ["Infrastructure as code", "IaC"],
+  ["Site reliability engineering", "SRE"],
+  ["Development operations", "DevOps"],
+  ["Design systems", "Design system"],
+  ["Testing", "Test", "Tests"],
+];
 
 const STOPWORDS = new Set(
   [
@@ -183,7 +227,9 @@ const STOPWORDS = new Set(
 );
 
 function tokens(text: string): string[] {
-  return text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}+#.]*/gu) ?? [];
+  return (text.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}+#.]*/gu) ?? [])
+    .map((token) => token.replace(/[.,]+$/g, ""))
+    .filter(Boolean);
 }
 
 /** All CV text that an ATS would see, including section headings. */
@@ -277,6 +323,132 @@ function normalizeForMatch(value: string): string {
     .toLowerCase()
     .replace(/[^\p{L}\p{N}+#.]+/gu, " ")
     .trim();
+}
+
+function isMeaningfulToken(token: string): boolean {
+  return token.length >= 3 && !/^\d+$/.test(token) && !STOPWORDS.has(token);
+}
+
+function containsTerm(haystack: string, term: string): boolean {
+  const normalized = normalizeForMatch(term);
+  if (!normalized) return false;
+  return ` ${haystack} `.includes(` ${normalized} `);
+}
+
+function synonymsFor(term: string): string[] {
+  const normalized = normalizeForMatch(term);
+  const group = SYNONYM_GROUPS.find((candidate) =>
+    candidate.some((entry) => normalizeForMatch(entry) === normalized),
+  );
+  return group ? [...group] : [term];
+}
+
+/** Return the matched spelling, so the preview can highlight what exists. */
+function matchedSpelling(haystack: string, term: string): string | undefined {
+  return synonymsFor(term).find((variant) => containsTerm(haystack, variant));
+}
+
+/**
+ * Repeated multi-word phrases in the job text. Single occurrence terms are
+ * already covered by keywords; repeated phrases are the useful ATS signal.
+ */
+export function extractJobPhrases(jobText: string, limit = 12): string[] {
+  const words = tokens(jobText);
+  const counts = new Map<string, number>();
+  for (let index = 0; index < words.length; index += 1) {
+    const first = words[index];
+    if (!isMeaningfulToken(first)) continue;
+    const second = words[index + 1];
+    if (second && isMeaningfulToken(second)) {
+      const phrase = `${first} ${second}`;
+      counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
+    }
+    const third = words[index + 2];
+    if (
+      second &&
+      third &&
+      isMeaningfulToken(second) &&
+      isMeaningfulToken(third)
+    ) {
+      const phrase = `${first} ${second} ${third}`;
+      counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .slice(0, limit)
+    .map(([phrase]) => phrase);
+}
+
+function requirementLines(requirements: string): string[] {
+  const lines = requirements
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-*•\d.)]+\s*/, "").trim())
+    .filter((line) => line.length >= 3);
+  if (lines.length > 1) return lines.slice(0, 10);
+  const prose = requirements.trim();
+  if (!prose) return [];
+  return prose
+    .split(/(?<=[.;])\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3)
+    .slice(0, 10);
+}
+
+function requirementPriority(line: string): "must" | "preferred" {
+  const lower = line.toLowerCase();
+  if (
+    /(nice to have|preferred|bonus|advantage|desirable|good to have|a plus)/.test(
+      lower,
+    )
+  ) {
+    return "preferred";
+  }
+  return "must";
+}
+
+const REQUIREMENT_FILLER = new Set(
+  [
+    "ability",
+    "advantage",
+    "bonus",
+    "desirable",
+    "essential",
+    "familiarity",
+    "knowledge",
+    "minimum",
+    "must",
+    "nice",
+    "plus",
+    "preferred",
+    "proven",
+    "required",
+    "requirement",
+    "strong",
+  ].map((word) => word.toLowerCase()),
+);
+
+function requirementTerms(line: string): string[] {
+  const words = tokens(line);
+  const isTerm = (token: string) =>
+    isMeaningfulToken(token) && !REQUIREMENT_FILLER.has(token);
+  const unigrams = words.filter(isTerm);
+  const phrases: string[] = [];
+  for (let index = 0; index < words.length - 1; index += 1) {
+    if (!isTerm(words[index])) continue;
+    if (isTerm(words[index + 1])) {
+      phrases.push(`${words[index]} ${words[index + 1]}`);
+    }
+    if (
+      words[index + 2] &&
+      isTerm(words[index + 1]) &&
+      isTerm(words[index + 2])
+    ) {
+      phrases.push(`${words[index]} ${words[index + 1]} ${words[index + 2]}`);
+    }
+  }
+  return [...new Set([...phrases, ...unigrams])].slice(0, 6);
 }
 
 const NUMBER_RE = /\b\d[\d,]*(?:\.\d+)?(?:%|k|m|bn)?/gi;
@@ -376,14 +548,70 @@ export function analyzeCvAts(
     application.requirements,
   ].join("\n");
   const resolvedKeywords = keywords ?? extractJobKeywords(jobText);
+  const phrases = extractJobPhrases(jobText);
   const cvText = normalizeForMatch(cvPlainText(document));
-  const cvWords = new Set(tokens(cvText));
-  const matchedKeywords = resolvedKeywords.filter((keyword) =>
-    cvWords.has(keyword),
-  );
-  const missingKeywords = resolvedKeywords.filter(
-    (keyword) => !cvWords.has(keyword),
-  );
+  const highlight = new Set<string>();
+
+  const matchedKeywords: string[] = [];
+  const missingKeywords: string[] = [];
+  for (const keyword of resolvedKeywords) {
+    const spelling = matchedSpelling(cvText, keyword);
+    if (spelling) {
+      matchedKeywords.push(keyword);
+      highlight.add(spelling);
+    } else {
+      missingKeywords.push(keyword);
+    }
+  }
+
+  const matchedPhrases: string[] = [];
+  const missingPhrases: string[] = [];
+  for (const phrase of phrases) {
+    const spelling = matchedSpelling(cvText, phrase);
+    if (spelling) {
+      matchedPhrases.push(phrase);
+      highlight.add(spelling);
+    } else {
+      missingPhrases.push(phrase);
+    }
+  }
+
+  const requirements: CvAtsRequirement[] = requirementLines(
+    application.requirements,
+  )
+    .map((line, index) => {
+      const terms = requirementTerms(line);
+      const matchedTerms: string[] = [];
+      const missingTerms: string[] = [];
+      for (const term of terms) {
+        const spelling = matchedSpelling(cvText, term);
+        if (spelling) {
+          matchedTerms.push(term);
+          highlight.add(spelling);
+        } else {
+          missingTerms.push(term);
+        }
+      }
+      return {
+        id: `requirement-${index}`,
+        label: line.length > 120 ? `${line.slice(0, 120)}…` : line,
+        priority: requirementPriority(line),
+        matchedTerms,
+        missingTerms,
+      };
+    })
+    .filter(
+      (requirement) =>
+        requirement.matchedTerms.length + requirement.missingTerms.length > 0,
+    );
+
+  const allTerms = [...new Set([...resolvedKeywords, ...phrases])];
+  const matchedCount = matchedKeywords.length + matchedPhrases.length;
+  const highlightTerms = [...highlight]
+    .filter((term) => term.length >= 2)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 40);
+
   const wordCount = tokens(cvText).length;
 
   const experience = document.experience.filter((item) => item.included);
@@ -447,10 +675,11 @@ export function analyzeCvAts(
   return {
     matchedKeywords,
     missingKeywords,
-    keywordCoverage:
-      resolvedKeywords.length === 0
-        ? 0
-        : matchedKeywords.length / resolvedKeywords.length,
+    matchedPhrases,
+    missingPhrases,
+    requirements,
+    highlightTerms,
+    keywordCoverage: allTerms.length === 0 ? 0 : matchedCount / allTerms.length,
     wordCount,
     checks,
     unverifiedNumbers: findUnverifiedNumbers(document, profile),

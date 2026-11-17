@@ -63,6 +63,7 @@ import {
 import { formatCvUsage } from "@/utils/cvUsage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -392,6 +393,18 @@ export default function CvBuilder({
     view === "preview" && previewPages
       ? previewPages
       : (pageEstimate?.pages ?? 1);
+
+  const atsMissingTerms = ats
+    ? [...new Set([...ats.missingKeywords, ...ats.missingPhrases])]
+    : [];
+  const atsMatchedTerms = ats
+    ? [...new Set([...ats.matchedKeywords, ...ats.matchedPhrases])]
+    : [];
+  const mustHaveGaps =
+    ats?.requirements.filter(
+      (requirement) =>
+        requirement.priority === "must" && requirement.missingTerms.length > 0,
+    ).length ?? 0;
 
   const patch = (updater: (current: CvDocument) => CvDocument) => {
     updateCv(application.id, updater);
@@ -1724,7 +1737,11 @@ export default function CvBuilder({
       )}
 
       {view === "preview" ? (
-        <CvPreview document={document} onPageCount={setPreviewPages} />
+        <CvPreview
+          document={document}
+          highlightTerms={ats?.highlightTerms}
+          onPageCount={setPreviewPages}
+        />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
@@ -1908,15 +1925,80 @@ export default function CvBuilder({
                 {ats && (
                   <>
                     <p className="text-[11px] text-text-muted">
-                      Exact keyword matches from the job title, description and
-                      requirements. Use missing terms only if they are true.
+                      Phrase and curated-synonym matching from the job title,
+                      description and requirements. Use missing terms only if
+                      they are true.
                     </p>
+                    {ats.requirements.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                            Requirements ({ats.requirements.length})
+                          </p>
+                          {mustHaveGaps > 0 && (
+                            <span className="rounded border border-amber-600/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-800 dark:text-amber-300">
+                              {mustHaveGaps} must-have gap
+                              {mustHaveGaps === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          {ats.requirements.slice(0, 5).map((requirement) => (
+                            <div
+                              key={requirement.id}
+                              className="rounded border border-border bg-field/40 p-2"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-[10px] leading-snug text-text-secondary">
+                                  {requirement.label}
+                                </p>
+                                <span
+                                  className={cn(
+                                    "shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide",
+                                    requirement.priority === "must"
+                                      ? "bg-primary/10 text-text-secondary"
+                                      : "bg-field text-text-muted",
+                                  )}
+                                >
+                                  {requirement.priority === "must"
+                                    ? "Must-have"
+                                    : "Preferred"}
+                                </span>
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {requirement.matchedTerms.map((term) => (
+                                  <span
+                                    key={`${requirement.id}-m-${term}`}
+                                    className="rounded border border-green-700/30 bg-green-500/10 px-1 py-0.5 text-[9px] text-green-800 dark:text-green-300"
+                                  >
+                                    {term}
+                                  </span>
+                                ))}
+                                {requirement.missingTerms.map((term) => (
+                                  <span
+                                    key={`${requirement.id}-x-${term}`}
+                                    className="rounded border border-amber-600/30 bg-amber-500/10 px-1 py-0.5 text-[9px] text-amber-800 dark:text-amber-300"
+                                  >
+                                    {term}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {ats.requirements.length > 5 && (
+                          <p className="text-[10px] text-text-muted">
+                            Showing the first 5 requirement groups.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
-                        Missing ({ats.missingKeywords.length})
+                        Missing ({atsMissingTerms.length})
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {ats.missingKeywords.slice(0, 10).map((keyword) => (
+                        {atsMissingTerms.slice(0, 12).map((keyword) => (
                           <span
                             key={keyword}
                             className="rounded border border-amber-600/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-800 dark:text-amber-300"
@@ -1924,7 +2006,7 @@ export default function CvBuilder({
                             {keyword}
                           </span>
                         ))}
-                        {ats.missingKeywords.length === 0 && (
+                        {atsMissingTerms.length === 0 && (
                           <span className="text-[11px] text-text-muted">
                             None detected.
                           </span>
@@ -1933,10 +2015,10 @@ export default function CvBuilder({
                     </div>
                     <div>
                       <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
-                        Matched ({ats.matchedKeywords.length})
+                        Matched ({atsMatchedTerms.length})
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {ats.matchedKeywords.slice(0, 10).map((keyword) => (
+                        {atsMatchedTerms.slice(0, 12).map((keyword) => (
                           <span
                             key={keyword}
                             className="rounded border border-green-700/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-800 dark:text-green-300"
@@ -1946,6 +2028,11 @@ export default function CvBuilder({
                         ))}
                       </div>
                     </div>
+                    {ats.highlightTerms.length > 0 && (
+                      <p className="text-[10px] text-text-muted">
+                        Matched terms are highlighted in Preview.
+                      </p>
+                    )}
                     <ul className="space-y-1 border-t border-border pt-2">
                       {ats.checks.map((check) => (
                         <li

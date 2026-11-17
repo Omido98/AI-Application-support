@@ -91,14 +91,20 @@ review workflow.
 
 ## Phase 6 — ATS depth (v1.15.0)
 
-- Multi-word phrase matching and a curated synonym map.
-- Group missing keywords by requirement; distinguish must-have from
-  nice-to-have.
-- Highlight matched terms in the preview.
-- Keep the deterministic no-auto-insert rule.
+**Status: implemented in this release.**
 
-**Why:** current exact unigram matching is honest but noisy; requirement-level
-guidance is more actionable.
+- Multi-word phrase extraction and matching, with longer phrases preferred.
+- A curated synonym map (for example JavaScript/JS, accessibility/a11y,
+  AWS/Amazon Web Services, design systems/design system).
+- Requirement groups parsed from the requirements text, with **Must-have** and
+  **Preferred** priority badges and matched/missing terms per group.
+- Must-have gap count in the ATS panel.
+- Matched terms (including phrase and synonym spellings) highlighted in the
+  preview.
+- The no-auto-insert, advisory-only rule is unchanged.
+
+**Why:** exact unigram matching was honest but noisy; requirement-level
+guidance is more actionable without claiming experience the candidate lacks.
 
 ## Phase 7 — Output polish (v1.16.0)
 

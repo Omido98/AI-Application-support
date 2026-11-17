@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { CvDocument, CvSectionId } from "@/types/cv";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
+import HighlightedText from "@/components/cv/HighlightedText";
 
 function hasSection(document: CvDocument, section: CvSectionId): boolean {
   switch (section) {
@@ -39,9 +40,11 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 /** Print-like HTML preview of the structured CV, matching the DOCX layout. */
 export default function CvPreview({
   document,
+  highlightTerms = [],
   onPageCount,
 }: {
   document: CvDocument;
+  highlightTerms?: string[];
   onPageCount?: (pages: number) => void;
 }) {
   const articleRef = useRef<HTMLElement | null>(null);
@@ -87,7 +90,10 @@ export default function CvPreview({
           </h2>
           {document.headline.trim() && (
             <p className="mt-1 text-[13px] italic text-neutral-700">
-              {document.headline.trim()}
+              <HighlightedText
+                text={document.headline.trim()}
+                terms={highlightTerms}
+              />
             </p>
           )}
           {contact.length > 0 && (
@@ -102,14 +108,24 @@ export default function CvPreview({
           if (section === "summary") {
             return (
               <Section key={section} title={labels[section]}>
-                <p className="whitespace-pre-line">{document.summary.trim()}</p>
+                <p className="whitespace-pre-line">
+                  <HighlightedText
+                    text={document.summary.trim()}
+                    terms={highlightTerms}
+                  />
+                </p>
               </Section>
             );
           }
           if (section === "skills") {
             return (
               <Section key={section} title={labels[section]}>
-                <p>{document.skills.join("  ·  ")}</p>
+                <p>
+                  <HighlightedText
+                    text={document.skills.join("  ·  ")}
+                    terms={highlightTerms}
+                  />
+                </p>
               </Section>
             );
           }
@@ -121,7 +137,12 @@ export default function CvPreview({
                   .map((item) => (
                     <div key={item.id} className="break-inside-avoid">
                       <p className="font-bold">
-                        {[item.role, item.company].filter(Boolean).join(" — ")}
+                        <HighlightedText
+                          text={[item.role, item.company]
+                            .filter(Boolean)
+                            .join(" — ")}
+                          terms={highlightTerms}
+                        />
                       </p>
                       <p className="text-[11px] italic text-neutral-600">
                         {[item.startDate, item.endDate, item.location]
@@ -130,7 +151,12 @@ export default function CvPreview({
                       </p>
                       <ul className="mt-1 list-disc space-y-0.5 pl-5">
                         {item.bullets.map((bullet, index) => (
-                          <li key={`${item.id}-${index}`}>{bullet}</li>
+                          <li key={`${item.id}-${index}`}>
+                            <HighlightedText
+                              text={bullet}
+                              terms={highlightTerms}
+                            />
+                          </li>
                         ))}
                       </ul>
                     </div>
@@ -146,9 +172,12 @@ export default function CvPreview({
                   .map((item) => (
                     <div key={item.id} className="break-inside-avoid">
                       <p className="font-bold">
-                        {[item.degree, item.field, item.school]
-                          .filter(Boolean)
-                          .join(" — ")}
+                        <HighlightedText
+                          text={[item.degree, item.field, item.school]
+                            .filter(Boolean)
+                            .join(" — ")}
+                          terms={highlightTerms}
+                        />
                       </p>
                       <p className="text-[11px] italic text-neutral-600">
                         {[item.startDate, item.endDate]
@@ -157,7 +186,12 @@ export default function CvPreview({
                       </p>
                       <ul className="mt-1 list-disc space-y-0.5 pl-5">
                         {item.details.map((detail, index) => (
-                          <li key={`${item.id}-${index}`}>{detail}</li>
+                          <li key={`${item.id}-${index}`}>
+                            <HighlightedText
+                              text={detail}
+                              terms={highlightTerms}
+                            />
+                          </li>
                         ))}
                       </ul>
                     </div>
@@ -173,10 +207,20 @@ export default function CvPreview({
                   .map((item) => (
                     <div key={item.id} className="break-inside-avoid">
                       {item.title.trim() && (
-                        <p className="font-bold">{item.title.trim()}</p>
+                        <p className="font-bold">
+                          <HighlightedText
+                            text={item.title.trim()}
+                            terms={highlightTerms}
+                          />
+                        </p>
                       )}
                       {item.description.trim() && (
-                        <p>{item.description.trim()}</p>
+                        <p>
+                          <HighlightedText
+                            text={item.description.trim()}
+                            terms={highlightTerms}
+                          />
+                        </p>
                       )}
                       {item.period.trim() && (
                         <p className="text-[11px] italic text-neutral-600">
@@ -185,7 +229,12 @@ export default function CvPreview({
                       )}
                       <ul className="mt-1 list-disc space-y-0.5 pl-5">
                         {item.bullets.map((bullet, index) => (
-                          <li key={`${item.id}-${index}`}>{bullet}</li>
+                          <li key={`${item.id}-${index}`}>
+                            <HighlightedText
+                              text={bullet}
+                              terms={highlightTerms}
+                            />
+                          </li>
                         ))}
                       </ul>
                     </div>
@@ -200,9 +249,12 @@ export default function CvPreview({
                   .filter((item) => item.included)
                   .map((item) => (
                     <p key={item.id}>
-                      {[item.name, item.issuer, item.date]
-                        .filter(Boolean)
-                        .join("  ·  ")}
+                      <HighlightedText
+                        text={[item.name, item.issuer, item.date]
+                          .filter(Boolean)
+                          .join("  ·  ")}
+                        terms={highlightTerms}
+                      />
                     </p>
                   ))}
               </Section>
@@ -212,12 +264,15 @@ export default function CvPreview({
             return (
               <Section key={section} title={labels[section]}>
                 <p>
-                  {document.languages
-                    .filter((item) => item.included)
-                    .map((item) =>
-                      [item.name, item.level].filter(Boolean).join(" — "),
-                    )
-                    .join("  ·  ")}
+                  <HighlightedText
+                    text={document.languages
+                      .filter((item) => item.included)
+                      .map((item) =>
+                        [item.name, item.level].filter(Boolean).join(" — "),
+                      )
+                      .join("  ·  ")}
+                    terms={highlightTerms}
+                  />
                 </p>
               </Section>
             );
@@ -229,9 +284,12 @@ export default function CvPreview({
                 .map((item) => (
                   <div key={item.id} className="break-inside-avoid">
                     <p className="font-bold">
-                      {[item.role, item.organization]
-                        .filter(Boolean)
-                        .join(" — ")}
+                      <HighlightedText
+                        text={[item.role, item.organization]
+                          .filter(Boolean)
+                          .join(" — ")}
+                        terms={highlightTerms}
+                      />
                     </p>
                     <p className="text-[11px] italic text-neutral-600">
                       {[item.startDate, item.endDate]
@@ -240,7 +298,12 @@ export default function CvPreview({
                     </p>
                     <ul className="mt-1 list-disc space-y-0.5 pl-5">
                       {item.bullets.map((bullet, index) => (
-                        <li key={`${item.id}-${index}`}>{bullet}</li>
+                        <li key={`${item.id}-${index}`}>
+                          <HighlightedText
+                            text={bullet}
+                            terms={highlightTerms}
+                          />
+                        </li>
                       ))}
                     </ul>
                   </div>

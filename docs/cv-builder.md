@@ -79,11 +79,13 @@ from the referenced profile entry and discards unknown references. You can
 still edit every field afterwards, so generated content is always a draft, not
 an automatic export.
 
-The ATS panel uses deterministic, exact keyword matching against the job title,
-description and requirements. It shows matched and missing terms, but never
-inserts them: add a missing term only if it is true for you. The checklist also
-covers contact details, summary length, experience bullets, skills, dates and
-document length.
+The ATS panel uses deterministic phrase, keyword and curated-synonym matching
+against the job title, description and requirements. It shows matched and
+missing terms, groups requirements with **Must-have** or **Preferred** badges,
+counts must-have gaps, and highlights matched terms in the preview. It never
+inserts a term: add a missing term only if it is true for you. The checklist
+also covers contact details, summary length, experience bullets, skills, dates
+and document length.
 
 The **Grounding review** panel is a separate deterministic audit. It flags:
 
