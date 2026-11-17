@@ -314,9 +314,15 @@ test(
       "return !!document.querySelector('[role=\"option\"]');",
       { message: "template options did not open" },
     );
-    await driver.clickXPath(
-      "//*[@role='option' and contains(normalize-space(.), 'Compact')]",
-    );
+    const choseCompact = await driver.execute(`
+      const option = [...document.querySelectorAll('[role="option"]')]
+        .find((node) =>
+          node.textContent.includes("Compact") &&
+          node.getBoundingClientRect().width > 0);
+      option?.click();
+      return !!option;
+    `);
+    assert.equal(choseCompact, true, "Compact option was not visible");
     await driver.clickXPath(
       "//button[contains(normalize-space(.), 'Preview')]",
     );
@@ -331,9 +337,15 @@ test(
       "return !!document.querySelector('[role=\"option\"]');",
       { message: "language options did not open" },
     );
-    await driver.clickXPath(
-      "//*[@role='option' and contains(normalize-space(.), 'Svenska')]",
-    );
+    const choseSwedish = await driver.execute(`
+      const option = [...document.querySelectorAll('[role="option"]')]
+        .find((node) =>
+          node.textContent.includes("Svenska") &&
+          node.getBoundingClientRect().width > 0);
+      option?.click();
+      return !!option;
+    `);
+    assert.equal(choseSwedish, true, "Svenska option was not visible");
     await driver.waitFor(
       "return document.querySelector('[role=\"dialog\"]')?.textContent.includes('Change CV language to Swedish?');",
       { message: "language review dialog did not open" },
