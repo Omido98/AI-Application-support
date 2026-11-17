@@ -1,5 +1,6 @@
 import type { JobApplication, ProfileData } from "@/types";
 import type { CvDocument } from "@/types/cv";
+import { getCvProfileContext } from "@/utils/cvProfileContext";
 
 export interface CvAtsCheck {
   id: string;
@@ -467,13 +468,16 @@ function unverifiedNumberWarnings(
   fields: { label: string; text: string }[],
   profile: ProfileData,
   extraContext: string,
+  sourceNumbers?: Set<string>,
 ): string[] {
-  const source = `${JSON.stringify(profile)}\n${extraContext}`;
-  const sourceNumbers = new Set(numericTokens(source));
+  const profileNumbers = getCvProfileContext(profile).numbers;
+  const numbers =
+    sourceNumbers ??
+    new Set([...profileNumbers, ...numericTokens(extraContext)]);
   const warnings = new Map<string, string>();
   for (const field of fields) {
     for (const token of numericTokens(field.text)) {
-      if (isYear(token) || sourceNumbers.has(token)) continue;
+      if (isYear(token) || numbers.has(token)) continue;
       if (warnings.has(token)) continue;
       warnings.set(
         token,
@@ -494,11 +498,6 @@ export function findUnverifiedNumbersInText(
   return unverifiedNumberWarnings([{ label, text }], profile, extraContext);
 }
 
-/**
- * Heuristic check for numbers in the CV prose that do not occur anywhere in
- * the profile or the extra context. It deliberately does not block export;
- * it surfaces claims the user should verify.
- */
 export function findUnverifiedNumbers(
   document: CvDocument,
   profile: ProfileData,
@@ -536,19 +535,25 @@ export function findUnverifiedNumbers(
   return unverifiedNumberWarnings(fields, profile, document.extraContext);
 }
 
+export interface CvAtsContext {
+  keywords?: string[];
+  phrases?: string[];
+}
+
 export function analyzeCvAts(
   document: CvDocument,
   application: JobApplication,
   profile: ProfileData,
-  keywords?: string[],
+  context?: CvAtsContext,
+  unverifiedNumbers?: string[],
 ): CvAtsReport {
   const jobText = [
     application.jobTitle,
     application.jobDescription,
     application.requirements,
   ].join("\n");
-  const resolvedKeywords = keywords ?? extractJobKeywords(jobText);
-  const phrases = extractJobPhrases(jobText);
+  const resolvedKeywords = context?.keywords ?? extractJobKeywords(jobText);
+  const phrases = context?.phrases ?? extractJobPhrases(jobText);
   const cvText = normalizeForMatch(cvPlainText(document));
   const highlight = new Set<string>();
 
@@ -682,6 +687,7 @@ export function analyzeCvAts(
     keywordCoverage: allTerms.length === 0 ? 0 : matchedCount / allTerms.length,
     wordCount,
     checks,
-    unverifiedNumbers: findUnverifiedNumbers(document, profile),
+    unverifiedNumbers:
+      unverifiedNumbers ?? findUnverifiedNumbers(document, profile),
   };
 }

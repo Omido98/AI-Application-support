@@ -45,8 +45,7 @@ import {
   createCvDocumentFromProfile,
   profileFingerprint,
 } from "@/utils/cvSchema";
-import { analyzeCvAts, extractJobKeywords } from "@/utils/cvAts";
-import { analyzeCvGrounding } from "@/utils/cvGrounding";
+import { analyzeCvDocument } from "@/utils/cvAnalysis";
 import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
 import { analyzeCoverLetterConsistency } from "@/utils/cvConsistency";
 import CvConsistencyPanel from "@/components/cv/CvConsistencyPanel";
@@ -371,38 +370,19 @@ export default function CvBuilder({
       document.applicationUpdatedAt !== application.updatedAt),
   );
 
-  const jobKeywords = useMemo(
-    () =>
-      extractJobKeywords(
-        [
-          application.jobTitle,
-          application.jobDescription,
-          application.requirements,
-        ].join("\n"),
-      ),
-    [
-      application.jobDescription,
-      application.jobTitle,
-      application.requirements,
-    ],
-  );
-
   // ATS and grounding are advisory and expensive to recompute. Use a deferred
-  // document snapshot while typing; the editor remains fully responsive.
+  // document snapshot while typing; both audits share one job context and one
+  // number-grounding pass.
   const analysisDocument = useDebouncedValue(document, 250);
-  const ats = useMemo(
+  const analysis = useMemo(
     () =>
       analysisDocument
-        ? analyzeCvAts(analysisDocument, application, profile, jobKeywords)
+        ? analyzeCvDocument(analysisDocument, application, profile)
         : null,
-    [analysisDocument, application, profile, jobKeywords],
+    [analysisDocument, application, profile],
   );
-
-  const grounding = useMemo(
-    () =>
-      analysisDocument ? analyzeCvGrounding(analysisDocument, profile) : null,
-    [analysisDocument, profile],
-  );
+  const ats = analysis?.ats ?? null;
+  const grounding = analysis?.grounding ?? null;
 
   const pageEstimate = useMemo(
     () => (document ? estimateCvPages(document) : null),

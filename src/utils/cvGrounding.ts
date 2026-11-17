@@ -1,6 +1,7 @@
 import type { ProfileData } from "@/types";
 import type { CvDocument } from "@/types/cv";
 import { findUnverifiedNumbers } from "@/utils/cvAts";
+import { getCvProfileContext } from "@/utils/cvProfileContext";
 
 export type CvGroundingCategory = "skill" | "education" | "claim" | "number";
 
@@ -236,6 +237,7 @@ function claimWarnings(
 export function analyzeCvGrounding(
   document: CvDocument,
   profile: ProfileData,
+  unverifiedNumbers?: string[],
 ): CvGroundingReport {
   const counts: Record<CvGroundingCategory, number> = {
     skill: 0,
@@ -294,12 +296,12 @@ export function analyzeCvGrounding(
 
   const claims = claimWarnings(
     document,
-    `${JSON.stringify(profile)}\n${document.extraContext}`,
+    `${getCvProfileContext(profile).json}\n${document.extraContext}`,
   );
   counts.claim = claims.length;
   warnings.push(...claims);
 
-  const numbers = findUnverifiedNumbers(document, profile);
+  const numbers = unverifiedNumbers ?? findUnverifiedNumbers(document, profile);
   counts.number = numbers.length;
   warnings.push(
     ...numbers.map((message, index) => ({

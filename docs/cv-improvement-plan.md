@@ -184,15 +184,22 @@ so page-fit feedback could contradict the exported file.
 
 ## Phase 11 — Performance at scale (v1.20.0)
 
-- Compute numeric/source grounding once; ATS currently computes
-  `unverifiedNumbers` and the grounding panel computes them again.
-- Cache normalized profile/source tokens and job context across analyses.
-- Split or memoize hot editor sections if profiling shows a remaining budget
-  miss after buffered inputs.
-- Add section-switch, preview-toggle and PDF-export performance budgets.
+**Status: implemented in this release.**
+
+- ATS and grounding now run from one document snapshot via
+  `analyzeCvDocument` (`cvAnalysis.ts`).
+- Number grounding is computed once and shared by both audits.
+- Profile JSON/number extraction is cached per profile object
+  (`cvProfileContext.ts`); job keywords/phrases are cached per application
+  object.
+- Added perf budgets for CV section navigation, preview toggling and PDF
+  export, in addition to long-document typing.
+- The measured editor budgets pass, so the editor was not split into section
+  components in this release. Revisit if profile/field counts grow enough to
+  miss the budget.
 
 **Why:** buffered typing fixed the measured keystroke regression, but the
-editor remains monolithic and the analysis path duplicates work.
+analysis path still repeated expensive profile scans and numbers.
 
 ## Phase 12 — ATS and consistency quality (v1.21.0)
 

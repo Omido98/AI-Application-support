@@ -90,7 +90,8 @@ missing terms, groups requirements with **Must-have** or **Preferred** badges,
 counts must-have gaps, and highlights matched terms in the preview. It never
 inserts a term: add a missing term only if it is true for you. The checklist
 also covers contact details, summary length, experience bullets, skills, dates
-and document length.
+and document length. ATS and grounding share one analysis pass, so editing does
+not run the same profile/number scan twice.
 
 The **Grounding review** panel is a separate deterministic audit. It flags:
 
