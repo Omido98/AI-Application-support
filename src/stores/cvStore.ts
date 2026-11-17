@@ -48,7 +48,11 @@ interface CvState {
     profile: ProfileData;
     config: ApiConfig;
     options: CvGenerationOptions;
-  }) => Promise<boolean>;
+  }) => Promise<CvDocument | null>;
+  applyGeneratedCv: (
+    applicationId: string,
+    document: CvDocument,
+  ) => Promise<CvDocument | null>;
   cancelGeneration: (applicationId: string) => void;
   deleteCv: (applicationId: string) => Promise<void>;
   resetCache: () => void;
@@ -277,29 +281,19 @@ export const useCvStore = create<CvState>((set, get) => ({
       generationErrors: { ...state.generationErrors, [application.id]: null },
     }));
     try {
-      const document = await generateCvDocument({
+      return await generateCvDocument({
         application,
         profile,
         config,
         options,
         signal: controller.signal,
       });
-      if (get().documents[application.id]) {
-        await get().snapshotCurrent(application.id, "Before AI regeneration");
-      }
-      bumpRevision(application.id);
-      set((state) => ({
-        documents: { ...state.documents, [application.id]: document },
-        loaded: { ...state.loaded, [application.id]: true },
-      }));
-      await get().saveCv(application.id);
-      return true;
     } catch (error) {
       if (
         controller.signal.aborted ||
         (error instanceof Error && error.name === "AbortError")
       ) {
-        return false;
+        return null;
       }
       set((state) => ({
         generationErrors: {
@@ -307,7 +301,7 @@ export const useCvStore = create<CvState>((set, get) => ({
           [application.id]: errorText(error),
         },
       }));
-      return false;
+      return null;
     } finally {
       if (controllers.get(application.id) === controller) {
         controllers.delete(application.id);
@@ -316,6 +310,23 @@ export const useCvStore = create<CvState>((set, get) => ({
         generating: { ...state.generating, [application.id]: false },
       }));
     }
+  },
+
+  applyGeneratedCv: async (applicationId, document) => {
+    if (deletedApplications.has(applicationId)) return null;
+    flushPendingEdits();
+    const before = get().documents[applicationId] ?? null;
+    if (before) {
+      await get().snapshotCurrent(applicationId, "Before AI regeneration");
+    }
+    bumpRevision(applicationId);
+    set((state) => ({
+      documents: { ...state.documents, [applicationId]: document },
+      loaded: { ...state.loaded, [applicationId]: true },
+      errors: { ...state.errors, [applicationId]: null },
+    }));
+    await get().saveCv(applicationId);
+    return before;
   },
 
   cancelGeneration: (applicationId) => {

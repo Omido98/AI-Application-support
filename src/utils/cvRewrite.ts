@@ -7,6 +7,7 @@ import { sendMessage } from "@/utils/api";
 import { buildCvRewritePrompt } from "@/utils/cvRewritePrompt";
 import { findUnverifiedNumbersInText } from "@/utils/cvAts";
 import { makeCvUsage } from "@/utils/cvUsage";
+import { markAiSection, sectionForRewriteTarget } from "@/utils/cvProvenance";
 
 export type CvRewriteResult =
   | {
@@ -85,14 +86,9 @@ export function applyRewriteResult(
   usage?: CvAiUsage,
 ): CvDocument {
   const section: CvDocument["sectionOrder"][number] =
-    target.kind === "project"
-      ? "projects"
-      : target.kind === "other"
-        ? "other"
-        : target.kind;
+    sectionForRewriteTarget(target);
   const withUsage: CvDocument = {
-    ...document,
-    aiSections: [...new Set([...(document.aiSections ?? []), section])],
+    ...markAiSection(document, section),
     ...(usage ? { lastUsage: usage } : {}),
   };
   if (result.kind === "summary") {

@@ -19,6 +19,7 @@ import { sendMessage } from "@/utils/api";
 import { buildCvGenerationPrompt } from "@/utils/cvPrompt";
 import { createCvDocumentFromProfile } from "@/utils/cvSchema";
 import { makeCvUsage } from "@/utils/cvUsage";
+import { markAiSections } from "@/utils/cvProvenance";
 
 interface GeneratedCvContent {
   headline?: unknown;
@@ -338,12 +339,14 @@ export async function generateCvDocument({
     );
   }
 
-  const document = mergeGeneratedCv(parsed, base, options);
+  const document = markAiSections(
+    mergeGeneratedCv(parsed, base, options),
+    CV_SECTIONS,
+  );
   const lastUsage = makeCvUsage("generate", config, usages);
   return {
     ...document,
     contentLanguage: options.language,
-    aiSections: [...CV_SECTIONS],
     ...(lastUsage ? { lastUsage } : {}),
   };
 }

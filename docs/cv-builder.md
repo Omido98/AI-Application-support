@@ -31,7 +31,11 @@ no AI call.
    a compact set of ATS priorities, and relevance rules; it selects the two or
    three most relevant roles and writes a headline, summary, skills order and
    role bullets.
-5. Review the document and edit any section. Check the **Grounding review**
+5. Review the generated CV before accepting. The dialog shows the estimated
+   page count, selected roles/skills, headline and summary, token/cost usage
+   and the full Grounding review. **Discard** keeps the current draft;
+   **Accept generated CV** snapshots the old CV in Versions and replaces it.
+6. Review and edit any section. Check the **Grounding review**
    panel for unsupported skills, education details, low-evidence claims and
    numbers before exporting. The editor supports:
    - contact details and headline;
@@ -41,16 +45,16 @@ no AI call.
      deletion;
    - education, projects, certifications, languages and other experience;
    - section order and entry order.
-6. Switch to **Preview** for a formatted page view that matches the Word
+7. Switch to **Preview** for a formatted page view that matches the Word
    layout, including measured page-break markers, then back to **Edit**.
-7. Use **AI rewrite** on the summary, a role, a project or other experience to
+8. Use **AI rewrite** on the summary, a role, a project or other experience to
    rewrite only that section. Pick a preset such as **Shorter**, **More
    senior**, **More technical**, **Stronger verbs** or **Match requirements**,
    or add your own guidance. The rest of the CV stays untouched. The model's
    result is not applied automatically: review the before/after diff, any
    numbers that could not be grounded in the profile, then **Accept**,
    **Discard** or **Try again**.
-8. **Export Word** saves a `.docx` through the native save dialog.
+9. **Export Word** saves a `.docx` through the native save dialog.
 
 Edits autosave to `cv_<applicationId>.json` in the app data folder. Long text
 fields save once you pause or leave the field, rather than on every keystroke;

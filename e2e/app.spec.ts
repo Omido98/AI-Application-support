@@ -552,6 +552,10 @@ test("CV history restores a saved version and survives reload", async ({
     page.getByRole("heading", { name: "Grounding review" }),
   ).toBeVisible();
   await expect(page.getByText("AI-assisted")).toBeVisible();
+  await page
+    .getByRole("textbox", { name: "Professional summary" })
+    .fill("Manually edited summary.");
+  await expect(page.getByText("AI-assisted")).toHaveCount(0);
   await expect(
     page.getByText(/is not in your profile skills or extra context/),
   ).toBeVisible();

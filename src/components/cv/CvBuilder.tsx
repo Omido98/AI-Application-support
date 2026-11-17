@@ -54,6 +54,7 @@ import BufferedTextarea from "@/components/cv/BufferedTextarea";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
 import { flushPendingEdits } from "@/utils/pendingEdits";
+import { clearAiSection } from "@/utils/cvProvenance";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import { exportCvPdf } from "@/utils/cvPdf";
@@ -61,6 +62,7 @@ import CvPreview from "@/components/cv/CvPreview";
 import CvRewriteDialog from "@/components/cv/CvRewriteDialog";
 import CvHistoryDialog from "@/components/cv/CvHistoryDialog";
 import CvLanguageDialog from "@/components/cv/CvLanguageDialog";
+import CvGenerationReviewDialog from "@/components/cv/CvGenerationReviewDialog";
 import {
   applyRewriteResult,
   buildRewriteProposal,
@@ -279,6 +281,7 @@ export default function CvBuilder({
   const restoreSnapshot = useCvStore((state) => state.restoreSnapshot);
   const saveCv = useCvStore((state) => state.saveCv);
   const generateCv = useCvStore((state) => state.generateCv);
+  const applyGeneratedCv = useCvStore((state) => state.applyGeneratedCv);
   const cancelGeneration = useCvStore((state) => state.cancelGeneration);
 
   const [language, setLanguage] = useState<CvLanguage>(() =>
@@ -298,6 +301,9 @@ export default function CvBuilder({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [chatContextBusy, setChatContextBusy] = useState(false);
+  const [generationProposal, setGenerationProposal] =
+    useState<CvDocument | null>(null);
+  const [generationBusy, setGenerationBusy] = useState(false);
   const [previousDocument, setPreviousDocument] = useState<CvDocument | null>(
     null,
   );
@@ -338,6 +344,8 @@ export default function CvBuilder({
     setPreviousDocument(null);
     setView("edit");
     setHistoryOpen(false);
+    setGenerationProposal(null);
+    setGenerationBusy(false);
   }, [application.id]);
 
   const profileHasContent = Boolean(
@@ -436,52 +444,90 @@ export default function CvBuilder({
   };
 
   const updateExperience = (id: string, next: Partial<CvExperience>) => {
-    patch((current) => ({
-      ...current,
-      experience: current.experience.map((item) =>
-        item.id === id ? { ...item, ...next } : item,
+    patch((current) =>
+      clearAiSection(
+        {
+          ...current,
+          experience: current.experience.map((item) =>
+            item.id === id ? { ...item, ...next } : item,
+          ),
+        },
+        "experience",
       ),
-    }));
+    );
   };
   const updateEducation = (id: string, next: Partial<CvEducation>) => {
-    patch((current) => ({
-      ...current,
-      education: current.education.map((item) =>
-        item.id === id ? { ...item, ...next } : item,
+    patch((current) =>
+      clearAiSection(
+        {
+          ...current,
+          education: current.education.map((item) =>
+            item.id === id ? { ...item, ...next } : item,
+          ),
+        },
+        "education",
       ),
-    }));
+    );
   };
   const updateProject = (id: string, next: Partial<CvProject>) => {
-    patch((current) => ({
-      ...current,
-      projects: current.projects.map((item) =>
-        item.id === id ? { ...item, ...next } : item,
+    patch((current) =>
+      clearAiSection(
+        {
+          ...current,
+          projects: current.projects.map((item) =>
+            item.id === id ? { ...item, ...next } : item,
+          ),
+        },
+        "projects",
       ),
-    }));
+    );
   };
   const updateCertification = (id: string, next: Partial<CvCertification>) => {
-    patch((current) => ({
-      ...current,
-      certifications: current.certifications.map((item) =>
-        item.id === id ? { ...item, ...next } : item,
+    patch((current) =>
+      clearAiSection(
+        {
+          ...current,
+          certifications: current.certifications.map((item) =>
+            item.id === id ? { ...item, ...next } : item,
+          ),
+        },
+        "certifications",
       ),
-    }));
+    );
   };
   const updateLanguage = (id: string, next: Partial<CvLanguageSkill>) => {
-    patch((current) => ({
-      ...current,
-      languages: current.languages.map((item) =>
-        item.id === id ? { ...item, ...next } : item,
+    patch((current) =>
+      clearAiSection(
+        {
+          ...current,
+          languages: current.languages.map((item) =>
+            item.id === id ? { ...item, ...next } : item,
+          ),
+        },
+        "languages",
       ),
-    }));
+    );
   };
   const updateOther = (id: string, next: Partial<CvOtherEngagement>) => {
-    patch((current) => ({
-      ...current,
-      otherEngagements: current.otherEngagements.map((item) =>
-        item.id === id ? { ...item, ...next } : item,
+    patch((current) =>
+      clearAiSection(
+        {
+          ...current,
+          otherEngagements: current.otherEngagements.map((item) =>
+            item.id === id ? { ...item, ...next } : item,
+          ),
+        },
+        "other",
       ),
-    }));
+    );
+  };
+
+  const setContentField = <K extends keyof CvDocument>(
+    section: CvSectionId,
+    key: K,
+    value: CvDocument[K],
+  ) => {
+    patch((current) => clearAiSection({ ...current, [key]: value }, section));
   };
 
   const moveSection = (section: CvSectionId, direction: -1 | 1) => {
@@ -509,9 +555,8 @@ export default function CvBuilder({
     flushPendingEdits();
     const current = useCvStore.getState().documents[application.id] ?? document;
     setExportStatus(null);
-    setLanguage(nextLanguage);
-    const before = current;
-    const ok = await generateCv({
+    setGenerationProposal(null);
+    const proposal = await generateCv({
       application,
       profile,
       config: apiConfig,
@@ -522,8 +567,30 @@ export default function CvBuilder({
         template: current?.template ?? template,
       },
     });
-    if (ok && before) setPreviousDocument(before);
-    if (!ok && before) setLanguage(before.language);
+    if (proposal) setGenerationProposal(proposal);
+  };
+
+  const handleAcceptGenerated = async () => {
+    if (!generationProposal) return;
+    setGenerationBusy(true);
+    try {
+      const before = await applyGeneratedCv(application.id, generationProposal);
+      setLanguage(generationProposal.language);
+      setPageSize(generationProposal.pageSize);
+      setTemplate(generationProposal.template ?? "classic");
+      setExtraContext(generationProposal.extraContext);
+      if (before) setPreviousDocument(before);
+      setGenerationProposal(null);
+      setExportStatus("Applied generated CV.");
+    } finally {
+      setGenerationBusy(false);
+    }
+  };
+
+  const handleDiscardGenerated = () => {
+    if (generationBusy) return;
+    setGenerationProposal(null);
+    setExportStatus("Discarded generated CV.");
   };
 
   const handleUndo = () => {
@@ -909,6 +976,15 @@ export default function CvBuilder({
             </div>
           </CardContent>
         </Card>
+        <CvGenerationReviewDialog
+          open={generationProposal !== null}
+          proposal={generationProposal}
+          current={null}
+          profile={profile}
+          busy={generationBusy}
+          onAccept={() => void handleAcceptGenerated()}
+          onDiscard={handleDiscardGenerated}
+        />
       </div>
     );
   }
@@ -954,7 +1030,7 @@ export default function CvBuilder({
         return card(
           <BufferedTextarea
             value={document.summary}
-            onCommit={(value) => setField("summary", value)}
+            onCommit={(value) => setContentField("summary", "summary", value)}
             placeholder="Professional summary tailored to this role…"
             className={textareaClass}
             aria-label="Professional summary"
@@ -966,7 +1042,9 @@ export default function CvBuilder({
           <div className="space-y-1.5">
             <BufferedTextarea
               value={document.skills.join("\n")}
-              onCommit={(value) => setField("skills", lines(value))}
+              onCommit={(value) =>
+                setContentField("skills", "skills", lines(value))
+              }
               placeholder="One skill per line"
               className={textareaClass}
               aria-label="Skills, one per line"
@@ -1984,7 +2062,9 @@ export default function CvBuilder({
                 </h3>
                 <Input
                   value={document.headline}
-                  onChange={(event) => setField("headline", event.target.value)}
+                  onChange={(event) =>
+                    setContentField("summary", "headline", event.target.value)
+                  }
                   placeholder="Headline, e.g. Frontend Engineer focused on accessible design systems"
                   className={fieldClass}
                 />
@@ -2311,6 +2391,15 @@ export default function CvBuilder({
         onClose={() => setPendingLanguage(null)}
         onHeadingsOnly={applyHeadingsOnlyLanguage}
         onRegenerate={regenerateLanguage}
+      />
+      <CvGenerationReviewDialog
+        open={generationProposal !== null}
+        proposal={generationProposal}
+        current={document}
+        profile={profile}
+        busy={generationBusy}
+        onAccept={() => void handleAcceptGenerated()}
+        onDiscard={handleDiscardGenerated}
       />
     </div>
   );

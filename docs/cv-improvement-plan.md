@@ -149,15 +149,20 @@ save pipeline that can overwrite newer edits.
 
 ## Phase 9 — Generation review and provenance (v1.18.0)
 
-- Full generation returns a proposal instead of applying immediately.
-- Review grounding warnings, then **Accept** or **Discard**; keep the previous
-  CV in Versions.
-- Persist per-section AI provenance and clear the marker when that section is
-  manually edited.
-- Keep mixed-language/content-language provenance accurate.
+**Status: implemented in this release.**
 
-**Why:** section rewrites are reviewable, but whole-CV generation still
-replaces a user-edited draft without an explicit accept step.
+- Full generation now returns a proposal instead of replacing immediately.
+- A review dialog shows page/role/skill counts, the generated headline and
+  summary, usage, and the full grounding warnings.
+- **Accept** snapshots the current CV into Versions and saves the replacement;
+  **Discard** keeps the current draft.
+- Generated sections receive persistent AI provenance.
+- A manual edit to a section clears that section’s AI marker; the marker is
+  no longer merely historical.
+- Language state is not changed until the generated proposal is accepted.
+
+**Why:** section rewrites were reviewable, but whole-CV generation still
+replaced a user-edited draft without an explicit accept step.
 
 ## Phase 10 — Layout parity and page accuracy (v1.19.0)
 
