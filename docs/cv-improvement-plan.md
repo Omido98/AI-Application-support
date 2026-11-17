@@ -1,7 +1,9 @@
 # CV builder improvement plan
 
-This is the phased follow-up plan after the v1.9.0 CV builder. Each phase is a
-separate release and should be tested before the next one starts.
+This is the phased follow-up plan after the v1.9.0 CV builder. Phases 1–7 are
+feature-complete on the `release-v1.16.0` branch. They are not yet safe to
+merge or publish: the post-roadmap audit found data-integrity, layout-parity
+and testing gaps, covered by phases 8–13 below.
 
 ## Phase 1 — Reviewable rewrites (v1.10.0)
 
@@ -124,11 +126,96 @@ guidance is more actionable without claiming experience the candidate lacks.
 **Why:** output choices and cross-document consistency were the remaining
 workflow gaps after trust, performance and ATS depth.
 
+## Phase 8 — Data integrity and save pipeline (v1.17.0)
+
+**Status: implemented in this release.**
+
+The audit found that the plan's cross-cutting promise, “the last edit is never
+lost”, was not met.
+
+- Register dirty buffered text inputs and flush them before close, backup,
+  export, generation and other destructive/read actions.
+- Serialize saves per application with a revision guard. A save that finishes
+  after newer edits must not replace the newer in-memory document.
+- Make deletion wait for or invalidate in-flight saves so a deleted CV cannot
+  be resurrected.
+- Resolve the current document from the store at export/generate time instead
+  of using a render-time snapshot.
+- Add regression tests for save-order races, delete races, dirty-input close
+  and registration cleanup.
+
+**Why:** data loss is a P0 defect; further feature work must not proceed on a
+save pipeline that can overwrite newer edits.
+
+## Phase 9 — Generation review and provenance (v1.18.0)
+
+- Full generation returns a proposal instead of applying immediately.
+- Review grounding warnings, then **Accept** or **Discard**; keep the previous
+  CV in Versions.
+- Persist per-section AI provenance and clear the marker when that section is
+  manually edited.
+- Keep mixed-language/content-language provenance accurate.
+
+**Why:** section rewrites are reviewable, but whole-CV generation still
+replaces a user-edited draft without an explicit accept step.
+
+## Phase 10 — Layout parity and page accuracy (v1.19.0)
+
+- One shared layout-metrics source for DOCX, PDF, preview and page estimates:
+  page size, margins, font sizes, line heights and section spacing.
+- Align the current mismatch: DOCX uses 30/36 pt margins, PDF uses 54/60 pt,
+  and preview uses 27/39 pt.
+- Make the page estimate template-aware and use the measured preview count
+  for the overflow warning.
+- Add PDF/DOCX text and page-parity tests, including Swedish characters.
+
+**Why:** the two templates and three outputs currently do not paginate
+comparably, so the page-fit feedback can be wrong.
+
+## Phase 11 — Performance at scale (v1.20.0)
+
+- Compute numeric/source grounding once; ATS currently computes
+  `unverifiedNumbers` and the grounding panel computes them again.
+- Cache normalized profile/source tokens and job context across analyses.
+- Split or memoize hot editor sections if profiling shows a remaining budget
+  miss after buffered inputs.
+- Add section-switch, preview-toggle and PDF-export performance budgets.
+
+**Why:** buffered typing fixed the measured keystroke regression, but the
+editor remains monolithic and the analysis path duplicates work.
+
+## Phase 12 — ATS and consistency quality (v1.21.0)
+
+- Harden requirement parsing for multiple requirements per sentence,
+  semicolons, negations and explicit must/preferred language.
+- Reduce generic keyword/highlight noise and label exact vs phrase vs synonym
+  matches.
+- Improve cover-letter consistency using actual letter content and linked
+  applications, not only the summary and company.
+- Replace or deduplicate the appended chat-context block.
+
+**Why:** the ATS and consistency layers are useful but still heuristic; the
+next step is precision and explainability.
+
+## Phase 13 — Release hardening and acceptance (v1.22.0)
+
+- Native e2e for PDF save, template switching, history restore and language
+  flow.
+- Axe scans for history, consistency, template and PDF-highlight states.
+- Live-provider acceptance pass before any merge.
+- Clean up superseded PRs/drafts and publish only after the P0 fixes.
+
+**Why:** the current green suite does not cover the data-safety and layout
+paths that matter most before release.
+
 ## Cross-cutting rules
 
 - Never let generated content replace a user-edited section without an
   explicit accept action.
 - Never automatically insert a missing keyword or credential.
+- Never let a stale save, delete race or unmounted buffer overwrite newer
+  edits.
+- Keep DOCX/PDF/preview layout metrics in one source of truth.
 - Keep DOCX rendering and ATS analysis deterministic and local.
 - Every phase must keep backup/prune/reset coverage and axe/browser tests
   green.

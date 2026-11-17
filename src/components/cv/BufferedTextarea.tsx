@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { Textarea } from "@/components/ui/textarea";
+import { registerPendingEditFlush } from "@/utils/pendingEdits";
 
 interface BufferedTextareaProps extends Omit<
   ComponentProps<"textarea">,
@@ -58,6 +59,10 @@ export default function BufferedTextarea({
     dirtyRef.current = false;
     commitRef.current(draftRef.current);
   };
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+
+  useEffect(() => registerPendingEditFlush(() => flushRef.current()), []);
 
   useEffect(() => {
     return () => {

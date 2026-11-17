@@ -53,6 +53,7 @@ import CvConsistencyPanel from "@/components/cv/CvConsistencyPanel";
 import BufferedTextarea from "@/components/cv/BufferedTextarea";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
+import { flushPendingEdits } from "@/utils/pendingEdits";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import { exportCvPdf } from "@/utils/cvPdf";
@@ -494,6 +495,7 @@ export default function CvBuilder({
   };
 
   const startFromProfile = () => {
+    flushPendingEdits();
     const next = createCvDocumentFromProfile(profile, application, {
       language,
       pageSize,
@@ -504,14 +506,21 @@ export default function CvBuilder({
   };
 
   const handleGenerate = async (nextLanguage: CvLanguage = language) => {
+    flushPendingEdits();
+    const current = useCvStore.getState().documents[application.id] ?? document;
     setExportStatus(null);
     setLanguage(nextLanguage);
-    const before = document;
+    const before = current;
     const ok = await generateCv({
       application,
       profile,
       config: apiConfig,
-      options: { language: nextLanguage, pageSize, extraContext, template },
+      options: {
+        language: nextLanguage,
+        pageSize: current?.pageSize ?? pageSize,
+        extraContext: current?.extraContext ?? extraContext,
+        template: current?.template ?? template,
+      },
     });
     if (ok && before) setPreviousDocument(before);
     if (!ok && before) setLanguage(before.language);
@@ -525,6 +534,7 @@ export default function CvBuilder({
   };
 
   const handleRestoreSnapshot = async (snapshotId: string) => {
+    flushPendingEdits();
     setHistoryBusy(true);
     try {
       await restoreSnapshot(application.id, snapshotId);
@@ -536,6 +546,7 @@ export default function CvBuilder({
   };
 
   const addRecentChatContext = async () => {
+    flushPendingEdits();
     if (!document) return;
     setChatContextBusy(true);
     try {
@@ -592,7 +603,9 @@ export default function CvBuilder({
   };
 
   const handleRewrite = async (instruction: string) => {
-    if (!document || !rewriteTarget) return;
+    flushPendingEdits();
+    const current = useCvStore.getState().documents[application.id] ?? document;
+    if (!current || !rewriteTarget) return;
     const controller = new AbortController();
     rewriteController.current?.abort();
     rewriteController.current = controller;
@@ -605,7 +618,7 @@ export default function CvBuilder({
       const result = await rewriteCvSection({
         application,
         profile,
-        document,
+        document: current,
         target: rewriteTarget,
         instruction,
         config: apiConfig,
@@ -616,7 +629,7 @@ export default function CvBuilder({
       });
       setRewriteProposal(
         buildRewriteProposal(
-          document,
+          current,
           rewriteTarget,
           rewriteLabel,
           result,
@@ -642,7 +655,8 @@ export default function CvBuilder({
 
   const handleAcceptRewrite = async () => {
     if (!rewriteProposal) return;
-    const before = document;
+    flushPendingEdits();
+    const before = useCvStore.getState().documents[application.id] ?? document;
     setRewriteBusy(true);
     try {
       await snapshotCurrent(
@@ -673,11 +687,13 @@ export default function CvBuilder({
   };
 
   const handleExport = async () => {
-    if (!document) return;
+    flushPendingEdits();
+    const current = useCvStore.getState().documents[application.id] ?? document;
+    if (!current) return;
     setExportStatus(null);
     setExporting(true);
     try {
-      const path = await exportCvDocx(document, application.companyName);
+      const path = await exportCvDocx(current, application.companyName);
       if (path) {
         const name = path.split(/[\\/]/).pop() ?? path;
         setExportStatus(`Exported ${name}.`);
@@ -692,11 +708,13 @@ export default function CvBuilder({
   };
 
   const handleExportPdf = async () => {
-    if (!document) return;
+    flushPendingEdits();
+    const current = useCvStore.getState().documents[application.id] ?? document;
+    if (!current) return;
     setExportStatus(null);
     setExportingPdf(true);
     try {
-      const path = await exportCvPdf(document, application.companyName);
+      const path = await exportCvPdf(current, application.companyName);
       if (path) {
         const name = path.split(/[\\/]/).pop() ?? path;
         setExportStatus(`Exported ${name}.`);
@@ -708,6 +726,11 @@ export default function CvBuilder({
     } finally {
       setExportingPdf(false);
     }
+  };
+
+  const handleSave = async () => {
+    flushPendingEdits();
+    await saveCv(application.id);
   };
 
   const changeLanguage = (value: CvLanguage) => {
@@ -1692,7 +1715,7 @@ export default function CvBuilder({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void saveCv(application.id)}
+            onClick={() => void handleSave()}
             disabled={saving}
           >
             <Save className="size-3.5" /> Save

@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import fs from "node:fs/promises";
+import mammoth from "mammoth";
 import {
   dateFromNow,
   makeApplication,
@@ -288,6 +290,35 @@ test("CV can explicitly add recent chat details to its context", async ({
   await expect(
     page.getByRole("textbox", { name: "Extra context" }),
   ).toHaveValue(/Recent chat context \(selected manually\):/);
+});
+
+test("CV export includes the latest buffered edit", async ({ page }) => {
+  const application = makeApplication(
+    "cv-buffered-export",
+    "Export Corp",
+    "applied",
+  );
+  await seed(page, { applications: [application] });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page
+    .getByRole("textbox", { name: "Professional summary" })
+    .fill("Buffered export summary with TypeScript evidence.");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export Word" }).click();
+  const download = await downloadPromise;
+  const path = await download.path();
+  expect(path).toBeTruthy();
+  const bytes = await fs.readFile(path as string);
+  const text = await mammoth.extractRawText({
+    buffer: Buffer.from(bytes),
+  });
+  expect(text.value).toContain(
+    "Buffered export summary with TypeScript evidence.",
+  );
 });
 
 test("CV section rewrite dialog opens with guidance", async ({ page }) => {

@@ -22,6 +22,7 @@ import {
   generateCvDocument,
   type CvGenerationOptions,
 } from "@/utils/cvGeneration";
+import { flushPendingEdits } from "@/utils/pendingEdits";
 
 interface CvState {
   documents: Record<string, CvDocument>;
@@ -55,6 +56,18 @@ interface CvState {
 
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const controllers = new Map<string, AbortController>();
+/** Per-application document revision, bumped on every in-memory mutation. */
+const revisions = new Map<string, number>();
+/** Per-application promise chain so only one write runs at a time. */
+const saveQueues = new Map<string, Promise<boolean>>();
+/** Applications whose files must not be recreated by a late save. */
+const deletedApplications = new Set<string>();
+
+function bumpRevision(applicationId: string): number {
+  const next = (revisions.get(applicationId) ?? 0) + 1;
+  revisions.set(applicationId, next);
+  return next;
+}
 
 function fileName(applicationId: string): string {
   return `cv_${applicationId}.json`;
@@ -67,6 +80,7 @@ function errorText(error: unknown): string {
 }
 
 function scheduleSave(applicationId: string) {
+  if (deletedApplications.has(applicationId)) return;
   const existing = saveTimers.get(applicationId);
   if (existing) clearTimeout(existing);
   saveTimers.set(
@@ -80,6 +94,7 @@ function scheduleSave(applicationId: string) {
 
 /** Flush pending CV edits (used before close/backup/reload). */
 export async function flushCvSaves(): Promise<boolean> {
+  flushPendingEdits();
   for (const timer of saveTimers.values()) clearTimeout(timer);
   saveTimers.clear();
   const state = useCvStore.getState();
@@ -125,6 +140,10 @@ export const useCvStore = create<CvState>((set, get) => ({
         "The saved CV history was unreadable and was ignored.",
       );
     }
+    if (document) {
+      deletedApplications.delete(applicationId);
+      revisions.set(applicationId, 0);
+    }
     set((state) => ({
       documents: document
         ? { ...state.documents, [applicationId]: document }
@@ -138,28 +157,55 @@ export const useCvStore = create<CvState>((set, get) => ({
 
   saveCv: async (applicationId) => {
     const current = get().documents[applicationId];
-    if (!current) return false;
-    const document = { ...current, updatedAt: new Date().toISOString() };
+    if (!current || deletedApplications.has(applicationId)) return false;
+
     set((state) => ({
       saving: { ...state.saving, [applicationId]: true },
     }));
-    const ok = await saveJson(fileName(applicationId), document);
-    set((state) => ({
-      documents: ok
-        ? { ...state.documents, [applicationId]: document }
-        : state.documents,
-      saving: { ...state.saving, [applicationId]: false },
-      errors: {
-        ...state.errors,
-        [applicationId]: ok
-          ? null
-          : "Could not save the CV to the data folder.",
-      },
-    }));
-    return ok;
+
+    const previous = saveQueues.get(applicationId) ?? Promise.resolve(true);
+    const queued = previous.then(async (): Promise<boolean> => {
+      if (deletedApplications.has(applicationId)) return false;
+      const latest = get().documents[applicationId];
+      if (!latest) return false;
+
+      const revision = revisions.get(applicationId) ?? 0;
+      const document = { ...latest, updatedAt: new Date().toISOString() };
+      const ok = await saveJson(fileName(applicationId), document);
+
+      // A delete may have happened while the write was in flight. The delete
+      // path waits for this queue and removes the files afterwards.
+      if (deletedApplications.has(applicationId)) return false;
+
+      set((state) => ({
+        documents:
+          ok && (revisions.get(applicationId) ?? 0) === revision
+            ? { ...state.documents, [applicationId]: document }
+            : state.documents,
+        errors: {
+          ...state.errors,
+          [applicationId]: ok
+            ? null
+            : "Could not save the CV to the data folder.",
+        },
+      }));
+      return ok;
+    });
+    saveQueues.set(applicationId, queued);
+    void queued.then(() => {
+      if (saveQueues.get(applicationId) === queued) {
+        saveQueues.delete(applicationId);
+        set((state) => ({
+          saving: { ...state.saving, [applicationId]: false },
+        }));
+      }
+    });
+    return queued;
   },
 
   setCv: (applicationId, document) => {
+    deletedApplications.delete(applicationId);
+    bumpRevision(applicationId);
     set((state) => ({
       documents: { ...state.documents, [applicationId]: document },
       loaded: { ...state.loaded, [applicationId]: true },
@@ -172,6 +218,7 @@ export const useCvStore = create<CvState>((set, get) => ({
   updateCv: (applicationId, updater) => {
     const current = get().documents[applicationId];
     if (!current) return;
+    bumpRevision(applicationId);
     const next = { ...updater(current), updatedAt: new Date().toISOString() };
     set((state) => ({
       documents: { ...state.documents, [applicationId]: next },
@@ -212,6 +259,7 @@ export const useCvStore = create<CvState>((set, get) => ({
     if (!target) return;
     const restored = cloneCvDocument(target.document);
     await get().snapshotCurrent(applicationId, "Before restoring a version");
+    bumpRevision(applicationId);
     set((state) => ({
       documents: { ...state.documents, [applicationId]: restored },
       loaded: { ...state.loaded, [applicationId]: true },
@@ -239,6 +287,7 @@ export const useCvStore = create<CvState>((set, get) => ({
       if (get().documents[application.id]) {
         await get().snapshotCurrent(application.id, "Before AI regeneration");
       }
+      bumpRevision(application.id);
       set((state) => ({
         documents: { ...state.documents, [application.id]: document },
         loaded: { ...state.loaded, [application.id]: true },
@@ -277,11 +326,24 @@ export const useCvStore = create<CvState>((set, get) => ({
   deleteCv: async (applicationId) => {
     controllers.get(applicationId)?.abort();
     controllers.delete(applicationId);
+    deletedApplications.add(applicationId);
+    bumpRevision(applicationId);
     const timer = saveTimers.get(applicationId);
     if (timer) {
       clearTimeout(timer);
       saveTimers.delete(applicationId);
     }
+
+    // Never delete underneath a write: wait for the queue, then remove files.
+    const pending = saveQueues.get(applicationId);
+    if (pending) {
+      try {
+        await pending;
+      } catch {
+        // A failed save must not prevent deletion.
+      }
+    }
+
     await deleteFile(fileName(applicationId));
     await deleteFile(cvHistoryFileName(applicationId));
     set((state) => {
@@ -302,6 +364,11 @@ export const useCvStore = create<CvState>((set, get) => ({
     controllers.clear();
     for (const timer of saveTimers.values()) clearTimeout(timer);
     saveTimers.clear();
+    for (const applicationId of Object.keys(get().documents)) {
+      deletedApplications.add(applicationId);
+      bumpRevision(applicationId);
+    }
+    saveQueues.clear();
     set({
       documents: {},
       history: {},

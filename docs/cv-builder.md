@@ -54,8 +54,9 @@ no AI call.
 
 Edits autosave to `cv_<applicationId>.json` in the app data folder. Long text
 fields save once you pause or leave the field, rather than on every keystroke;
-the ATS and grounding panels update shortly afterwards. The document stores
-structured content, not the DOCX bytes.
+the ATS and grounding panels update shortly afterwards. Pending textarea drafts
+are also flushed before close, backup, export and AI actions. The document
+stores structured content, not the DOCX bytes.
 
 The **Versions (n)** button keeps the last five CV snapshots per application.
 A snapshot is taken before AI regeneration, before an accepted section rewrite

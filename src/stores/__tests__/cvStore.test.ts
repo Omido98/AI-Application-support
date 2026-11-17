@@ -161,6 +161,67 @@ describe("cvStore", () => {
     );
   });
 
+  it("does not let a stale save overwrite newer edits", async () => {
+    const document = makeDocument();
+    loadJsonMock.mockImplementation(async (name: string) =>
+      name.startsWith("cv_history_") ? null : document,
+    );
+    await useCvStore.getState().loadCv("app-1");
+
+    let releaseSave!: (ok: boolean) => void;
+    saveJsonMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseSave = resolve;
+        }),
+    );
+
+    const save = useCvStore.getState().saveCv("app-1");
+    await vi.waitFor(() => expect(releaseSave).toBeTypeOf("function"));
+
+    useCvStore.getState().updateCv("app-1", (current) => ({
+      ...current,
+      headline: "Newer headline",
+    }));
+    releaseSave(true);
+    await save;
+
+    expect(useCvStore.getState().documents["app-1"].headline).toBe(
+      "Newer headline",
+    );
+  });
+
+  it("waits for an in-flight save before deleting files", async () => {
+    const document = makeDocument();
+    loadJsonMock.mockImplementation(async (name: string) =>
+      name.startsWith("cv_history_") ? null : document,
+    );
+    await useCvStore.getState().loadCv("app-1");
+
+    let releaseSave!: (ok: boolean) => void;
+    saveJsonMock.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseSave = resolve;
+        }),
+    );
+
+    const save = useCvStore.getState().saveCv("app-1");
+    await vi.waitFor(() => expect(releaseSave).toBeTypeOf("function"));
+
+    const deletion = useCvStore.getState().deleteCv("app-1");
+    await Promise.resolve();
+    expect(deleteFileMock).not.toHaveBeenCalled();
+
+    releaseSave(true);
+    await save;
+    await deletion;
+
+    expect(deleteFileMock).toHaveBeenCalledWith("cv_app-1.json");
+    expect(deleteFileMock).toHaveBeenCalledWith("cv_history_app-1.json");
+    expect(useCvStore.getState().documents["app-1"]).toBeUndefined();
+  });
+
   it("deletes the CV file, history and cache entry", async () => {
     const document = makeDocument();
     loadJsonMock.mockImplementation(async (name: string) =>
