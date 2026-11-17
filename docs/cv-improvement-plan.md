@@ -35,15 +35,18 @@ visibility makes repeated section rewrites predictable.
 
 ## Phase 3 — Grounding and generation quality (v1.12.0)
 
+**Status: implemented in this release.**
+
 - Deterministically validate generated skills against profile skills and the
   explicit extra context.
-- Validate education details/coursework, project titles and non-numeric
-  claims against profile entries before accepting a generated CV.
-- Surface unsupported claims as review warnings, not silent fixes.
-- Improve the generation prompt with role-relevance priorities and a compact
-  must-have requirement list.
-- Add a small offline eval set for CV structure/grounding (mocked provider,
-  no network).
+- Validate education details/coursework against the referenced profile entry.
+- Flag summary and bullet text with very little profile overlap as
+  low-evidence claims, alongside unverified numbers.
+- Surface all of these as advisory warnings in the Grounding review panel;
+  never silently remove or rewrite.
+- Improve the generation prompt with compact ATS priorities, relevance rules,
+  a two-or-three-role target and a 15-skill cap.
+- Add an offline CV grounding eval and prompt tests.
 
 **Why:** source IDs prevent invented employers, but not invented skills or
 soft claims. This is the remaining truthfulness gap.

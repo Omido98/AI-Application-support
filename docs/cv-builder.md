@@ -28,9 +28,12 @@ no AI call.
 2. Pick **English** or **Svenska** and A4 or US Letter.
 3. Optionally add extra context.
 4. **Generate tailored CV**. The model receives the profile and job context,
-   selects the relevant roles and writes a headline, summary, skills order and
+   a compact set of ATS priorities, and relevance rules; it selects the two or
+   three most relevant roles and writes a headline, summary, skills order and
    role bullets.
-5. Review the document and edit any section. The editor supports:
+5. Review the document and edit any section. Check the **Grounding review**
+   panel for unsupported skills, education details, low-evidence claims and
+   numbers before exporting. The editor supports:
    - contact details and headline;
    - summary;
    - skills (one per line);
@@ -79,11 +82,20 @@ inserts them: add a missing term only if it is true for you. The checklist also
 covers contact details, summary length, experience bullets, skills, dates and
 document length.
 
-A heuristic **Numbers to verify** check compares numbers in the summary and
-bullets with the numbers in your profile and extra context. It flags numbers
-that do not appear in either source, because those are the easiest claims to
-fabricate accidentally. The check can produce false positives (for example a
-number you derived from dates); it never blocks export or edits.
+The **Grounding review** panel is a separate deterministic audit. It flags:
+
+- skills that do not appear in your profile skills or extra context;
+- education details that are not supported by the referenced profile entry;
+- summary or bullet text with very little word overlap with your profile and
+  extra context;
+- numbers that do not appear in either source.
+
+The checks are advisory and can produce false positives, especially after you
+rewrite or manually paraphrase a bullet. They never remove content or block
+export. Review the flags, then correct the CV, add a true profile detail or
+dismiss the wording as supported. Generation uses a compact set of ATS
+priorities from the job description and requirements, and asks the model to
+prefer the two or three most relevant roles rather than including everything.
 
 ## Word and ATS format
 

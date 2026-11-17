@@ -303,7 +303,7 @@ test("CV history restores a saved version and survives reload", async ({
     },
     headline: "",
     summary: "Current summary",
-    skills: [],
+    skills: ["Kubernetes"],
     experience: [],
     education: [],
     projects: [],
@@ -350,6 +350,12 @@ test("CV history restores a saved version and survives reload", async ({
   await page.goto("/");
 
   await page.getByRole("button", { name: "Tailored CV" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Grounding review" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/is not in your profile skills or extra context/),
+  ).toBeVisible();
   const versions = page.getByRole("button", { name: "Versions (1)" });
   await expect(versions).toBeEnabled();
   await versions.click();

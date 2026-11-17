@@ -41,6 +41,8 @@ import {
   profileFingerprint,
 } from "@/utils/cvSchema";
 import { analyzeCvAts } from "@/utils/cvAts";
+import { analyzeCvGrounding } from "@/utils/cvGrounding";
+import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
 import CvPreview from "@/components/cv/CvPreview";
@@ -308,6 +310,11 @@ export default function CvBuilder({
   const ats = useMemo(
     () => (document ? analyzeCvAts(document, application, profile) : null),
     [document, application, profile],
+  );
+
+  const grounding = useMemo(
+    () => (document ? analyzeCvGrounding(document, profile) : null),
+    [document, profile],
   );
 
   const patch = (updater: (current: CvDocument) => CvDocument) => {
@@ -1563,6 +1570,20 @@ export default function CvBuilder({
           </Button>
         </div>
       )}
+      {grounding && grounding.warnings.length > 0 && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-md border border-amber-600/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300"
+        >
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            Grounding review found {grounding.warnings.length} item
+            {grounding.warnings.length === 1 ? "" : "s"} that may not be
+            supported by your profile. Check the Grounding review panel before
+            exporting.
+          </span>
+        </div>
+      )}
 
       {view === "preview" ? (
         <CvPreview document={document} />
@@ -1704,6 +1725,7 @@ export default function CvBuilder({
           </div>
 
           <aside className="space-y-4 lg:sticky lg:top-0 lg:self-start">
+            {grounding && <CvGroundingPanel report={grounding} />}
             <Card className="bg-surface border-border">
               <CardContent className="space-y-3 pt-4">
                 <div className="flex items-center justify-between gap-2">
@@ -1779,27 +1801,6 @@ export default function CvBuilder({
                         </li>
                       ))}
                     </ul>
-                    {ats.unverifiedNumbers.length > 0 && (
-                      <div className="space-y-1 border-t border-border pt-2">
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-amber-800 dark:text-amber-300">
-                          Numbers to verify
-                        </p>
-                        <ul className="space-y-1">
-                          {ats.unverifiedNumbers.map((warning) => (
-                            <li
-                              key={warning}
-                              className="text-[10px] text-amber-800 dark:text-amber-300"
-                            >
-                              {warning}
-                            </li>
-                          ))}
-                        </ul>
-                        <p className="text-[10px] text-text-muted">
-                          Heuristic check against your profile and extra
-                          context. Verify each number before submitting.
-                        </p>
-                      </div>
-                    )}
                     <p className="border-t border-border pt-2 text-[10px] text-text-muted">
                       {ats.wordCount} words. ATS guidance is not a guarantee;
                       always check the exported file.

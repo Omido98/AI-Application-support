@@ -40,6 +40,14 @@ test.describe("WCAG 2.2 AA", () => {
 
     await scan(page, testInfo, { label: "cv-sub-view" });
 
+    await page
+      .getByRole("textbox", { name: "Skills, one per line" })
+      .fill("Kubernetes");
+    await expect(
+      page.getByText(/is not in your profile skills or extra context/),
+    ).toBeVisible();
+    await scan(page, testInfo, { label: "cv-grounding-warning" });
+
     await page.getByRole("button", { name: "AI rewrite" }).click();
     await expect(
       page.getByRole("heading", { name: "Rewrite summary and headline" }),
