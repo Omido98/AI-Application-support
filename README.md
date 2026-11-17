@@ -42,12 +42,12 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
     are omitted from requests, and can be summarized into a compact hidden
     context note when needed.
   - Choose between the built-in standard prompt or your own custom prompt.
-- **Tailored CV builder** — generate an editable, ATS-friendly Word CV from
-  your profile and one application's job description. Edit every section,
+- **Tailored CV builder** — generate an editable, ATS-friendly Word or PDF CV
+  from your profile and one application's job description. Edit every section,
   reorder entries and sections, add extra context, preview the formatted page,
-  review a generated CV before accepting it, rewrite sections with a
-  before/after diff and presets, restore earlier CV versions, check
-  phrase/synonym keyword matches and requirement priorities, use a
+  review the generated roles, skills and sections before accepting it, rewrite
+  sections with a before/after diff and presets, restore earlier CV versions,
+  check phrase/synonym keyword matches and requirement priorities, use a
   deterministic grounding review, get page-fit feedback, switch between two
   ATS-safe templates, export Word or PDF, and add recent chat details
   explicitly. See [docs/cv-builder.md](docs/cv-builder.md) and the

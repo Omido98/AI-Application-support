@@ -41,8 +41,10 @@ model quality or a real provider's structured-output behavior.
 7. **History and context**
    - Restore an earlier version, close/reopen the app, and confirm persistence.
    - Add recent chat details twice and confirm only one context block remains.
+   - Add a note after the generated block, add chat details again, and confirm
+     the note is still present.
    - Add a cover-letter summary and confirm the consistency panel reports only
-     plausible missing themes.
+     plausible missing themes (not greetings, names or locations).
 8. **Save safety**
    - Type in a long field and immediately close, backup or export; confirm the
      latest text is present.

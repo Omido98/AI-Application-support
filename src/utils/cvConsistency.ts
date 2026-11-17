@@ -62,6 +62,19 @@ const STOPWORDS = new Set(
     "dear",
     "sincerely",
     "regards",
+    "hiring",
+    "manager",
+    "interested",
+    "look",
+    "forward",
+    "hearing",
+    "contact",
+    "candidate",
+    "role",
+    "best",
+    "kind",
+    "resume",
+    "cv",
   ].map((word) => word.toLowerCase()),
 );
 
@@ -78,6 +91,12 @@ function normalize(value: string): string {
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+}
+
+/** Tolerate simple inflections such as build/built and mentor/mentoring. */
+function sharesStem(a: string, b: string): boolean {
+  const length = Math.min(4, a.length, b.length);
+  return length >= 4 && a.slice(0, length) === b.slice(0, length);
 }
 
 /**
@@ -105,13 +124,26 @@ export function analyzeCoverLetterConsistency(
 
   if (themeSource) {
     const applicationWords = new Set(
-      words(`${application.companyName} ${application.jobTitle}`),
+      words(
+        [
+          application.companyName,
+          application.jobTitle,
+          application.location,
+          profile.fullName,
+          profile.city,
+          profile.country,
+        ].join(" "),
+      ),
     );
     const summaryTerms = [...new Set(words(themeSource))]
       .filter((term) => !applicationWords.has(term))
       .slice(0, 12);
     const cvWords = new Set(words(cvPlainText(document)));
-    const missing = summaryTerms.filter((term) => !cvWords.has(term));
+    const missing = summaryTerms.filter(
+      (term) =>
+        !cvWords.has(term) &&
+        ![...cvWords].some((cvWord) => sharesStem(term, cvWord)),
+    );
     checks.push({
       id: "cover-summary",
       label: "Cover-letter themes",

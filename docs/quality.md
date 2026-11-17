@@ -17,7 +17,7 @@ Playwright 1.65 + `@axe-core/playwright` 4.14, tags `wcag2a`, `wcag2aa`,
 rule). Only **serious/critical** violations fail; the full axe JSON is attached
 to the Playwright report.
 
-Screens scanned (2026-11-16, all passed with zero serious/critical violations):
+Screens scanned (2026-11-17, all passed with zero serious/critical violations):
 
 - Overview, Application, Tailored CV, Cover Letter Developer, Profile tabs
 - Settings dialog (including focus trapping)
@@ -25,6 +25,9 @@ Screens scanned (2026-11-16, all passed with zero serious/critical violations):
 - Light theme: Application tab and Settings dialog
 - Dark theme with the Deep Teal accent (`#0f6e5c`)
 - Reduced motion: dialog animation collapses to ≤0.01ms
+- Tailored CV history dialog and cover-letter consistency panel
+- CV preview with ATS highlighting, plus the rewrite and language dialogs
+- Generation-review proposal details (static component render)
 
 Also asserted:
 
@@ -57,7 +60,7 @@ and do a keyboard-only smoke of any new dialog.
 
 Budgets are counts and generous ceilings, not dev-server wall-clock targets:
 
-| Check                                      | 2026-11-16 result | Budget                    |
+| Check                                      | 2026-11-17 result | Budget                    |
 | ------------------------------------------ | ----------------- | ------------------------- |
 | Initial render DOM nodes                   | 223               | < 3,000                   |
 | Startup long tasks                         | 2                 | ≤ 20                      |
@@ -65,6 +68,10 @@ Budgets are counts and generous ceilings, not dev-server wall-clock targets:
 | Cumulative layout shift                    | 0.00013           | < 0.1                     |
 | 600 streamed deltas → store flushes        | 1                 | ≤ 2                       |
 | 600 streamed deltas → DOM mutation records | 6                 | ≤ 100                     |
+| CV long-document typing                    | ~0.2 s            | < 8 s                     |
+| CV section navigation                      | ~2–3 s            | < 8 s                     |
+| Four Preview/Edit toggles                  | ~2.5–3 s          | < 12 s                    |
+| CV PDF export                              | < 1 s             | < 30 s                    |
 
 The streaming check imports the real `chatStore` and `createStreamBatcher` in
 the running Vite page, so it verifies the live-delta isolation rather than a

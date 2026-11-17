@@ -301,6 +301,7 @@ export default function CvBuilder({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [chatContextBusy, setChatContextBusy] = useState(false);
+  const [showAllAts, setShowAllAts] = useState(false);
   const [generationProposal, setGenerationProposal] =
     useState<CvDocument | null>(null);
   const [generationBusy, setGenerationBusy] = useState(false);
@@ -346,6 +347,7 @@ export default function CvBuilder({
     setHistoryOpen(false);
     setGenerationProposal(null);
     setGenerationBusy(false);
+    setShowAllAts(false);
   }, [application.id]);
 
   const profileHasContent = Boolean(
@@ -581,6 +583,9 @@ export default function CvBuilder({
 
   const handleUndo = () => {
     if (!previousDocument) return;
+    // A buffered textarea may still hold a draft whose timer would otherwise
+    // overwrite the restored document.
+    flushPendingEdits();
     setCv(application.id, previousDocument);
     setPreviousDocument(null);
     setExportStatus("Restored the previous CV.");
@@ -2113,7 +2118,10 @@ export default function CvBuilder({
                           )}
                         </div>
                         <div className="space-y-1.5">
-                          {ats.requirements.slice(0, 5).map((requirement) => (
+                          {(showAllAts
+                            ? ats.requirements
+                            : ats.requirements.slice(0, 5)
+                          ).map((requirement) => (
                             <div
                               key={requirement.id}
                               className="rounded border border-border bg-field/40 p-2"
@@ -2156,7 +2164,7 @@ export default function CvBuilder({
                             </div>
                           ))}
                         </div>
-                        {ats.requirements.length > 5 && (
+                        {!showAllAts && ats.requirements.length > 5 && (
                           <p className="text-[10px] text-text-muted">
                             Showing the first 5 requirement groups.
                           </p>
@@ -2168,7 +2176,10 @@ export default function CvBuilder({
                         Missing ({atsMissingTerms.length})
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {atsMissingTerms.slice(0, 12).map((keyword) => (
+                        {(showAllAts
+                          ? atsMissingTerms
+                          : atsMissingTerms.slice(0, 12)
+                        ).map((keyword) => (
                           <span
                             key={keyword}
                             className="rounded border border-amber-600/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-800 dark:text-amber-300"
@@ -2188,22 +2199,29 @@ export default function CvBuilder({
                         Matched ({atsMatchedTerms.length})
                       </p>
                       <p className="mt-1 text-[10px] text-text-muted">
-                        Chips show the wording found in the CV; hover for the
-                        match type.
+                        Unlabeled chips are exact matches. Phrase and synonym
+                        badges show why a term matched.
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {atsMatchedTerms.slice(0, 12).map((keyword) => {
+                        {(showAllAts
+                          ? atsMatchedTerms
+                          : atsMatchedTerms.slice(0, 12)
+                        ).map((keyword) => {
                           const detail = atsMatchDetails.get(keyword);
                           return (
                             <span
                               key={keyword}
                               title={`${detail?.type ?? "exact"} match for ${keyword}`}
-                              aria-label={`${keyword} (${detail?.type ?? "exact"} match)`}
+                              aria-label={`${keyword} (${detail?.type ?? "exact"} match${detail ? `; found ${detail.matched}` : ""})`}
                               className="rounded border border-green-700/30 bg-green-500/10 px-1.5 py-0.5 text-[10px] text-green-800 dark:text-green-300"
                             >
-                              {detail?.matched ?? keyword}
-                              {detail?.type === "synonym" && (
-                                <span className="ml-0.5 opacity-70">≈</span>
+                              {detail?.type === "synonym"
+                                ? `${detail.matched} (${keyword})`
+                                : (detail?.matched ?? keyword)}
+                              {detail && detail.type !== "exact" && (
+                                <span className="ml-1 rounded bg-green-700/10 px-1 py-0.5 text-[8px] uppercase tracking-wide opacity-80">
+                                  {detail.type}
+                                </span>
                               )}
                             </span>
                           );
@@ -2214,6 +2232,18 @@ export default function CvBuilder({
                       <p className="text-[10px] text-text-muted">
                         Matched terms are highlighted in Preview.
                       </p>
+                    )}
+                    {(ats.requirements.length > 5 ||
+                      atsMissingTerms.length > 12 ||
+                      atsMatchedTerms.length > 12) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => setShowAllAts((value) => !value)}
+                      >
+                        {showAllAts ? "Show fewer terms" : "Show all terms"}
+                      </Button>
                     )}
                     <ul className="space-y-1 border-t border-border pt-2">
                       {ats.checks.map((check) => (
@@ -2339,8 +2369,9 @@ export default function CvBuilder({
                     Add recent chat details
                   </Button>
                   <p className="text-[10px] text-text-muted">
-                    Appends a short, visible transcript excerpt to the extra
-                    context. Nothing from chat is used unless you add it.
+                    Replaces the previous generated excerpt with a short,
+                    visible transcript excerpt. Nothing from chat is used unless
+                    you add it; notes outside the generated block are kept.
                   </p>
                 </div>
               </CardContent>

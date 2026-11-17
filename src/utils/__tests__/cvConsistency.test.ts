@@ -166,4 +166,30 @@ describe("analyzeCoverLetterConsistency", () => {
       report.checks.find((check) => check.id === "cover-company")?.ok,
     ).toBe(true);
   });
+
+  it("ignores greeting, signature and location boilerplate", () => {
+    const data = profile({
+      fullName: "Jane Doe",
+      city: "Stockholm",
+      coverLetters: [
+        {
+          id: "cl-1",
+          content:
+            "Dear Hiring Manager, I build accessible design systems. Sincerely, Jane Doe, Stockholm.",
+          addedAt: "2026-01-01T00:00:00.000Z",
+          applicationId: application.id,
+        },
+      ],
+    });
+    const report = analyzeCoverLetterConsistency(
+      document("Built accessible design systems."),
+      data,
+      application,
+    );
+    const themes = report.checks.find((check) => check.id === "cover-summary");
+
+    expect(themes?.ok).toBe(true);
+    expect(themes?.detail).not.toContain("hiring");
+    expect(themes?.detail).not.toContain("jane");
+  });
 });

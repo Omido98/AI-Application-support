@@ -1,9 +1,8 @@
 # CV builder improvement plan
 
-This is the phased follow-up plan after the v1.9.0 CV builder. Phases 1–7 are
-feature-complete on the `release-v1.16.0` branch. They are not yet safe to
-merge or publish: the post-roadmap audit found data-integrity, layout-parity
-and testing gaps, covered by phases 8–13 below.
+This is the phased follow-up plan after the v1.9.0 CV builder. Phases 1–13 are
+implemented. Phase 13's automated acceptance is complete; live-provider
+acceptance remains a manual release gate.
 
 ## Phase 1 — Reviewable rewrites (v1.10.0)
 
@@ -220,23 +219,36 @@ heuristic; this pass makes the evidence easier to interpret.
 
 ## Phase 13 — Release hardening and acceptance (v1.21.0)
 
-**Status: implemented for automation; live-provider acceptance remains a manual
+**Status: automation complete; live-provider acceptance remains a manual
 release gate.**
 
-- Native smoke coverage now includes the CV template selector and the
-  headings-only language flow.
+- Native smoke coverage now includes the CV template selector, a restored saved
+  version and the headings-only language flow.
 - Axe now scans the CV history dialog and cover-letter consistency panel.
 - Browser coverage includes PDF text/page output, compact template, chat-context
   deduplication and the latest buffered edit.
-- PDF save uses a native OS dialog and is not automatable through
-  tauri-driver; it remains covered by the browser export path, PDF renderer
-  tests and the manual acceptance checklist.
+- PDF save uses a native dialog and cannot be driven through WebDriver; the
+  renderer/browser tests and manual checklist cover the generated file.
 - Superseded PRs are closed; old draft releases must not be published.
 - Live-provider acceptance is documented in
   `docs/live-provider-acceptance.md` and must be performed before merge.
 
 **Why:** automated tests cover the code paths, but only a real provider run can
 validate model output quality.
+
+## Finishing pass (v1.21.1)
+
+- Chat-context re-add now replaces only the generated block and preserves user
+  notes outside it, including legacy blocks.
+- Undo replacement flushes buffered textarea edits first.
+- Generation review shows the actual selected roles, skills, education,
+  projects, certifications, languages and other experience before acceptance.
+- ATS match types are visible badges; full requirement/term lists can be
+  expanded; synonym chips show the job term.
+- Cover-letter theme checks ignore greetings, signatures, names, locations and
+  common boilerplate, and tolerate simple inflections.
+- Docs, the quality matrix and the native/PDF coverage notes reflect the
+  current implementation.
 
 ## Cross-cutting rules
 

@@ -6,6 +6,7 @@ import { analyzeCvGrounding } from "@/utils/cvGrounding";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
 import { formatCvUsage } from "@/utils/cvUsage";
 import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
+import CvProposalDetails from "@/components/cv/CvProposalDetails";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -86,6 +87,8 @@ export default function CvGenerationReviewDialog({
                 )}
               </div>
             )}
+
+            <CvProposalDetails proposal={proposal} />
 
             {grounding && <CvGroundingPanel report={grounding} />}
 

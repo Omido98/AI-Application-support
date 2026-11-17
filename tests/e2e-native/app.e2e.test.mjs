@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import {
@@ -290,13 +296,63 @@ test("tab shortcuts and settings persist", { timeout: 90_000 }, async () => {
 });
 
 test(
-  "CV template and language controls work in the native window",
+  "CV template, history and language controls work in the native window",
   { timeout: 120_000 },
   async () => {
+    const applications = JSON.parse(readFileSync(applicationsFilePath, "utf8"));
+    const app =
+      applications.applications.find(
+        (application) => application.companyName === "Acme Updated",
+      ) ?? applications.applications[0];
+    const snapshotDocument = {
+      schemaVersion: 1,
+      language: "en",
+      pageSize: "a4",
+      template: "classic",
+      generatedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      profileFingerprint: "native-e2e",
+      applicationUpdatedAt: "",
+      extraContext: "",
+      contact: {
+        fullName: "Native Tester",
+        email: "native@example.com",
+        phone: "",
+        location: "",
+        linkedinUrl: "",
+        portfolioUrl: "",
+        githubUrl: "",
+      },
+      headline: "Native snapshot",
+      summary: "Native snapshot summary.",
+      skills: ["TypeScript"],
+      experience: [],
+      education: [],
+      projects: [],
+      certifications: [],
+      languages: [],
+      otherEngagements: [],
+      sectionOrder: ["summary", "skills"],
+    };
+    writeFileSync(
+      path.join(dataDir, `cv_history_${app.id}.json`),
+      JSON.stringify([
+        {
+          id: "native-snapshot",
+          savedAt: new Date().toISOString(),
+          label: "Native fixture",
+          document: snapshotDocument,
+        },
+      ]),
+    );
+
     await pressShortcut(
       "2",
       tabIsSelected("Application"),
       "Ctrl+2 did not open Application",
+    );
+    await driver.clickXPath(
+      `//aside//button[contains(normalize-space(.), ${JSON.stringify(app.companyName)})]`,
     );
     await driver.clickXPath(
       "//button[contains(normalize-space(.), 'Tailored CV')]",
@@ -307,6 +363,21 @@ test(
     await driver.waitFor(
       "return !!document.querySelector('#cv-template-edit');",
       { message: "CV editor did not open" },
+    );
+
+    await driver.clickXPath(
+      "//button[contains(normalize-space(.), 'Versions')]",
+    );
+    await driver.waitFor(
+      "return document.body.textContent.includes('Native fixture');",
+      { message: "native history snapshot was not loaded" },
+    );
+    await driver.clickXPath(
+      "//li[contains(normalize-space(.), 'Native fixture')]//button[contains(normalize-space(.), 'Restore')]",
+    );
+    await driver.waitFor(
+      "return document.querySelector('textarea[aria-label=\"Professional summary\"]')?.value.includes('Native snapshot summary.');",
+      { message: "native history restore did not replace the CV" },
     );
 
     await driver.clickXPath("//*[@id='cv-template-edit']");

@@ -32,9 +32,10 @@ no AI call.
    three most relevant roles and writes a headline, summary, skills order and
    role bullets.
 5. Review the generated CV before accepting. The dialog shows the estimated
-   page count, selected roles/skills, headline and summary, token/cost usage
-   and the full Grounding review. **Discard** keeps the current draft;
-   **Accept generated CV** snapshots the old CV in Versions and replaces it.
+   page count, selected roles and skills, education/projects, headline and
+   summary, token/cost usage and the full Grounding review. **Discard** keeps
+   the current draft; **Accept generated CV** snapshots the old CV in Versions
+   and replaces it.
 6. Review and edit any section. Check the **Grounding review**
    panel for unsupported skills, education details, low-evidence claims and
    numbers before exporting. The editor supports:
@@ -54,7 +55,8 @@ no AI call.
    result is not applied automatically: review the before/after diff, any
    numbers that could not be grounded in the profile, then **Accept**,
    **Discard** or **Try again**.
-9. **Export Word** saves a `.docx` through the native save dialog.
+9. **Export Word** or **Export PDF** saves the selected format through the
+   native save dialog.
 
 Edits autosave to `cv_<applicationId>.json` in the app data folder. Long text
 fields save once you pause or leave the field, rather than on every keystroke;
@@ -88,12 +90,12 @@ The ATS panel uses deterministic phrase, keyword and curated-synonym matching
 against the job title, description and requirements. It shows matched and
 missing terms, groups requirements with **Must-have** or **Preferred** badges,
 counts must-have gaps, and highlights matched terms in the preview. Matched
-chips show the wording found in the CV; hover or use a screen reader to hear
-whether the match was exact, a phrase or a synonym. The panel never inserts a
-term: add a missing term only if it is true for you. The checklist also covers
-contact details, summary length, experience bullets, skills, dates and document
-length. ATS and grounding share one analysis pass, so editing does not run the
-same profile/number scan twice.
+chips show the wording found in the CV. Unlabeled chips are exact matches;
+phrase and synonym matches carry a visible badge, and synonym chips also show
+the job term. The panel never inserts a term: add a missing term only if it is
+true for you. The checklist also covers contact details, summary length,
+experience bullets, skills, dates and document length. ATS and grounding share
+one analysis pass, so editing does not run the same profile/number scan twice.
 
 The **Grounding review** panel is a separate deterministic audit. It flags:
 
@@ -117,15 +119,18 @@ Two single-column ATS-safe templates are available: **Classic** and
 section headings; both export as DOCX or PDF. The PDF is text-based and
 selectable, not a screenshot of the preview.
 
-**Export Word** writes `.docx`; **Export PDF** writes `.pdf`. PDF pagination is
-generated independently of the browser preview and can differ slightly from
-Word, so check the exported file before submitting.
+**Export Word** writes `.docx`; **Export PDF** writes `.pdf`. Word and PDF
+share the same margins, font sizes and line-height metrics, but use different
+font engines, so pagination can still differ by roughly a page on dense CVs.
+Check the exported file before submitting.
 
-**Add recent chat details** appends up to eight short messages from this
-application's chat to the visible extra context. Nothing from chat is used
-unless you press that button. The **Cover-letter consistency** panel compares
-the CV with your stored cover-letter summary and flags themes or company names
-that do not line up; it never edits either document.
+**Add recent chat details** replaces the previous generated transcript excerpt
+with up to eight short messages from this application's chat. Nothing from
+chat is used unless you press that button, and notes you type outside the
+generated block are preserved. The **Cover-letter consistency** panel compares
+the CV with your stored cover-letter summary and actual saved letters (including
+company-matched letters) and flags themes that do not line up; it never edits
+either document.
 
 ## Language and page fit
 
@@ -148,7 +153,7 @@ so you can see which content was generated or rewritten.
 
 ## Word and ATS format
 
-The single template is deliberately constrained:
+The two templates are deliberately constrained:
 
 - one column, no tables, text boxes, images or header/footer-only content;
 - Calibri body text, clear standard headings and selectable text;

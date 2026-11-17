@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import CvProposalDetails from "../src/components/cv/CvProposalDetails";
 import { openApp, makeApplication } from "./support/seed";
 import { scan } from "./support/axe";
 
@@ -28,6 +31,63 @@ test.describe("WCAG 2.2 AA", () => {
     ).toBeVisible();
 
     await scan(page, testInfo, { label: "tab-application" });
+  });
+
+  test("Generation review proposal details", async ({ page }, testInfo) => {
+    const proposal = {
+      schemaVersion: 1,
+      language: "en",
+      pageSize: "a4",
+      template: "classic",
+      generatedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      profileFingerprint: "fingerprint",
+      applicationUpdatedAt: "2026-01-01T00:00:00.000Z",
+      extraContext: "",
+      contact: {
+        fullName: "Jane Doe",
+        email: "jane@example.com",
+        phone: "",
+        location: "",
+        linkedinUrl: "",
+        portfolioUrl: "",
+        githubUrl: "",
+      },
+      headline: "Platform Engineer",
+      summary: "Builds reliable systems.",
+      skills: ["TypeScript"],
+      experience: [
+        {
+          id: "role-1",
+          company: "Acme",
+          role: "Platform Engineer",
+          location: "Remote",
+          startDate: "Jan 2022",
+          endDate: "Present",
+          current: true,
+          bullets: ["Reduced reporting time."],
+          included: true,
+        },
+      ],
+      education: [],
+      projects: [],
+      certifications: [],
+      languages: [],
+      otherEngagements: [],
+      sectionOrder: ["summary", "skills", "experience"],
+    };
+    const html = renderToStaticMarkup(
+      createElement(CvProposalDetails, {
+        proposal: proposal as never,
+      }),
+    );
+    await page.setContent(
+      `<!doctype html><html lang="en"><head><title>Generation review</title></head><body><main><h1>Review generated CV</h1>${html}</main></body></html>`,
+    );
+
+    await scan(page, testInfo, {
+      label: "cv-generation-review-details",
+    });
   });
 
   test("Tailored CV sub-view", async ({ page }, testInfo) => {
