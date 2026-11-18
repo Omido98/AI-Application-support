@@ -2,6 +2,7 @@ import { flushChatSave, flushDraftsSave } from "@/stores/chatStore";
 import { flushProfileSave } from "@/stores/profileStore";
 import { flushApplicationSave } from "@/stores/applicationStore";
 import { flushCvSaves } from "@/stores/cvStore";
+import { flushSettingsSave } from "@/stores/settingsStore";
 import { flushPendingEdits } from "@/utils/pendingEdits";
 
 /**
@@ -19,6 +20,7 @@ export async function flushAllSaves(): Promise<boolean> {
     flushChatSave(),
     flushDraftsSave(),
     flushCvSaves(),
+    flushSettingsSave(),
   ]);
   return results.every(Boolean);
 }

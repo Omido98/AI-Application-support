@@ -106,6 +106,50 @@ describe("message identity", () => {
   });
 });
 
+describe("abortable refine writes", () => {
+  it("does not append a refine result after the action is aborted", async () => {
+    useChatStore.setState({
+      threads: { "app-1": thread() },
+      activeThreadId: "app-1",
+    });
+    const controller = new AbortController();
+    const append = useChatStore
+      .getState()
+      .appendMessageToThread(
+        "app-1",
+        assistantMessage("Late result"),
+        controller.signal,
+      );
+    controller.abort();
+    await append;
+
+    expect(useChatStore.getState().threads["app-1"].messages).toEqual([]);
+  });
+
+  it("does not update a thread after the action is aborted", async () => {
+    const message = assistantMessage("Original");
+    useChatStore.setState({
+      threads: { "app-1": thread({ messages: [message] }) },
+      activeThreadId: "app-1",
+    });
+    const controller = new AbortController();
+    const update = useChatStore
+      .getState()
+      .updateMessageInThread(
+        "app-1",
+        message.id,
+        (current) => ({ ...current, content: "Late replacement" }),
+        controller.signal,
+      );
+    controller.abort();
+    await update;
+
+    expect(useChatStore.getState().threads["app-1"].messages[0].content).toBe(
+      "Original",
+    );
+  });
+});
+
 describe("normalizeChatMessages", () => {
   it("drops malformed entries instead of letting them crash the UI", () => {
     const messages = normalizeChatMessages([
