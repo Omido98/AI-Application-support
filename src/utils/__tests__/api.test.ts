@@ -348,6 +348,77 @@ describe("sendMessage (OpenAI-compatible)", () => {
     expect(result).toEqual({ content: "Acme is a company." });
   });
 
+  it("runs independent tool calls concurrently and preserves their order", async () => {
+    const starts: string[] = [];
+    const pending: Array<(value: unknown) => void> = [];
+    let chatRound = 0;
+
+    mockedInvoke.mockImplementation(async (cmd: string, args: unknown) => {
+      if (cmd === "zen_web_search" || cmd === "zen_fetch_page") {
+        starts.push(cmd === "zen_web_search" ? "search" : "fetch");
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      if (cmd === "zen_chat_stream_cancel") return null;
+      if (cmd === "zen_chat_stream") {
+        const onEvent = streamOnEvent(args);
+        const round = chatRound;
+        chatRound += 1;
+        setTimeout(() => {
+          if (round === 0) {
+            onEvent?.onmessage({
+              type: "done",
+              data: openaiMessage({
+                content: null,
+                tool_calls: [
+                  {
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                      name: "web_search",
+                      arguments: JSON.stringify({ query: "Acme" }),
+                    },
+                  },
+                  {
+                    id: "call_2",
+                    type: "function",
+                    function: {
+                      name: "fetch_page",
+                      arguments: JSON.stringify({
+                        url: "https://acme.example",
+                      }),
+                    },
+                  },
+                ],
+              }),
+            });
+          } else {
+            onEvent?.onmessage({
+              type: "done",
+              data: openaiMessage({ content: "Final answer." }),
+            });
+          }
+        }, 0);
+        return `req-${round}`;
+      }
+      return null;
+    });
+
+    const sending = sendMessage([], baseConfig, "system");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Both tools must already be in flight before either can resolve.
+    const startedTogether = starts.length;
+
+    pending[0](searchResult);
+    await vi.waitFor(() => expect(starts).toHaveLength(2));
+    pending[1]("Page text.");
+
+    await expect(sending).resolves.toEqual({ content: "Final answer." });
+    expect(startedTogether).toBe(2);
+    expect(starts).toEqual(["search", "fetch"]);
+  });
+
   it("finishes with a tools-free answer when the model repeats the same call three times", async () => {
     const sameCall = openaiToolCall("web_search", "Acme Corp");
     mockChatSequence([
@@ -920,6 +991,29 @@ describe("improveDraft", () => {
     expect(result.verdict).toBe("revise");
     expect(steps).toEqual(["review", "revise"]);
     expect(deltas).toEqual(["Improved ", "draft."]);
+  });
+
+  it("starts the first review without waiting for pacing", async () => {
+    setPaceDelayMs(300);
+    try {
+      mockChatSequence([
+        {
+          kind: "stream",
+          data: openaiMessage({ content: "No issues.\n\nVERDICT: PASS" }),
+        },
+        { kind: "stream", data: openaiMessage({ content: "Final draft." }) },
+      ]);
+      const started = Date.now();
+      const steps: { step: string; at: number }[] = [];
+      await improveDraft("Original draft.", appContext, null, baseConfig, {
+        onStep: (step) => steps.push({ step, at: Date.now() - started }),
+      });
+
+      expect(steps[0].step).toBe("review");
+      expect(steps[0].at).toBeLessThan(200);
+    } finally {
+      setPaceDelayMs(0);
+    }
   });
 
   it("surfaces review errors and reports zero rounds", async () => {

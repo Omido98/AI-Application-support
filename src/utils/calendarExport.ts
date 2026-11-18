@@ -97,11 +97,21 @@ export function getCalendarEvents(
   );
 }
 
+/** Count future events without building, formatting or sorting them. */
 export function countCalendarEvents(
   applications: JobApplication[],
   now: Date = new Date(),
 ): number {
-  return getCalendarEvents(applications, now).length;
+  const today = startOfDay(now);
+  let count = 0;
+  for (const application of applications) {
+    if (isArchivedStatus(application.status)) continue;
+    for (const value of [application.deadline, application.followUpAt]) {
+      const date = parseDateOnly(value);
+      if (date && date.getTime() >= today.getTime()) count += 1;
+    }
+  }
+  return count;
 }
 
 /** Escape text for an iCalendar TEXT value (RFC 5545 §3.3.11). */

@@ -99,6 +99,13 @@ function sharesStem(a: string, b: string): boolean {
   return length >= 4 && a.slice(0, length) === b.slice(0, length);
 }
 
+function hasStemmedMatch(words: Set<string>, term: string): boolean {
+  for (const word of words) {
+    if (sharesStem(term, word)) return true;
+  }
+  return false;
+}
+
 /**
  * Lightweight, deterministic checks between the CV and the user's cover
  * letters. It never changes either document; it only surfaces mismatches.
@@ -140,9 +147,7 @@ export function analyzeCoverLetterConsistency(
       .slice(0, 12);
     const cvWords = new Set(words(cvPlainText(document)));
     const missing = summaryTerms.filter(
-      (term) =>
-        !cvWords.has(term) &&
-        ![...cvWords].some((cvWord) => sharesStem(term, cvWord)),
+      (term) => !cvWords.has(term) && !hasStemmedMatch(cvWords, term),
     );
     checks.push({
       id: "cover-summary",

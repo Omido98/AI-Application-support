@@ -26,6 +26,7 @@ import { countCalendarEvents, exportCalendarIcs } from "@/utils/calendarExport";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { useNowAtMidnight } from "@/hooks/useNowAtMidnight";
 
 /** Solid segment colours for the CSS-only status and activity bars. */
 const STATUS_BAR_CLASSES: Record<ApplicationStatus, string> = {
@@ -91,18 +92,19 @@ export default function OverviewTab() {
   const applications = useApplicationStore((s) => s.applications);
   const selectApplication = useApplicationStore((s) => s.selectApplication);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
+  const now = useNowAtMidnight();
 
   useEffect(() => {
     if (!isLoaded) void loadApplications();
   }, [isLoaded, loadApplications]);
 
   const stats = useMemo(
-    () => computePipelineStats(applications),
-    [applications],
+    () => computePipelineStats(applications, now),
+    [applications, now],
   );
   const calendarEventCount = useMemo(
-    () => countCalendarEvents(applications),
-    [applications],
+    () => countCalendarEvents(applications, now),
+    [applications, now],
   );
   const [calendarStatus, setCalendarStatus] = useState<string | null>(null);
   const [exportingCalendar, setExportingCalendar] = useState(false);

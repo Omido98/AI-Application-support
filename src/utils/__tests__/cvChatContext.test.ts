@@ -9,10 +9,11 @@ import {
 
 describe("CV chat context", () => {
   it("builds a bounded, visible transcript block", () => {
-    const block = buildChatContextBlock([
+    const { block, count } = buildChatContextBlock([
       { role: "user", content: "  I led accessibility work.  " },
       { role: "assistant", content: "Great detail." },
     ]);
+    expect(count).toBe(2);
     expect(block).toContain(CHAT_CONTEXT_MARKER);
     expect(block).toContain(CHAT_CONTEXT_END_MARKER);
     expect(block).toContain("Candidate: I led accessibility work.");

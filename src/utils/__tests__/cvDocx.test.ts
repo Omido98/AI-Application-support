@@ -111,6 +111,25 @@ describe("renderCvDocx", () => {
     expect(text).toContain("English");
   });
 
+  it("uses exact line spacing instead of Word's 1.1-line default", async () => {
+    const document = createCvDocumentFromProfile(profile, application, {
+      language: "en",
+      pageSize: "a4",
+      extraContext: "",
+    });
+    document.summary = "Spacing check.";
+
+    const bytes = await renderCvDocx(document);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(bytes);
+    const styles = await zip.file("word/styles.xml")?.async("string");
+
+    expect(styles).toBeTruthy();
+    // Classic template: 13.2 pt line height = 264 twips.
+    expect(styles).toContain('w:line="264"');
+    expect(styles).toContain('w:lineRule="exact"');
+  });
+
   it("uses Swedish section headings when the document language is Swedish", async () => {
     const document = createCvDocumentFromProfile(profile, application, {
       language: "sv",

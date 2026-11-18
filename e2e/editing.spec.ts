@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  dateFromNow,
   defaultProfile,
   makeApplication,
   seed,
@@ -104,6 +105,15 @@ test("CV bullets keep spaces and new lines across autosave and reload", async ({
   await bullets.pressSequentially("Second bullet");
   await expect(bullets).toHaveValue("Led migration.\nSecond bullet");
 
+  // A short buffered input commits on blur and must persist too.
+  const company = page.getByRole("textbox", {
+    name: "Company for Frontend Engineer",
+  });
+  await company.click();
+  await company.press("End");
+  await company.pressSequentially(" AB");
+  await bullets.click();
+
   await bullets.blur();
   await page.waitForTimeout(800);
   await page.reload();
@@ -112,6 +122,9 @@ test("CV bullets keep spaces and new lines across autosave and reload", async ({
   await expect(
     page.getByRole("textbox", { name: "Bullets for Frontend Engineer" }),
   ).toHaveValue("Led migration.\nSecond bullet");
+  await expect(
+    page.getByRole("textbox", { name: "Company for Frontend Engineer" }),
+  ).toHaveValue("Fjordline AB");
 });
 
 test("CV buffered fields adopt an external document update when not focused", async ({
@@ -254,6 +267,51 @@ test("deleting the only application keeps Undo available", async ({ page }) => {
 
   await expect(page.getByText("Deleted Only Corp")).toHaveCount(0);
   await expect(page.getByText("Only Corp").first()).toBeVisible();
+});
+
+test("tracker long fields commit and survive an app switch", async ({
+  page,
+}) => {
+  const first = makeApplication("notes-a", "Notes A", "applied");
+  const second = makeApplication("notes-b", "Notes B", "applied");
+  await seed(page, {
+    applications: [first, second],
+    lastTab: "application",
+  });
+  await page.goto("/");
+
+  const notes = page.locator("#app-notes");
+  await notes.click();
+  await notes.pressSequentially("Follow up with the hiring manager.", {
+    delay: 0,
+  });
+  await page.locator("aside").getByText("Notes B").click();
+  await page.locator("aside").getByText("Notes A").click();
+
+  await expect(page.locator("#app-notes")).toHaveValue(
+    "Follow up with the hiring manager.",
+  );
+});
+
+test("archived applications do not show overdue deadline chips", async ({
+  page,
+}) => {
+  const active = makeApplication("active-due", "Active Corp", "applied", {
+    deadline: dateFromNow(-3),
+  });
+  const closed = makeApplication("closed-due", "Closed Corp", "rejected", {
+    deadline: dateFromNow(-3),
+  });
+  await seed(page, { applications: [active, closed], lastTab: "application" });
+  await page.goto("/");
+
+  await expect(
+    page.locator("aside").getByText(/Deadline 3d overdue/),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /Archive/ }).click();
+  await expect(page.locator("aside").getByText("Closed Corp")).toBeVisible();
+  await expect(page.locator("aside").getByText(/overdue/)).toHaveCount(0);
 });
 
 test("leaving the tab during the undo window finalizes chat and CV deletion", async ({

@@ -167,7 +167,14 @@ function profileEvidence(profile: FitProfile | null): Evidence[] {
   return evidence;
 }
 
-function splitRequirements(application: JobApplication): string[] {
+/** The application fields the matrix reads. Narrow inputs keep its memo from
+ * re-running when unrelated fields (notes, contact, status) change. */
+export type FitApplication = Pick<
+  JobApplication,
+  "requirements" | "jobDescription"
+>;
+
+function splitRequirements(application: FitApplication): string[] {
   const sources = [application.requirements, application.jobDescription].filter(
     (text) => text.trim().length > 0,
   );
@@ -202,7 +209,7 @@ function splitRequirements(application: JobApplication): string[] {
  * remains the place for nuanced fit evaluation.
  */
 export function buildFitMatrix(
-  application: JobApplication,
+  application: FitApplication,
   profile: FitProfile | null,
 ): FitMatrix {
   const evidence = profileEvidence(profile);

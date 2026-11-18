@@ -60,23 +60,28 @@ and do a keyboard-only smoke of any new dialog.
 
 Budgets are counts and generous ceilings, not dev-server wall-clock targets:
 
-| Check                                      | 2026-11-17 result | Budget                    |
-| ------------------------------------------ | ----------------- | ------------------------- |
-| Initial render DOM nodes                   | 223               | < 3,000                   |
-| Startup long tasks                         | 2                 | ≤ 20                      |
-| Longest startup task                       | 257 ms            | < 1,500 ms (freeze guard) |
-| Cumulative layout shift                    | 0.00013           | < 0.1                     |
-| 600 streamed deltas → store flushes        | 1                 | ≤ 2                       |
-| 600 streamed deltas → DOM mutation records | 6                 | ≤ 100                     |
-| CV long-document typing                    | ~0.2 s            | < 8 s                     |
-| CV section navigation                      | ~2–3 s            | < 8 s                     |
-| Four Preview/Edit toggles                  | ~2.5–3 s          | < 12 s                    |
-| CV PDF export                              | < 1 s             | < 30 s                    |
+| Check                                      | Latest observed (2026-11-18) | Budget                    |
+| ------------------------------------------ | ---------------------------- | ------------------------- |
+| Initial render DOM nodes                   | 231                          | < 3,000                   |
+| Startup long tasks                         | 2                            | ≤ 20                      |
+| Longest startup task                       | 271–748 ms (dev variance)    | < 1,500 ms (freeze guard) |
+| Cumulative layout shift                    | 0.0002                       | < 0.1                     |
+| 600 streamed deltas → store flushes        | 1                            | ≤ 2                       |
+| 600 streamed deltas → DOM mutation records | 6                            | ≤ 100                     |
+| Long-thread streaming (80 messages)        | 1–2 long tasks, 77–163 ms    | ≤ 10 tasks, < 500 ms      |
+| Chat composer typing (80-message thread)   | 0.5–0.6 s, 1–4 long tasks    | < 3 s, ≤ 10 tasks         |
+| CV long-document typing (summary + input)  | 0.5–3.2 s (dev variance)     | < 8 s                     |
+| Tracker typing (100 applications)          | 0.6–0.8 s, 0 long tasks      | < 3 s, ≤ 10 tasks         |
+| CV section navigation                      | 2.9–3.2 s                    | < 8 s                     |
+| Four Preview/Edit toggles                  | ~2.5–3 s                     | < 12 s                    |
+| CV PDF export                              | < 0.3 s                      | < 30 s                    |
 
 The streaming check imports the real `chatStore` and `createStreamBatcher` in
 the running Vite page, so it verifies the live-delta isolation rather than a
 mock. The tab-switch check requires at least 10 animation frames in 500ms,
-which catches a frozen UI.
+which catches a frozen UI. The long-thread check seeds 80 rendered messages and
+streams 400 deltas, so it covers the historical Markdown parse cost; the
+tracker check seeds 100 applications with long postings and types into Notes.
 
 CI runs `npm run test:a11y` as a blocking step. `npm run test:perf` is
 initially non-blocking (`continue-on-error`) because dev-server startup timing

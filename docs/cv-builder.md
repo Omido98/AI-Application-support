@@ -58,15 +58,18 @@ no AI call.
    numbers that could not be grounded in the profile, then **Accept**,
    **Discard** or **Try again**.
 9. **Export Word** or **Export PDF** saves the selected format through the
-   native save dialog.
+   native save dialog. The Word export uses an explicit exact line height
+   (`w:lineRule="exact"`) so its spacing matches the PDF and preview instead of
+   Word's 1.1-line default.
 
-Edits autosave to `cv_<applicationId>.json` in the app data folder. Long text
-fields save once you pause or leave the field, rather than on every keystroke;
-the ATS and grounding panels update shortly afterwards. A list field keeps the
-raw text while you are typing, so a trailing space or a line break is never
-trimmed mid-edit; it is normalized when the edit commits. Pending textarea
-drafts are also flushed before close, backup, export and AI actions. The
-document stores structured content, not the DOCX bytes.
+Edits autosave to `cv_<applicationId>.json` in the app data folder. Text fields,
+including the short contact/role/date inputs, commit once you pause or leave the
+field, rather than on every keystroke; the ATS and grounding panels update
+shortly afterwards. A list field keeps the raw text while you are typing, so a
+trailing space or a line break is never trimmed mid-edit; it is normalized when
+the edit commits. Pending textarea drafts are also flushed before close,
+backup, export and AI actions. The document stores structured content, not the
+DOCX bytes.
 
 The **Versions (n)** button keeps the last five CV snapshots per application.
 A snapshot is taken before AI regeneration, before an accepted section rewrite,

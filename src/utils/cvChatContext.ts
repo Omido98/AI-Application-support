@@ -47,9 +47,17 @@ export function mergeChatContext(existing: string, block: string): string {
     .join("\n\n");
 }
 
+export interface ChatContextBlock {
+  block: string;
+  count: number;
+}
+
 export function buildChatContextBlock(
-  messages: { role: string; content: string }[],
-): string {
+  messages: {
+    role: string;
+    content: string;
+  }[],
+): ChatContextBlock {
   const recent = messages
     .filter((message) => message.content.trim())
     .slice(-8)
@@ -60,6 +68,9 @@ export function buildChatContextBlock(
           .trim()
           .slice(0, 500)}`,
     );
-  if (recent.length === 0) return "";
-  return [CHAT_CONTEXT_MARKER, ...recent, CHAT_CONTEXT_END_MARKER].join("\n");
+  if (recent.length === 0) return { block: "", count: 0 };
+  return {
+    block: [CHAT_CONTEXT_MARKER, ...recent, CHAT_CONTEXT_END_MARKER].join("\n"),
+    count: recent.length,
+  };
 }

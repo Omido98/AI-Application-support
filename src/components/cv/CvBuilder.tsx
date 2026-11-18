@@ -50,6 +50,7 @@ import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
 import { analyzeCoverLetterConsistency } from "@/utils/cvConsistency";
 import CvConsistencyPanel from "@/components/cv/CvConsistencyPanel";
 import BufferedTextarea from "@/components/common/BufferedTextarea";
+import BufferedInput from "@/components/common/BufferedInput";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { splitLines as lines } from "@/utils/lines";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
@@ -75,7 +76,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -180,7 +180,7 @@ function SectionCard({
           </div>
         </div>
         <div id={`cv-section-body-${section}`} hidden={collapsed}>
-          {children}
+          {!collapsed && children}
         </div>
       </CardContent>
     </Card>
@@ -400,10 +400,10 @@ export default function CvBuilder({
   );
   const consistency = useMemo(
     () =>
-      document
-        ? analyzeCoverLetterConsistency(document, profile, application)
+      analysisDocument
+        ? analyzeCoverLetterConsistency(analysisDocument, profile, application)
         : null,
-    [application, document, profile],
+    [analysisDocument, application, profile],
   );
   const visiblePages =
     view === "preview" && previewPages
@@ -632,8 +632,7 @@ export default function CvBuilder({
     setChatContextBusy(true);
     try {
       const messages = await loadChatMessagesFor(application.id);
-      const block = buildChatContextBlock(messages);
-      const recentCount = block ? block.split("\n").length - 1 : 0;
+      const { block, count: recentCount } = buildChatContextBlock(messages);
       if (!block) {
         setExportStatus("No chat messages to add for this application.");
         return;
@@ -1101,51 +1100,45 @@ export default function CvBuilder({
                   `${item.role || "role"} bullets`,
                 )}
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
+                  <BufferedInput
                     value={item.role}
-                    onChange={(event) =>
-                      updateExperience(item.id, { role: event.target.value })
+                    onCommit={(value) =>
+                      updateExperience(item.id, { role: value })
                     }
                     placeholder="Role"
                     className={fieldClass}
                     aria-label={`Role for ${item.company || "experience"}`}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.company}
-                    onChange={(event) =>
-                      updateExperience(item.id, { company: event.target.value })
+                    onCommit={(value) =>
+                      updateExperience(item.id, { company: value })
                     }
                     placeholder="Company"
                     className={fieldClass}
                     aria-label={`Company for ${item.role || "experience"}`}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.location}
-                    onChange={(event) =>
-                      updateExperience(item.id, {
-                        location: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateExperience(item.id, { location: value })
                     }
                     placeholder="Location (optional)"
                     className={fieldClass}
                   />
                   <div className="grid grid-cols-2 gap-2">
-                    <Input
+                    <BufferedInput
                       value={item.startDate}
-                      onChange={(event) =>
-                        updateExperience(item.id, {
-                          startDate: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        updateExperience(item.id, { startDate: value })
                       }
                       placeholder="Start"
                       className={fieldClass}
                     />
-                    <Input
+                    <BufferedInput
                       value={item.endDate}
-                      onChange={(event) =>
-                        updateExperience(item.id, {
-                          endDate: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        updateExperience(item.id, { endDate: value })
                       }
                       placeholder="End"
                       className={fieldClass}
@@ -1246,47 +1239,43 @@ export default function CvBuilder({
                   label={item.school || "education"}
                 />
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
+                  <BufferedInput
                     value={item.school}
-                    onChange={(event) =>
-                      updateEducation(item.id, { school: event.target.value })
+                    onCommit={(value) =>
+                      updateEducation(item.id, { school: value })
                     }
                     placeholder="School"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.degree}
-                    onChange={(event) =>
-                      updateEducation(item.id, { degree: event.target.value })
+                    onCommit={(value) =>
+                      updateEducation(item.id, { degree: value })
                     }
                     placeholder="Degree"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.field}
-                    onChange={(event) =>
-                      updateEducation(item.id, { field: event.target.value })
+                    onCommit={(value) =>
+                      updateEducation(item.id, { field: value })
                     }
                     placeholder="Field / programme"
                     className={fieldClass}
                   />
                   <div className="grid grid-cols-2 gap-2">
-                    <Input
+                    <BufferedInput
                       value={item.startDate}
-                      onChange={(event) =>
-                        updateEducation(item.id, {
-                          startDate: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        updateEducation(item.id, { startDate: value })
                       }
                       placeholder="Start"
                       className={fieldClass}
                     />
-                    <Input
+                    <BufferedInput
                       value={item.endDate}
-                      onChange={(event) =>
-                        updateEducation(item.id, {
-                          endDate: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        updateEducation(item.id, { endDate: value })
                       }
                       placeholder="End"
                       className={fieldClass}
@@ -1372,18 +1361,16 @@ export default function CvBuilder({
                   { kind: "project", id: item.id },
                   `${item.title || "project"} text`,
                 )}
-                <Input
+                <BufferedInput
                   value={item.title}
-                  onChange={(event) =>
-                    updateProject(item.id, { title: event.target.value })
-                  }
+                  onCommit={(value) => updateProject(item.id, { title: value })}
                   placeholder="Project title"
                   className={fieldClass}
                 />
-                <Input
+                <BufferedInput
                   value={item.period}
-                  onChange={(event) =>
-                    updateProject(item.id, { period: event.target.value })
+                  onCommit={(value) =>
+                    updateProject(item.id, { period: value })
                   }
                   placeholder="Dates (e.g. Jan 2024 – Jun 2025)"
                   className={fieldClass}
@@ -1473,32 +1460,26 @@ export default function CvBuilder({
                   label={item.name || "certification"}
                 />
                 <div className="grid gap-2 sm:grid-cols-3">
-                  <Input
+                  <BufferedInput
                     value={item.name}
-                    onChange={(event) =>
-                      updateCertification(item.id, {
-                        name: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateCertification(item.id, { name: value })
                     }
                     placeholder="Certification"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.issuer}
-                    onChange={(event) =>
-                      updateCertification(item.id, {
-                        issuer: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateCertification(item.id, { issuer: value })
                     }
                     placeholder="Issuer"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.date}
-                    onChange={(event) =>
-                      updateCertification(item.id, {
-                        date: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateCertification(item.id, { date: value })
                     }
                     placeholder="Date"
                     className={fieldClass}
@@ -1565,18 +1546,18 @@ export default function CvBuilder({
                   label={item.name || "language"}
                 />
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
+                  <BufferedInput
                     value={item.name}
-                    onChange={(event) =>
-                      updateLanguage(item.id, { name: event.target.value })
+                    onCommit={(value) =>
+                      updateLanguage(item.id, { name: value })
                     }
                     placeholder="Language"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.level}
-                    onChange={(event) =>
-                      updateLanguage(item.id, { level: event.target.value })
+                    onCommit={(value) =>
+                      updateLanguage(item.id, { level: value })
                     }
                     placeholder="Level"
                     className={fieldClass}
@@ -1647,36 +1628,32 @@ export default function CvBuilder({
                   `${item.organization || "other experience"} bullets`,
                 )}
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
+                  <BufferedInput
                     value={item.organization}
-                    onChange={(event) =>
-                      updateOther(item.id, {
-                        organization: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateOther(item.id, { organization: value })
                     }
                     placeholder="Organization"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.role}
-                    onChange={(event) =>
-                      updateOther(item.id, { role: event.target.value })
-                    }
+                    onCommit={(value) => updateOther(item.id, { role: value })}
                     placeholder="Role"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.startDate}
-                    onChange={(event) =>
-                      updateOther(item.id, { startDate: event.target.value })
+                    onCommit={(value) =>
+                      updateOther(item.id, { startDate: value })
                     }
                     placeholder="Start"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.endDate}
-                    onChange={(event) =>
-                      updateOther(item.id, { endDate: event.target.value })
+                    onCommit={(value) =>
+                      updateOther(item.id, { endDate: value })
                     }
                     placeholder="End"
                     className={fieldClass}
@@ -1960,14 +1937,14 @@ export default function CvBuilder({
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-full-name">Full name</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-full-name"
                       value={document.contact.fullName}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          fullName: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, fullName: value },
+                        }))
                       }
                       placeholder="Full name"
                       className={fieldClass}
@@ -1975,14 +1952,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-email">Email</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-email"
                       value={document.contact.email}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          email: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, email: value },
+                        }))
                       }
                       placeholder="Email"
                       className={fieldClass}
@@ -1990,14 +1967,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-phone">Phone</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-phone"
                       value={document.contact.phone}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          phone: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, phone: value },
+                        }))
                       }
                       placeholder="Phone"
                       className={fieldClass}
@@ -2005,14 +1982,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-location">Location</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-location"
                       value={document.contact.location}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          location: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, location: value },
+                        }))
                       }
                       placeholder="Location"
                       className={fieldClass}
@@ -2020,14 +1997,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-linkedin">LinkedIn URL</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-linkedin"
                       value={document.contact.linkedinUrl}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          linkedinUrl: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, linkedinUrl: value },
+                        }))
                       }
                       placeholder="LinkedIn URL"
                       className={fieldClass}
@@ -2037,14 +2014,14 @@ export default function CvBuilder({
                     <Label htmlFor="cv-contact-portfolio">
                       Portfolio / website
                     </Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-portfolio"
                       value={document.contact.portfolioUrl}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          portfolioUrl: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, portfolioUrl: value },
+                        }))
                       }
                       placeholder="Portfolio / website"
                       className={fieldClass}
@@ -2052,14 +2029,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-github">GitHub URL</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-github"
                       value={document.contact.githubUrl}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          githubUrl: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, githubUrl: value },
+                        }))
                       }
                       placeholder="GitHub URL"
                       className={fieldClass}
@@ -2074,10 +2051,10 @@ export default function CvBuilder({
                 <h3 className="text-sm font-semibold text-text-primary">
                   Headline
                 </h3>
-                <Input
+                <BufferedInput
                   value={document.headline}
-                  onChange={(event) =>
-                    setContentField("summary", "headline", event.target.value)
+                  onCommit={(value) =>
+                    setContentField("summary", "headline", value)
                   }
                   placeholder="Headline, e.g. Frontend Engineer focused on accessible design systems"
                   className={fieldClass}

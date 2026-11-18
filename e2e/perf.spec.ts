@@ -191,6 +191,112 @@ test("@perf stream deltas coalesce into very few updates", async ({
   expect(result.mutations).toBeLessThanOrEqual(100);
 });
 
+test("@perf streaming a long thread stays inside the long-task budget", async ({
+  page,
+}, testInfo) => {
+  await instrument(page);
+  const longThread = Array.from({ length: 80 }, (_, index) => ({
+    id: `perf-message-${index}`,
+    role: index % 2 === 0 ? "user" : "assistant",
+    content:
+      index % 2 === 0
+        ? `Question ${index} about the role, the team and the requirements.`
+        : `Answer ${index} with **bold**, a [link](https://example.com/${index}) and a concrete detail. ${"detail ".repeat(20)}`,
+    timestamp: new Date(Date.UTC(2026, 0, 1, 12, index)).toISOString(),
+  }));
+  await openApp(page, {
+    applications: [application],
+    lastTab: "chat",
+    withChat: true,
+    threadMessages: longThread,
+  });
+  await expect(page.getByPlaceholder(/Type your message/)).toBeVisible();
+  await expect(page.getByText(/Question 0 about the role/)).toBeVisible();
+
+  const result = await page.evaluate(async () => {
+    const { useChatStore } = await import("/src/stores/chatStore.ts");
+    const { createStreamBatcher } = await import("/src/utils/streamBuffer.ts");
+    const threadId = useChatStore.getState().activeThreadId;
+    if (!threadId) throw new Error("No active chat thread");
+
+    const perf = (
+      window as unknown as {
+        __perf: { longTasks: { start: number; duration: number }[] };
+      }
+    ).__perf;
+    const start = performance.now();
+    useChatStore.getState().setThreadSending(threadId, true);
+    const batcher = createStreamBatcher(
+      (text) =>
+        useChatStore
+          .getState()
+          .setThreadStreamingText(threadId, (previous) => previous + text),
+      (callback) => requestAnimationFrame(callback),
+      (handle) => cancelAnimationFrame(handle),
+    );
+
+    for (let index = 0; index < 400; index += 1) {
+      batcher.push(`token${index} `);
+    }
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    batcher.cancel();
+    useChatStore.getState().setThreadStreamingText(threadId, "");
+    useChatStore.getState().setThreadSending(threadId, false);
+
+    const during = perf.longTasks.filter((task) => task.start >= start);
+    return {
+      elapsed: performance.now() - start,
+      longTaskCount: during.length,
+      longestTask: during.reduce(
+        (max, task) => Math.max(max, task.duration),
+        0,
+      ),
+    };
+  });
+
+  await testInfo.attach("long-thread-stream.json", {
+    body: JSON.stringify(result, null, 2),
+    contentType: "application/json",
+  });
+  console.log("[perf] long-thread stream", JSON.stringify(result));
+
+  // The composer updates on every keystroke; the memoised message list must
+  // not re-render or re-parse the 80 historical messages.
+  const typingBefore = await page.evaluate(
+    () =>
+      (window as unknown as { __perf: { longTasks: unknown[] } }).__perf
+        .longTasks.length,
+  );
+  const input = page.getByPlaceholder(/Type your message/);
+  await input.click();
+  const typingStart = Date.now();
+  await input.pressSequentially(
+    "Can you tighten the second paragraph and keep the metrics?",
+    { delay: 0 },
+  );
+  const typingElapsed = Date.now() - typingStart;
+  const typingAfter = await page.evaluate(
+    () =>
+      (window as unknown as { __perf: { longTasks: unknown[] } }).__perf
+        .longTasks.length,
+  );
+  console.log(
+    "[perf] chat composer typing",
+    JSON.stringify({
+      elapsed: typingElapsed,
+      tasks: typingAfter - typingBefore,
+    }),
+  );
+
+  expect(result.elapsed).toBeLessThan(3_000);
+  expect(result.longTaskCount).toBeLessThanOrEqual(10);
+  expect(result.longestTask).toBeLessThan(500);
+  expect(typingElapsed).toBeLessThan(3_000);
+  expect(typingAfter - typingBefore).toBeLessThanOrEqual(10);
+});
+
 test("@perf CV typing stays responsive with a long document", async ({
   page,
 }, testInfo) => {
@@ -240,7 +346,16 @@ test("@perf CV typing stays responsive with a long document", async ({
       "Accessible systems, reporting tools and reliable delivery.",
       { delay: 0 },
     );
+  // A short plain input is buffered too, so this must not write/save the whole
+  // document for every character.
+  const companyInput = page.getByRole("textbox", {
+    name: "Company for Engineer 7",
+  });
+  await companyInput.click();
+  await companyInput.press("End");
+  await companyInput.pressSequentially(" Labs", { delay: 0 });
   const elapsed = Date.now() - start;
+  await expect(companyInput).toHaveValue("Perf Company 7 Labs");
   const after = await page.evaluate(() => {
     const perf = (
       window as unknown as {
@@ -274,6 +389,71 @@ test("@perf CV typing stays responsive with a long document", async ({
 
   // Generous ceilings for the unminified dev server; catch a real freeze.
   expect(elapsed).toBeLessThan(8_000);
+  expect(after.count - before).toBeLessThanOrEqual(10);
+  expect(after.longest).toBeLessThan(1_000);
+});
+
+test("@perf tracker typing does not rebuild every row", async ({
+  page,
+}, testInfo) => {
+  await instrument(page);
+  const longDescription = "Build accessible systems. ".repeat(180);
+  const applications = Array.from({ length: 100 }, (_, index) =>
+    makeApplication(`perf-app-${index}`, `Company ${index}`, "applied", {
+      jobDescription: longDescription,
+      requirements: "TypeScript, React and accessibility.",
+    }),
+  );
+  await openApp(page, {
+    applications,
+    lastTab: "application",
+  });
+  const notes = page.locator("#app-notes");
+  await expect(notes).toBeVisible();
+
+  const before = await page.evaluate(
+    () =>
+      (window as unknown as { __perf: { longTasks: unknown[] } }).__perf
+        .longTasks.length,
+  );
+  const start = Date.now();
+  await notes.pressSequentially(
+    "Follow up with the hiring manager next week about the timeline.",
+    { delay: 0 },
+  );
+  const elapsed = Date.now() - start;
+  const after = await page.evaluate(() => {
+    const perf = (
+      window as unknown as {
+        __perf: { longTasks: { start: number; duration: number }[] };
+      }
+    ).__perf;
+    return {
+      count: perf.longTasks.length,
+      longest: perf.longTasks
+        .slice(-10)
+        .reduce((max, task) => Math.max(max, task.duration), 0),
+    };
+  });
+
+  await testInfo.attach("tracker-typing.json", {
+    body: JSON.stringify(
+      {
+        elapsed,
+        tasksDuringTyping: after.count - before,
+        longest: after.longest,
+      },
+      null,
+      2,
+    ),
+    contentType: "application/json",
+  });
+  console.log(
+    "[perf] tracker typing",
+    JSON.stringify({ elapsed, tasksDuringTyping: after.count - before }),
+  );
+
+  expect(elapsed).toBeLessThan(3_000);
   expect(after.count - before).toBeLessThanOrEqual(10);
   expect(after.longest).toBeLessThan(1_000);
 });

@@ -2,6 +2,7 @@ import type { ProfileData } from "@/types";
 import type { CvDocument } from "@/types/cv";
 import { findUnverifiedNumbers } from "@/utils/cvAts";
 import { getCvProfileContext } from "@/utils/cvProfileContext";
+import { contentTokens } from "@/utils/textTokens";
 
 export type CvGroundingCategory = "skill" | "education" | "claim" | "number";
 
@@ -17,72 +18,6 @@ export interface CvGroundingReport {
   counts: Record<CvGroundingCategory, number>;
 }
 
-const CLAIM_STOPWORDS = new Set(
-  [
-    "about",
-    "after",
-    "again",
-    "also",
-    "among",
-    "and",
-    "are",
-    "been",
-    "before",
-    "being",
-    "both",
-    "built",
-    "can",
-    "could",
-    "created",
-    "delivered",
-    "designed",
-    "developed",
-    "did",
-    "does",
-    "each",
-    "for",
-    "from",
-    "had",
-    "has",
-    "have",
-    "implemented",
-    "into",
-    "led",
-    "made",
-    "managed",
-    "more",
-    "most",
-    "not",
-    "other",
-    "our",
-    "over",
-    "responsible",
-    "than",
-    "that",
-    "the",
-    "their",
-    "them",
-    "then",
-    "there",
-    "these",
-    "they",
-    "this",
-    "through",
-    "using",
-    "was",
-    "were",
-    "which",
-    "while",
-    "will",
-    "with",
-    "work",
-    "worked",
-    "working",
-    "would",
-    "your",
-  ].map((word) => word.toLowerCase()),
-);
-
 function normalize(value: string): string {
   return value
     .toLowerCase()
@@ -90,17 +25,6 @@ function normalize(value: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\p{L}\p{N}+#.]+/gu, " ")
     .trim();
-}
-
-function contentTokens(value: string): string[] {
-  return (value.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}+#.]*/gu) ?? [])
-    .map((token) => token.replace(/[.,]+$/g, ""))
-    .filter(
-      (token) =>
-        token.length >= 3 &&
-        !/^\d+$/.test(token) &&
-        !CLAIM_STOPWORDS.has(token),
-    );
 }
 
 function escapeRegExp(value: string): string {
@@ -179,9 +103,8 @@ function overlapRatio(tokens: string[], allowed: Set<string>): number {
 
 function claimWarnings(
   document: CvDocument,
-  source: string,
+  sourceTokens: Set<string>,
 ): CvGroundingWarning[] {
-  const sourceTokens = new Set(contentTokens(source));
   const fields: { label: string; text: string }[] = [
     { label: "Summary", text: document.summary },
     ...document.experience
@@ -296,7 +219,10 @@ export function analyzeCvGrounding(
 
   const claims = claimWarnings(
     document,
-    `${getCvProfileContext(profile).json}\n${document.extraContext}`,
+    new Set([
+      ...getCvProfileContext(profile).tokens,
+      ...contentTokens(document.extraContext),
+    ]),
   );
   counts.claim = claims.length;
   warnings.push(...claims);

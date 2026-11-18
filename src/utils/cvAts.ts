@@ -261,7 +261,11 @@ function tokens(text: string): string[] {
 }
 
 /** All CV text that an ATS would see, including section headings. */
+const plainTextCache = new WeakMap<CvDocument, string>();
+
 export function cvPlainText(document: CvDocument): string {
+  const cached = plainTextCache.get(document);
+  if (cached !== undefined) return cached;
   const lines: string[] = [
     document.contact.fullName,
     document.contact.email,
@@ -320,7 +324,9 @@ export function cvPlainText(document: CvDocument): string {
     );
   }
 
-  return lines.filter(Boolean).join("\n");
+  const text = lines.filter(Boolean).join("\n");
+  plainTextCache.set(document, text);
+  return text;
 }
 
 /**
@@ -354,6 +360,18 @@ function normalizeForMatch(value: string): string {
     .trim();
 }
 
+/** Normalized term -> synonym group, built once instead of scanned per match. */
+const SYNONYM_LOOKUP: Map<string, string[]> = (() => {
+  const lookup = new Map<string, string[]>();
+  for (const group of SYNONYM_GROUPS) {
+    for (const entry of group) {
+      const key = normalizeForMatch(entry);
+      if (!lookup.has(key)) lookup.set(key, group);
+    }
+  }
+  return lookup;
+})();
+
 function isMeaningfulToken(token: string): boolean {
   return (
     token.length >= 3 &&
@@ -370,11 +388,7 @@ function containsTerm(haystack: string, term: string): boolean {
 }
 
 function synonymsFor(term: string): string[] {
-  const normalized = normalizeForMatch(term);
-  const group = SYNONYM_GROUPS.find((candidate) =>
-    candidate.some((entry) => normalizeForMatch(entry) === normalized),
-  );
-  return group ? [...group] : [term];
+  return SYNONYM_LOOKUP.get(normalizeForMatch(term)) ?? [term];
 }
 
 /** Return the matched spelling, so the preview can highlight what exists. */

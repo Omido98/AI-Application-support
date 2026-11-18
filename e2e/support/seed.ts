@@ -123,6 +123,8 @@ export interface SeedOptions {
   accent?: string;
   /** Seed an API key and one chat thread so the chat UI is meaningful. */
   withChat?: boolean;
+  /** Replace the seeded chat thread messages (used by perf/scroll tests). */
+  threadMessages?: unknown[];
   /** Replace the default profile fixture (e.g. to add work experience). */
   profile?: ProfileData;
   /** Extra CV documents keyed by application id. */
@@ -147,8 +149,12 @@ export async function seed(
     notificationLog: { day: "", keys: [] },
   };
   const config = options.withChat ? chatConfig : null;
-  const thread =
+  const baseThread =
     options.withChat && applications[0] ? makeThread(applications[0]) : null;
+  const thread =
+    baseThread && options.threadMessages
+      ? { ...baseThread, value: options.threadMessages }
+      : baseThread;
 
   await page.addInitScript(
     ({

@@ -1,6 +1,6 @@
 # Code review fixes and performance plan
 
-- Status: Phases 0-4 implemented and tested on 2026-11-18; Phases 5-9 pending.
+- Status: Phases 0-8 implemented and tested on 2026-11-18; Phase 9 automated checks pass, manual QA and PR/handoff pending.
 - Created: 2026-11-18
 - Note: the item-level checkboxes below are the original plan. The "Quick
   progress table" and "Implementation notes" at the end record what is actually
@@ -1421,11 +1421,11 @@ Update this as work lands.
 | 1 | FIX-01, FIX-02 | Done, tested (unit + 5 editing e2e) |
 | 2 | FIX-03, FIX-04, FIX-05 | Done, tested (store + generation unit, stale-state/removal e2e) |
 | 3 | FIX-06, FIX-07, FIX-08, FIX-09 | Done, tested (store queue tests, deletion/cleanup e2e, backup tests) |
-| 4 | FIX-10 | Done, tested (41 Rust tests incl. 3 new SSE tests) |
-| 5 | PERF-01, PERF-02 | Not started |
-| 6 | PERF-03, PERF-04, PERF-05, PERF-06, PERF-07 | Not started |
-| 7 | PERF-08, FIX-11..FIX-15 | Not started |
-| 8 | PERF-09..PERF-12 | Not started |
+| 4 | FIX-10 | Done, tested (43 Rust tests overall incl. 3 new SSE tests) |
+| 5 | PERF-01, PERF-02 | Done, tested (long-thread stream perf, token-helper unit) |
+| 6 | PERF-03, PERF-04, PERF-05, PERF-06, PERF-07 | Done, tested (CV/tracker typing perf, audit unit, api tests) |
+| 7 | PERF-08, FIX-11..FIX-15 | Done, tested (Rust save-cache, backup, CSV, DOCX, e2e) |
+| 8 | PERF-09..PERF-12 | Done except PERF-11 (investigated, deliberately left as `Array.from`; see notes) |
 | 9 | VERIFY-01..VERIFY-04 | Automated checks pass; manual QA and PR/handoff pending |
 
 ---
@@ -1498,9 +1498,159 @@ Deviations/notes:
 - `deletedApplications` is cleared in `cvStore.resetCache` so a reset/import
   does not leave stale delete markers for later ids; `deletedThreads` is also
   cleared on `resetThreadCache` because the import flow flushes first.
-- `BufferedInput` is added now but is only used by the later PERF-03 work; no
-  CV short fields were converted in this batch (out of scope for Phases 0-4).
-- BASE-02's optional thread `messageCount` seed was deferred to Phase 5, where
-  the long-thread perf test needs it.
+- `BufferedInput` was introduced with the shared editor and is used by the
+  PERF-03 CV short-field work in the later phase.
+- BASE-02's optional thread-message seed was added in Phase 5 (`threadMessages`)
+  for the long-thread perf test.
 - No release branch/tag/PR was created; the changes are local on the working
   branch.
+
+### 2026-11-18: Phases 5-8 and Phase 9 verification
+
+Completed:
+
+- **PERF-01**: `ChatTab` now subscribes to primitive thread slices instead of
+  the whole `ThreadState`, so a streamed delta no longer re-renders the tab.
+  `MessageList` and `Markdown` are memoised; resend/regenerate callbacks are
+  stable; time formatting uses cached `Intl.DateTimeFormat` instances. Added
+  an 80-message/400-delta Playwright long-task guard.
+- **PERF-02**: Added `estimateContextUsage`; the base prompt token count and
+  summary prompt are memoised on their inputs, and the draft uses
+  `useDeferredValue`, so typing does not rebuild the full system prompt.
+- **PERF-03**: Every short CV input now uses `BufferedInput`; collapsed section
+  bodies unmount instead of rendering hidden. The CV perf test types into a
+  short company input as well as the summary.
+- **PERF-04**: Added `src/utils/textTokens.ts`; profile JSON tokenisation is
+  cached in `CvProfileContext`, synonyms are looked up through a prebuilt map,
+  `cvPlainText` is cached per document, and the consistency scan no longer
+  spreads the CV word set per term. Consistency now runs on the same debounced
+  analysis document, sharing the text cache.
+- **PERF-05**: Fit-matrix memo dependencies narrowed to
+  requirements/jobDescription + profile arrays; sidebar rows are memoised;
+  tracker long fields use `BufferedTextarea`; searchable text is cached per
+  application object. Added a 100-application tracker typing perf guard.
+- **PERF-06**: Removed the client-side `pace()` before the first review pass;
+  a regression test verifies the first onStep arrives immediately even with a
+  300 ms configured delay.
+- **PERF-07**: Tool calls in one model round run with bounded concurrency
+  (3), preserving result order; a test proves both tools start before either
+  resolves.
+- **PERF-08**: Rust has a per-process known-good file stamp cache; trusted
+  saves skip the extra read/parse but still rotate the backup, and external
+  edits invalidate the stamp. Tests cover the stamp, trusted save and the
+  existing corrupt-main protection.
+- **FIX-11**: `buildChatContextBlock` returns `{ block, count }`, so the
+  "Added N messages" status is exact.
+- **FIX-12**: Archived applications no longer show due chips; e2e covers the
+  active/archived views.
+- **FIX-13**: Added `useNowAtMidnight`; Overview passes an injected `now` to
+  stats and the calendar count, and refreshes at midnight/focus.
+- **FIX-14**: CSV cells starting with `=`, `+`, `-`, `@`, tab or CR are
+  prefixed with an apostrophe; tests cover quoting and formula prefixes.
+- **FIX-15**: DOCX default paragraph spacing uses `LineRuleType.EXACT`; a
+  jszip-based test checks `w:line="264"` and `w:lineRule="exact"`.
+- **PERF-09**: `zen_fetch_page` caches one reqwest client per host/port for a
+  redirect chain, still validating and pinning each new origin.
+- **PERF-10**: `countCalendarEvents` counts without building/sorting events.
+- **PERF-11**: Investigated and deliberately not changed. `invoke` argument
+  serialisation is JSON; converting a CV export byte array to a JSON number
+  array is correct today and the files are small. A binary IPC spike is left
+  for a future change.
+- **PERF-12**: Time labels use cached `Intl` formatters and a bounded timestamp
+  cache; covered by the PERF-01 memo work.
+
+Final automated verification (2026-11-18, this branch):
+
+- `npm test`: 466 passed, 3 skipped.
+- `npx tsc --noEmit`: pass.
+- `npm run lint`: pass.
+- `npm run format:check`: pass.
+- `cargo fmt --check`: pass.
+- `npm run test:e2e`: 28 passed (19 original + 9 editing).
+- `npm run test:a11y`: 13 passed.
+- `npm run test:perf`: 7 passed. Latest observed: long-thread 1–2 long tasks /
+  77–163 ms; chat composer typing 1–4 long tasks / 0.5–0.6 s; CV typing
+  0.5–3.2 s / 2–5 tasks (dev-server variance); tracker typing 0.6–0.8 s /
+  0 tasks; CV navigation longest 392–489 ms.
+- `npm run eval`: 15/15 cases, 215/215 checks.
+- `cargo test`: 43 passed under the short `CARGO_TARGET_DIR` workaround for the
+  local MSVC `D8050` issue.
+
+Review notes / deliberate behavior changes:
+
+- CV and tracker text fields now commit on pause/blur rather than every
+  keystroke. Export, save, backup, close and AI actions flush pending drafts,
+  so the on-disk/exported result still includes the latest text.
+- CSV formula neutralisation also prefixes negative numeric-looking values
+  (for example `-5`); this is the documented, intentional safety tradeoff.
+- The Rust known-good cache trusts this process's write only while size+mtime
+  still match; an external edit falls back to full validation.
+- If a backup omits `applications.json` and the current application file is
+  unreadable (missing or malformed), the import proceeds for the other files but
+  skips thread/CV pruning. `loadJson` cannot distinguish "missing" from
+  "malformed" without exposing a new storage API, and skipping the prune is the
+  strictly safer choice; it is documented here rather than silently treated as
+  an empty application list.
+- `jszip` was added as a devDependency for the DOCX style assertion; it is not
+  part of the application bundle or runtime dependency set.
+- PERF-11 remains deliberately deferred; no binary IPC dependency was added.
+- Manual QA with a real provider and packaged Tauri window, and the PR/push
+  step, are still pending by design.
+
+### 2026-11-18: Full review of all phases
+
+Every review finding was mapped back to its implementation and a test or a
+direct audit. No regression was found in the final automated run.
+
+| Item | Verified by | Result |
+| --- | --- | --- |
+| FIX-01 profile typing | `editing.spec.ts` slow typing + Enter + reload | Pass; spaces/newlines survive |
+| FIX-02 CV list typing | `editing.spec.ts` bullets/skills + reload | Pass; trailing space/newline survive |
+| FIX-03 CV proposals | `cvStore.test.ts` keying/abort/delete + stale-state e2e | Pass; proposal scoped to app, survives navigation |
+| FIX-04 CV Stop | `cvGeneration.test.ts` stopped/aborted cases | Pass; no repair, no document |
+| FIX-05 CV removal | `editing.spec.ts` remove/restore | Pass; Versions snapshot |
+| FIX-06 last-app undo | `editing.spec.ts` delete only app/undo | Pass; toast visible and works |
+| FIX-07 cleanup | `editing.spec.ts` tab switch during undo | Pass; chat/CV/history removed |
+| FIX-08 save queues | `saveQueue`, `chatStore`, `applicationStore` tests | Pass; serialized, flush awaits, delete wins |
+| FIX-09 backup validation | `backup.test.ts` malformed/no-id/missing-current cases | Pass; no writes/prunes on reject |
+| FIX-10 stream usage | 3 Rust SSE tests | Pass; usage after finish captured |
+| FIX-11 message count | `cvChatContext.test.ts` | Pass; exact count |
+| FIX-12 archived chips | `editing.spec.ts` active vs archive | Pass; no archived due chips |
+| FIX-13 midnight | `useNowAtMidnight.test.ts` | Pass; pure schedule verified |
+| FIX-14 CSV injection | `csv.test.ts` | Pass; formula prefixes neutralized |
+| FIX-15 DOCX spacing | `cvDocx.test.ts` styles.xml assertion | Pass; exact line rule |
+| PERF-01 chat renders | long-thread stream + composer typing perf | Pass; 1–2 long tasks, memoized list |
+| PERF-02 token readout | `contextBudget.test.ts` usage helper | Pass; prompt memoized/deferred |
+| PERF-03 CV inputs | CV typing perf + company persistence e2e | Pass; short inputs buffered |
+| PERF-04 CV audits | CV audit unit suites | Pass; identical output, cached lookups |
+| PERF-05 tracker | tracker typing perf + app switch e2e | Pass; rows memoized, notes buffered |
+| PERF-06 pacing | `api.test.ts` immediate first review | Pass; no pre-first-call delay |
+| PERF-07 parallel tools | `api.test.ts` overlap/order | Pass; bounded concurrency, order kept |
+| PERF-08 save path | 3 Rust tests + existing recovery tests | Pass; trusted save skips parse, backup kept |
+| PERF-09 fetch clients | `cargo check`/review | Pass; per-chain client cache, same SSRF checks |
+| PERF-10 calendar count | `calendarExport.test.ts` | Pass; count matches events |
+| PERF-11 binary IPC | investigation | Deferred; JSON array path retained |
+| PERF-12 timestamps | covered by PERF-01/memo audit | Pass; cached formatters |
+
+Cross-cutting checks:
+
+- Full `npm test` (466), `tsc`, ESLint, Prettier, `cargo fmt`, `cargo check`
+  and `version:check` pass.
+- Full browser e2e (28), a11y (13) and perf (7) pass.
+- `npm run eval` passes 15/15 cases and 215/215 checks.
+- Rust tests pass 43/43 under the short-target-directory workaround.
+- No new runtime dependency; `jszip` is dev-only for the DOCX test.
+- No version bump, tag, push, PR or release was made.
+
+Residual risks / deliberate limits:
+
+- Manual QA with a live model and the packaged Tauri window remains to be done;
+  the automated suite covers browser mode and Rust unit behavior.
+- PERF-11 (binary export IPC) is deferred; CV export payloads are small.
+- The backup import skips pruning when the current applications file is
+  unreadable and the bundle omits it; this is safer than deleting chats/CVs.
+- CSV neutralisation turns negative numeric-looking values into text; this is
+  the documented formula-injection tradeoff.
+- Timed buffered edits commit after a short pause, so a force-kill inside that
+  window can lose the last few characters; normal close/export/save paths flush
+  them.

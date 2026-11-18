@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   isConversationMessage,
   newMessageId,
@@ -16,7 +22,11 @@ import {
   buildSystemPrompt,
 } from "@/utils/systemPrompt";
 import { estimateTokens } from "@/utils/tokens";
-import { fitHistoryToBudget, getContextBudget } from "@/utils/contextBudget";
+import {
+  estimateContextUsage,
+  fitHistoryToBudget,
+  getContextBudget,
+} from "@/utils/contextBudget";
 import { estimateUsageCost, isFreeModel } from "@/utils/zenPricing";
 import { createStreamBatcher } from "@/utils/streamBuffer";
 import type { WebSource } from "@/types";
@@ -56,13 +66,20 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const setConfig = useChatStore((s) => s.setConfig);
 
   const activeThreadId = useChatStore((s) => s.activeThreadId);
-  const activeThread = useChatStore((s) =>
-    s.activeThreadId ? s.threads[s.activeThreadId] : undefined,
-  );
   const messages = useChatStore(selectActiveMessages);
-  const threadLoaded = activeThread?.loaded ?? false;
-  const isSending = activeThread?.isSending ?? false;
-  const inputValue = activeThread?.draft ?? "";
+  // Only primitive slices here: a streamed token or a composer keystroke must
+  // not re-render the whole tab (and therefore the message list).
+  const threadLoaded = useChatStore((s) =>
+    s.activeThreadId ? (s.threads[s.activeThreadId]?.loaded ?? false) : false,
+  );
+  const isSending = useChatStore((s) =>
+    s.activeThreadId
+      ? (s.threads[s.activeThreadId]?.isSending ?? false)
+      : false,
+  );
+  const inputValue = useChatStore((s) =>
+    s.activeThreadId ? (s.threads[s.activeThreadId]?.draft ?? "") : "",
+  );
 
   const switchThread = useChatStore((s) => s.switchThread);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -97,58 +114,56 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
   const summaryText = summaryMessage?.content.trim() ?? "";
 
   // Live estimate of what the next request will actually send, after history
-  // trimming, plus how many older messages are omitted to stay in budget.
+  // trimming, plus how many older messages are omitted to stay in budget. The
+  // profile/job prompt is built only when its inputs change, not on every
+  // keystroke; the draft itself is deferred so typing stays responsive.
   const contextBudget = useMemo(
     () => getContextBudget(config.contextWindow),
     [config.contextWindow],
   );
-  const contextUsage = useMemo(() => {
-    if (!application) {
-      return { tokens: 0, dropped: 0 };
-    }
-    const appCtx = applicationContextFrom(application);
-    const basePrompt = buildSystemPrompt(appCtx, profile, {
+  const promptOptions = useMemo(
+    () => ({
       mode: config.systemPromptMode ?? "standard",
       customPrompt: config.customSystemPrompt ?? "",
-    });
-    const baseReserved =
-      estimateTokens(basePrompt) + estimateTokens(inputValue);
-    const baseFitted = fitHistoryToBudget(conversationMessages, {
+    }),
+    [config.systemPromptMode, config.customSystemPrompt],
+  );
+  const basePromptTokens = useMemo(() => {
+    if (!application) return 0;
+    const appCtx = applicationContextFrom(application);
+    return estimateTokens(buildSystemPrompt(appCtx, profile, promptOptions));
+  }, [application, profile, promptOptions]);
+  const summaryPromptTokens = useMemo(() => {
+    if (!application || !summaryText) return undefined;
+    const appCtx = applicationContextFrom(application);
+    return estimateTokens(
+      buildSystemPrompt(appCtx, profile, {
+        ...promptOptions,
+        conversationSummary: summaryText,
+      }),
+    );
+  }, [application, profile, promptOptions, summaryText]);
+  const deferredInputValue = useDeferredValue(inputValue);
+  const contextUsage = useMemo(() => {
+    if (!application) {
+      return { tokens: 0, droppedCount: 0 };
+    }
+    return estimateContextUsage(conversationMessages, {
       inputBudget: contextBudget.inputBudget,
-      reservedTokens: baseReserved,
+      basePromptTokens,
+      summaryPromptTokens,
+      draftTokens: estimateTokens(deferredInputValue),
     });
-    // The summary only earns its tokens when something is actually omitted.
-    const summary = baseFitted.droppedCount > 0 ? summaryText : "";
-    const prompt = summary
-      ? buildSystemPrompt(appCtx, profile, {
-          mode: config.systemPromptMode ?? "standard",
-          customPrompt: config.customSystemPrompt ?? "",
-          conversationSummary: summary,
-        })
-      : basePrompt;
-    const reserved = estimateTokens(prompt) + estimateTokens(inputValue);
-    const fitted =
-      summary || reserved !== baseReserved
-        ? fitHistoryToBudget(conversationMessages, {
-            inputBudget: contextBudget.inputBudget,
-            reservedTokens: reserved,
-          })
-        : baseFitted;
-    return {
-      tokens: reserved + fitted.historyTokens,
-      dropped: fitted.droppedCount,
-    };
   }, [
     application,
-    profile,
-    conversationMessages,
-    inputValue,
-    summaryText,
-    config.systemPromptMode,
-    config.customSystemPrompt,
+    basePromptTokens,
     contextBudget.inputBudget,
+    conversationMessages,
+    deferredInputValue,
+    summaryPromptTokens,
   ]);
   const tokenEstimate = contextUsage.tokens;
+  const droppedCount = contextUsage.droppedCount;
 
   // ── Input state ──
   const [showConfig, setShowConfig] = useState(false);
@@ -720,6 +735,21 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
     });
   }, [sendText]);
 
+  // Stable callbacks keep the memoized message list from re-rendering when the
+  // composer or a streamed delta changes state in this component.
+  const handleResend = useCallback(
+    (messageId: string) => {
+      void sendText({ resendId: messageId });
+    },
+    [sendText],
+  );
+  const handleRegenerate = useCallback(
+    (messageId: string) => {
+      void sendText({ regenerateId: messageId });
+    },
+    [sendText],
+  );
+
   // ── Show loading state while restoring config ──
   if (!configLoaded) {
     return (
@@ -878,8 +908,8 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       {/* Messages */}
       <MessageList
         onStart={handleStart}
-        onResend={(id) => void sendText({ resendId: id })}
-        onRegenerate={(id) => void sendText({ regenerateId: id })}
+        onResend={handleResend}
+        onRegenerate={handleRegenerate}
       />
 
       {toolActivity && (
@@ -900,12 +930,12 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         </p>
       )}
 
-      {contextUsage.dropped > 0 && (
+      {droppedCount > 0 && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-2 text-[10px] leading-snug text-text-muted">
           <span>
-            {contextUsage.dropped} older message
-            {contextUsage.dropped === 1 ? "" : "s"} will be omitted from the
-            next request to stay within the context budget.
+            {droppedCount} older message
+            {droppedCount === 1 ? "" : "s"} will be omitted from the next
+            request to stay within the context budget.
           </span>
           <button
             type="button"
@@ -951,7 +981,7 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
         disabled={isSending}
         tokenEstimate={tokenEstimate}
         contextLimit={contextBudget.inputBudget}
-        droppedMessages={contextUsage.dropped}
+        droppedMessages={droppedCount}
       />
 
       {/* Chat agent settings: a modal so the conversation stays visible and
