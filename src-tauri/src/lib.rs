@@ -2951,8 +2951,11 @@ mod tests {
         mark_data_file_good(&path);
         assert!(data_file_is_trusted(&path));
 
-        // Any external change invalidates the stamp.
-        fs::write(&path, br#"{"version":2}"#).unwrap();
+        // Use a different length as well as different content: some Windows
+        // filesystems can report the same mtime for two writes in the same
+        // clock tick, and the stamp intentionally falls back to validation on
+        // any size/mtime mismatch.
+        fs::write(&path, br#"{"version":2,"external":true}"#).unwrap();
         assert!(!data_file_is_trusted(&path));
 
         forget_data_file(&path);
