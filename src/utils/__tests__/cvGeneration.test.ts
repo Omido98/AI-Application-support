@@ -257,4 +257,36 @@ describe("generateCvDocument", () => {
     });
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects a stopped response instead of using its partial JSON", async () => {
+    sendMessageMock.mockResolvedValue({
+      content: JSON.stringify(generated),
+      stopped: true,
+    });
+
+    await expect(
+      generateCvDocument({ application, profile, config, options }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    // No repair round after the user cancelled.
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not issue a repair request after the caller aborts", async () => {
+    const controller = new AbortController();
+    sendMessageMock.mockImplementation(async () => {
+      controller.abort();
+      return { content: "not json", stopped: true };
+    });
+
+    await expect(
+      generateCvDocument({
+        application,
+        profile,
+        config,
+        options,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
 });

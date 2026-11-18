@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Search,
@@ -36,7 +36,6 @@ import { applicationMatchesQuery } from "@/utils/applicationSearch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -54,6 +53,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import FitMatrixCard from "@/components/tracker/FitMatrixCard";
+import BufferedTextarea from "@/components/common/BufferedTextarea";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 
 function StatusBadge({ status }: { status: ApplicationStatus }) {
@@ -203,6 +203,88 @@ const ACTIVE_STATUSES = STATUS_ORDER.filter(
   (status) => !isArchivedStatus(status),
 );
 
+/**
+ * One row in the tracker sidebar. Memoised so editing a field on one
+ * application does not re-render every other row; untouched applications keep
+ * their object identity.
+ */
+const SidebarRow = memo(function SidebarRow({
+  app,
+  isSelected,
+  onSelect,
+  onDelete,
+}: {
+  app: JobApplication;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const archived = isArchivedStatus(app.status);
+  const deadline = archived ? null : dueChip(app.deadline, "Deadline");
+  const followUp = archived ? null : dueChip(app.followUpAt, "Follow-up");
+  const showMeta = app.priority !== "medium" || deadline || followUp;
+
+  return (
+    <div
+      className={cn(
+        "group relative rounded-lg border border-transparent transition-colors",
+        isSelected && "bg-primary/10 border-primary/30",
+      )}
+    >
+      <button
+        onClick={() => onSelect(app.id)}
+        className="w-full text-left px-3 py-2 pr-8 rounded-lg"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-text-primary truncate">
+            {app.companyName.trim() || "Untitled application"}
+          </span>
+          <StatusBadge status={app.status} />
+        </div>
+        {app.jobTitle.trim() && (
+          <p className="text-xs text-text-secondary truncate mt-0.5">
+            {app.jobTitle}
+          </p>
+        )}
+        {showMeta && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <PriorityBadge priority={app.priority} />
+            {deadline && (
+              <span
+                className={cn(
+                  "rounded border px-1.5 py-0.5 text-[10px]",
+                  deadline.className,
+                )}
+              >
+                {deadline.text}
+              </span>
+            )}
+            {followUp && (
+              <span
+                className={cn(
+                  "rounded border px-1.5 py-0.5 text-[10px]",
+                  followUp.className,
+                )}
+              >
+                {followUp.text}
+              </span>
+            )}
+          </div>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={() => onDelete(app.id)}
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+        title="Delete application"
+        aria-label={`Delete ${app.companyName.trim() || "application"}`}
+      >
+        <Trash2 className="size-3.5" />
+      </button>
+    </div>
+  );
+});
+
 export default function ApplicationTab() {
   const sidebarScrollRef = useScrollRestoration<HTMLDivElement>(
     "application-sidebar",
@@ -242,11 +324,14 @@ export default function ApplicationTab() {
   const deletedAppRef = useRef<JobApplication | null>(null);
   deletedAppRef.current = deletedApp;
 
-  const finalizeDeletion = (app: JobApplication) => {
-    useChatStore.getState().discardDraft(app.id);
-    void deleteApplicationThread(app.id);
-    void useCvStore.getState().deleteCv(app.id);
-  };
+  const finalizeDeletion = useCallback(
+    (app: JobApplication) => {
+      useChatStore.getState().discardDraft(app.id);
+      void deleteApplicationThread(app.id);
+      void useCvStore.getState().deleteCv(app.id);
+    },
+    [deleteApplicationThread],
+  );
 
   const handleDelete = () => {
     if (!pendingDeleteId) return;
@@ -278,18 +363,32 @@ export default function ApplicationTab() {
     setDeletedApp(null);
   };
 
-  // Leaving the tab ends the undo window; never leave an orphaned chat file.
+  // Leaving the tab ends the undo window; never leave orphaned chat/CV files.
   useEffect(
     () => () => {
-      if (undoTimer.current) clearTimeout(undoTimer.current);
-      const app = deletedAppRef.current;
-      if (app) {
-        useChatStore.getState().discardDraft(app.id);
-        void useApplicationStore.getState().deleteApplicationThread(app.id);
+      if (undoTimer.current) {
+        clearTimeout(undoTimer.current);
+        undoTimer.current = null;
       }
+      const app = deletedAppRef.current;
+      if (app) finalizeDeletion(app);
     },
-    [],
+    [finalizeDeletion],
   );
+
+  const undoToast = deletedApp ? (
+    <div
+      role="status"
+      className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
+    >
+      <span className="text-sm text-text-primary">
+        Deleted {deletedApp.companyName.trim() || "application"}
+      </span>
+      <Button size="sm" variant="outline" onClick={handleUndoDelete}>
+        Undo
+      </Button>
+    </div>
+  ) : null;
 
   const handleExportCsv = async () => {
     setExportStatus(null);
@@ -335,6 +434,15 @@ export default function ApplicationTab() {
     resetFilters();
     addApplication();
   };
+
+  const handleSelectApplication = useCallback(
+    (id: string) => selectApplication(id),
+    [selectApplication],
+  );
+  const handleRequestDelete = useCallback(
+    (id: string) => setPendingDeleteId(id),
+    [],
+  );
 
   // Default order is status rank then company; the other modes are explicit
   // user choices and survive tab switches with the filter state.
@@ -404,12 +512,17 @@ export default function ApplicationTab() {
   }, [visibleApps, filter, statusFilter]);
 
   const selected = applications.find((a) => a.id === selectedId) ?? null;
-  const selectedDeadline = selected
-    ? dueChip(selected.deadline, "Deadline")
-    : null;
-  const selectedFollowUp = selected
-    ? dueChip(selected.followUpAt, "Follow-up")
-    : null;
+  // Closed applications keep their old dates; a permanent red "overdue" chip
+  // is noise and contradicts the notification/calendar/analytics rules.
+  const selectedArchived = selected ? isArchivedStatus(selected.status) : false;
+  const selectedDeadline =
+    selected && !selectedArchived
+      ? dueChip(selected.deadline, "Deadline")
+      : null;
+  const selectedFollowUp =
+    selected && !selectedArchived
+      ? dueChip(selected.followUpAt, "Follow-up")
+      : null;
   const pendingDelete =
     applications.find((a) => a.id === pendingDeleteId) ?? null;
 
@@ -424,23 +537,26 @@ export default function ApplicationTab() {
   // ── Empty state (no applications at all) ──
   if (applications.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-        <p className="text-text-primary text-lg font-semibold">
-          Track your job applications
-        </p>
-        <p className="text-text-muted text-sm mt-2 max-w-md">
-          Add the job you're applying for — the company, the job description,
-          and what the application requires. The AI assistant will then help you
-          craft your application.
-        </p>
-        <Button
-          className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
-          onClick={handleCreate}
-        >
-          <Plus className="size-4 mr-1.5" />
-          Add your first application
-        </Button>
-      </div>
+      <>
+        <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+          <p className="text-text-primary text-lg font-semibold">
+            Track your job applications
+          </p>
+          <p className="text-text-muted text-sm mt-2 max-w-md">
+            Add the job you're applying for — the company, the job description,
+            and what the application requires. The AI assistant will then help
+            you craft your application.
+          </p>
+          <Button
+            className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
+            onClick={handleCreate}
+          >
+            <Plus className="size-4 mr-1.5" />
+            Add your first application
+          </Button>
+        </div>
+        {undoToast}
+      </>
     );
   }
 
@@ -591,72 +707,15 @@ export default function ApplicationTab() {
                 : "Nothing archived yet — applications marked Offer or Rejected appear here."}
             </p>
           )}
-          {filtered.map((app) => {
-            const isSelected = app.id === selectedId;
-            const deadline = dueChip(app.deadline, "Deadline");
-            const followUp = dueChip(app.followUpAt, "Follow-up");
-            const showMeta = app.priority !== "medium" || deadline || followUp;
-            return (
-              <div
-                key={app.id}
-                className={cn(
-                  "group relative rounded-lg border border-transparent transition-colors",
-                  isSelected && "bg-primary/10 border-primary/30",
-                )}
-              >
-                <button
-                  onClick={() => selectApplication(app.id)}
-                  className="w-full text-left px-3 py-2 pr-8 rounded-lg"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-text-primary truncate">
-                      {app.companyName.trim() || "Untitled application"}
-                    </span>
-                    <StatusBadge status={app.status} />
-                  </div>
-                  {app.jobTitle.trim() && (
-                    <p className="text-xs text-text-secondary truncate mt-0.5">
-                      {app.jobTitle}
-                    </p>
-                  )}
-                  {showMeta && (
-                    <div className="mt-1 flex flex-wrap items-center gap-1">
-                      <PriorityBadge priority={app.priority} />
-                      {deadline && (
-                        <span
-                          className={cn(
-                            "rounded border px-1.5 py-0.5 text-[10px]",
-                            deadline.className,
-                          )}
-                        >
-                          {deadline.text}
-                        </span>
-                      )}
-                      {followUp && (
-                        <span
-                          className={cn(
-                            "rounded border px-1.5 py-0.5 text-[10px]",
-                            followUp.className,
-                          )}
-                        >
-                          {followUp.text}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPendingDeleteId(app.id)}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-text-muted opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-                  title="Delete application"
-                  aria-label={`Delete ${app.companyName.trim() || "application"}`}
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </div>
-            );
-          })}
+          {filtered.map((app) => (
+            <SidebarRow
+              key={app.id}
+              app={app}
+              isSelected={app.id === selectedId}
+              onSelect={handleSelectApplication}
+              onDelete={handleRequestDelete}
+            />
+          ))}
         </div>
       </aside>
 
@@ -769,7 +828,7 @@ export default function ApplicationTab() {
             </div>
 
             {detailView === "cv" ? (
-              <CvBuilder application={selected} />
+              <CvBuilder key={selected.id} application={selected} />
             ) : (
               <>
                 {/* Status */}
@@ -1196,12 +1255,12 @@ export default function ApplicationTab() {
                     >
                       Job Description
                     </Label>
-                    <Textarea
+                    <BufferedTextarea
                       id="app-description"
                       value={selected.jobDescription}
-                      onChange={(e) =>
+                      onCommit={(value) =>
                         updateApplication(selected.id, {
-                          jobDescription: e.target.value,
+                          jobDescription: value,
                         })
                       }
                       placeholder="Paste the full job description here..."
@@ -1242,12 +1301,12 @@ export default function ApplicationTab() {
                     >
                       What does the application require?
                     </Label>
-                    <Textarea
+                    <BufferedTextarea
                       id="app-requirements"
                       value={selected.requirements}
-                      onChange={(e) =>
+                      onCommit={(value) =>
                         updateApplication(selected.id, {
-                          requirements: e.target.value,
+                          requirements: value,
                         })
                       }
                       placeholder="e.g., Cover letter, Answer to 3 specific questions..."
@@ -1265,12 +1324,12 @@ export default function ApplicationTab() {
                     >
                       Company Research (optional)
                     </Label>
-                    <Textarea
+                    <BufferedTextarea
                       id="app-research"
                       value={selected.companyResearch}
-                      onChange={(e) =>
+                      onCommit={(value) =>
                         updateApplication(selected.id, {
-                          companyResearch: e.target.value,
+                          companyResearch: value,
                         })
                       }
                       placeholder="Paste any information you have about the company — website content, news articles, annual reports, etc. The AI will use this context to tailor your application."
@@ -1288,12 +1347,12 @@ export default function ApplicationTab() {
                     >
                       Notes
                     </Label>
-                    <Textarea
+                    <BufferedTextarea
                       id="app-notes"
                       value={selected.notes}
-                      onChange={(e) =>
+                      onCommit={(value) =>
                         updateApplication(selected.id, {
-                          notes: e.target.value,
+                          notes: value,
                         })
                       }
                       placeholder="Deadlines, contacts, follow-ups…"
@@ -1335,19 +1394,7 @@ export default function ApplicationTab() {
         </DialogContent>
       </Dialog>
 
-      {deletedApp && (
-        <div
-          role="status"
-          className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
-        >
-          <span className="text-sm text-text-primary">
-            Deleted {deletedApp.companyName.trim() || "application"}
-          </span>
-          <Button size="sm" variant="outline" onClick={handleUndoDelete}>
-            Undo
-          </Button>
-        </div>
-      )}
+      {undoToast}
     </div>
   );
 }

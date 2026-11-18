@@ -343,4 +343,61 @@ describe("restoreBackupBundle", () => {
 
     expect(pruneChatMock).toHaveBeenCalledWith([app.id]);
   });
+
+  it("rejects a malformed applications payload before writing or pruning", async () => {
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "applications.json": {},
+        "settings.json": { theme: "dark", accent: "#fff" },
+      },
+    };
+
+    await expect(restoreBackupBundle(bundle)).rejects.toThrow(
+      /applications\.json/,
+    );
+    expect(saveJsonMock).not.toHaveBeenCalled();
+    expect(pruneChatMock).not.toHaveBeenCalled();
+    expect(pruneCvMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-empty applications payload with no usable ids", async () => {
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "applications.json": {
+          applications: [{ id: "../../profile" }, { id: "not a uuid" }],
+        },
+      },
+    };
+
+    await expect(restoreBackupBundle(bundle)).rejects.toThrow(/no usable/);
+    expect(saveJsonMock).not.toHaveBeenCalled();
+    expect(pruneChatMock).not.toHaveBeenCalled();
+  });
+
+  it("skips pruning when the current application file cannot be read", async () => {
+    loadJsonMock.mockResolvedValue(null);
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "settings.json": { theme: "dark", accent: "#fff" },
+      },
+    };
+
+    await restoreBackupBundle(bundle);
+
+    expect(saveJsonMock).toHaveBeenCalledWith("settings.json", {
+      theme: "dark",
+      accent: "#fff",
+    });
+    expect(pruneChatMock).not.toHaveBeenCalled();
+    expect(pruneCvMock).not.toHaveBeenCalled();
+  });
 });

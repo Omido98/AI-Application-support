@@ -30,7 +30,9 @@ no AI call.
 4. **Generate tailored CV**. The model receives the profile and job context,
    a compact set of ATS priorities, and relevance rules; it selects the two or
    three most relevant roles and writes a headline, summary, skills order and
-   role bullets.
+   role bullets. The finished draft is kept per application until you review or
+   discard it, so switching tabs or applications while it is being generated
+   does not lose it. **Stop** cancels the request and keeps the previous CV.
 5. Review the generated CV before accepting. The dialog shows the estimated
    page count, selected roles and skills, education/projects, headline and
    summary, token/cost usage and the full Grounding review. **Discard** keeps
@@ -56,18 +58,23 @@ no AI call.
    numbers that could not be grounded in the profile, then **Accept**,
    **Discard** or **Try again**.
 9. **Export Word** or **Export PDF** saves the selected format through the
-   native save dialog.
+   native save dialog. The Word export uses an explicit exact line height
+   (`w:lineRule="exact"`) so its spacing matches the PDF and preview instead of
+   Word's 1.1-line default.
 
-Edits autosave to `cv_<applicationId>.json` in the app data folder. Long text
-fields save once you pause or leave the field, rather than on every keystroke;
-the ATS and grounding panels update shortly afterwards. Pending textarea drafts
-are also flushed before close, backup, export and AI actions. The document
-stores structured content, not the DOCX bytes.
+Edits autosave to `cv_<applicationId>.json` in the app data folder. Text fields,
+including the short contact/role/date inputs, commit once you pause or leave the
+field, rather than on every keystroke; the ATS and grounding panels update
+shortly afterwards. A list field keeps the raw text while you are typing, so a
+trailing space or a line break is never trimmed mid-edit; it is normalized when
+the edit commits. Pending textarea drafts are also flushed before close,
+backup, export and AI actions. The document stores structured content, not the
+DOCX bytes.
 
 The **Versions (n)** button keeps the last five CV snapshots per application.
-A snapshot is taken before AI regeneration, before an accepted section rewrite
-and before restoring a version. Restore is therefore reversible: the current
-CV is snapshotted first. History is persisted in
+A snapshot is taken before AI regeneration, before an accepted section rewrite,
+before removing an entry and before restoring a version. Restore is therefore
+reversible: the current CV is snapshotted first. History is persisted in
 `cv_history_<applicationId>.json`, included in backups and removed with the
 application. The toolbar shows the token usage and estimated cost of the last
 AI action, and the rewrite review shows the usage of that request.

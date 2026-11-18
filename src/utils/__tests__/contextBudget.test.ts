@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ChatMessage } from "@/stores/chatStore";
 import {
+  estimateContextUsage,
   fitHistoryToBudget,
   getContextBudget,
   MESSAGE_OVERHEAD_TOKENS,
@@ -98,5 +99,52 @@ describe("fitHistoryToBudget", () => {
     expect(fitted.messages).toEqual([]);
     expect(fitted.droppedCount).toBe(0);
     expect(fitted.overBudget).toBe(false);
+  });
+});
+
+describe("estimateContextUsage", () => {
+  const messages = Array.from({ length: 10 }, (_, index) =>
+    message("user", `m${index} `.padEnd(40, "x")),
+  );
+
+  it("uses the base prompt when nothing is dropped", () => {
+    const usage = estimateContextUsage(messages, {
+      inputBudget: 1_000,
+      basePromptTokens: 100,
+      draftTokens: 5,
+    });
+
+    expect(usage.droppedCount).toBe(0);
+    expect(usage.tokens).toBe(
+      100 + 5 + 10 * (estimateTokens(messages[0].content) + 4),
+    );
+  });
+
+  it("switches to the summary prompt only when the base fit drops messages", () => {
+    const base = estimateContextUsage(messages, {
+      inputBudget: 50,
+      basePromptTokens: 0,
+    });
+    expect(base.droppedCount).toBe(7);
+    expect(base.tokens).toBe(3 * 14);
+
+    const withSummary = estimateContextUsage(messages, {
+      inputBudget: 50,
+      basePromptTokens: 0,
+      summaryPromptTokens: 20,
+    });
+    expect(withSummary.droppedCount).toBe(8);
+    expect(withSummary.tokens).toBe(20 + 2 * 14);
+  });
+
+  it("counts the draft reserve", () => {
+    const usage = estimateContextUsage(messages, {
+      inputBudget: 50,
+      basePromptTokens: 0,
+      draftTokens: 10,
+    });
+
+    expect(usage.droppedCount).toBe(8);
+    expect(usage.tokens).toBe(10 + 2 * 14);
   });
 });

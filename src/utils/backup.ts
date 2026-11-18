@@ -122,23 +122,54 @@ export function parseBackupBundle(raw: string): BackupBundle | null {
 }
 
 /** Application ids that will exist after this restore. When the bundle omits
- * applications.json the current file is kept, so its ids still count. */
-async function restoredApplicationIds(bundle: BackupBundle): Promise<string[]> {
-  const source =
-    "applications.json" in bundle.files
-      ? bundle.files["applications.json"]
-      : await loadJson<unknown>("applications.json");
+ * applications.json the current file is kept, so its ids still count. Returns
+ * `null` when the current file is missing/unreadable and there is nothing safe
+ * to prune against. */
+async function restoredApplicationIds(
+  bundle: BackupBundle,
+): Promise<string[] | null> {
+  if ("applications.json" in bundle.files) {
+    return validatedApplicationIds(bundle.files["applications.json"]);
+  }
+  const source = await loadJson<unknown>("applications.json");
+  if (source == null) return null;
+  return validatedApplicationIds(source);
+}
+
+/**
+ * Extract the ids that may safely be used for thread/CV cleanup.
+ *
+ * A present payload must at least be an object with an `applications` array.
+ * Entries without a file-name-safe id are ignored (the normalizer would assign
+ * them new ids on load, so their old thread files cannot be matched anyway).
+ * A non-empty array with zero valid ids is rejected rather than being treated
+ * as "no applications", which would delete every thread and CV file.
+ */
+function validatedApplicationIds(payload: unknown): string[] {
+  if (!isRecord(payload)) {
+    throw new Error(
+      "The backup's applications.json is not an object, so nothing was imported. Your current data was not changed.",
+    );
+  }
+  if (!Array.isArray(payload.applications)) {
+    throw new Error(
+      "The backup's applications.json has no applications list, so nothing was imported. Your current data was not changed.",
+    );
+  }
   const ids = new Set<string>();
-  if (isRecord(source) && Array.isArray(source.applications)) {
-    for (const app of source.applications) {
-      if (
-        isRecord(app) &&
-        typeof app.id === "string" &&
-        SAFE_APPLICATION_ID_RE.test(app.id)
-      ) {
-        ids.add(app.id);
-      }
+  for (const application of payload.applications) {
+    if (
+      isRecord(application) &&
+      typeof application.id === "string" &&
+      SAFE_APPLICATION_ID_RE.test(application.id)
+    ) {
+      ids.add(application.id);
     }
+  }
+  if (payload.applications.length > 0 && ids.size === 0) {
+    throw new Error(
+      "The backup's applications.json contains no usable application ids, so nothing was imported. Your current data was not changed.",
+    );
   }
   return [...ids];
 }
@@ -164,7 +195,7 @@ export async function restoreBackupBundle(
   for (const [name, data] of Object.entries(bundle.files)) {
     if (!SAFE_NAME_RE.test(name)) continue;
     const safe =
-      name === "drafts.json"
+      name === "drafts.json" && applicationIds !== null
         ? draftsForApplications(fileForBackup(name, data), applicationIds)
         : fileForBackup(name, data);
     if (safe == null) continue;
@@ -173,8 +204,12 @@ export async function restoreBackupBundle(
   }
 
   // Thread/CV files for applications that no longer exist would otherwise
-  // stay on disk forever (and are not part of any backup either).
-  await pruneOrphanChatFiles(applicationIds);
-  await pruneOrphanCvFiles(applicationIds);
+  // stay on disk forever (and are not part of any backup either). Skip this
+  // when the current application list could not be read: pruning against an
+  // unknown set would delete files that still belong to live applications.
+  if (applicationIds !== null) {
+    await pruneOrphanChatFiles(applicationIds);
+    await pruneOrphanCvFiles(applicationIds);
+  }
   return restored;
 }

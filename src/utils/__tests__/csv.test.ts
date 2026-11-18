@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applicationsToCsv } from "@/utils/csv";
+import { applicationsToCsv, escapeCsv } from "@/utils/csv";
 import type { JobApplication } from "@/types";
 
 const base: JobApplication = {
@@ -50,5 +50,16 @@ describe("applicationsToCsv", () => {
     ]);
     expect(csv).toContain('"Acme, ""Inc"""');
     expect(csv).toContain('"Line\nBreak"');
+  });
+
+  it("neutralizes spreadsheet formula prefixes", () => {
+    expect(escapeCsv("=1+1")).toBe("'=1+1");
+    expect(escapeCsv("+SUM(A1)")).toBe("'+SUM(A1)");
+    expect(escapeCsv("-5")).toBe("'-5");
+    expect(escapeCsv("@cmd")).toBe("'@cmd");
+    expect(escapeCsv('=HYPERLINK("https://evil.example")')).toBe(
+      '"\'=HYPERLINK(""https://evil.example"")"',
+    );
+    expect(escapeCsv("Normal text")).toBe("Normal text");
   });
 });

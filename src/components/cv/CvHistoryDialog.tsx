@@ -39,7 +39,8 @@ export default function CvHistoryDialog({
         {snapshots.length === 0 ? (
           <p className="py-6 text-center text-xs text-text-muted">
             No previous versions yet. Versions are saved before AI regeneration,
-            before an accepted rewrite and before a restore.
+            before an accepted rewrite, before removing an entry and before a
+            restore.
           </p>
         ) : (
           <ul className="max-h-[50vh] space-y-2 overflow-y-auto">

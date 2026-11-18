@@ -20,6 +20,10 @@ fields use `YYYY-MM-DD`; timestamps use local `YYYY-MM-DD HH:mm`. Rows are
 sorted chronologically. Invalid or missing dates are skipped rather than
 guessed at.
 
+Cells that begin with `=`, `+`, `-` or `@` (and the tracker CSV, which shares the
+same escaping) are prefixed with an apostrophe, so job text pasted from a
+posting cannot execute as a spreadsheet formula when the file is opened.
+
 The save dialog is the same native dialog used by other exports; the browser
 build downloads the file instead. The default name is
 `<company>-timeline-YYYY-MM-DD.csv`.

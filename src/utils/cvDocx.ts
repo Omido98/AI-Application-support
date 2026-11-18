@@ -58,8 +58,15 @@ function safeFileName(document: CvDocument, company: string): string {
 
 /** Render a CV to ATS-safe DOCX: one column, no tables, images or text boxes. */
 export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
-  const { AlignmentType, BorderStyle, Document, Packer, Paragraph, TextRun } =
-    await import("docx");
+  const {
+    AlignmentType,
+    BorderStyle,
+    Document,
+    LineRuleType,
+    Packer,
+    Paragraph,
+    TextRun,
+  } = await import("docx");
 
   const compact = document.template === "compact";
   const layout = getCvLayout(document.pageSize, document.template);
@@ -306,7 +313,14 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
         document: {
           run: { font: "Calibri", size: bodySize, color: "1A1A1A" },
           paragraph: {
-            spacing: { after: bodyAfter, line: lineHeight },
+            // `line` is in twips; without an explicit rule Word interprets it
+            // as 240ths of a line (1.1 lines here) instead of the exact line
+            // height used by the PDF/preview renderers.
+            spacing: {
+              after: bodyAfter,
+              line: lineHeight,
+              lineRule: LineRuleType.EXACT,
+            },
           },
         },
       },

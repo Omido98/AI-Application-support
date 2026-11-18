@@ -40,9 +40,19 @@ function capitalize(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : "";
 }
 
+/**
+ * Neutralize spreadsheet formulas before quoting. Pasted job text is
+ * untrusted; a cell starting with `=`, `+`, `-` or `@` (or a tab/CR) would
+ * otherwise be executed when the CSV is opened in Excel/LibreOffice.
+ */
+function neutralizeFormula(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 /** RFC 4180 escaping: quote cells containing a comma, quote or newline. */
 export function escapeCsv(value: string): string {
-  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  const safe = neutralizeFormula(value);
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
 export function applicationsToCsv(applications: JobApplication[]): string {

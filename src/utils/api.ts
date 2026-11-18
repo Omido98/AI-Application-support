@@ -513,7 +513,8 @@ async function runImprovePipeline(
 
   // The reviewer's feedback every revision round must apply. Rounds always
   // revise against the original review report; the verifier only checks it.
-  await pace();
+  // No pacing before the first call: the user waits on a visible action, and
+  // the Rust client already retries 429s with backoff.
   options.onStep?.("review");
   const firstReview = await reviewDraft(draft, application, profile, config, {
     signal: options.signal,
@@ -1030,18 +1031,24 @@ async function sendOpenAICompatMessage(
       }
 
       // Record the assistant's tool-call message, then feed back the results.
+      // Independent searches/fetches run concurrently so two research calls
+      // cost one round-trip, not two; result order still follows the model's
+      // call order.
       history.push({
         role: "assistant",
         content: drafted ?? null,
         tool_calls: toolCalls,
       });
-
-      for (const call of toolCalls) {
-        const result = await executeTool(call, options);
+      const toolResults = await mapWithConcurrency(
+        toolCalls,
+        MAX_PARALLEL_TOOLS,
+        (call) => executeTool(call, options),
+      );
+      for (let index = 0; index < toolCalls.length; index += 1) {
         history.push({
           role: "tool",
-          tool_call_id: call.id,
-          content: result,
+          tool_call_id: toolCalls[index].id,
+          content: toolResults[index],
         });
       }
       continue;
@@ -1330,16 +1337,19 @@ async function sendAnthropicMessage(
 
       // Echo the assistant's full content blocks, then feed back the results.
       toolContext.push({ role: "assistant", content: blocks });
-      const results: AnthropicContentBlock[] = [];
-      for (const call of toolUses) {
-        const result = await executeAnthropicTool(call, options);
-        results.push({
+      const toolResults = await mapWithConcurrency(
+        toolUses,
+        MAX_PARALLEL_TOOLS,
+        (call) => executeAnthropicTool(call, options),
+      );
+      toolContext.push({
+        role: "user",
+        content: toolUses.map((call, index) => ({
           type: "tool_result",
           tool_use_id: call.id,
-          content: result,
-        });
-      }
-      toolContext.push({ role: "user", content: results });
+          content: toolResults[index],
+        })),
+      });
       continue;
     }
 
@@ -1415,6 +1425,32 @@ async function fetchPage(
   const text = await invoke<string>("zen_fetch_page", { url });
   options.onSource?.({ title: sourceTitle(url), url });
   return text;
+}
+
+/** Cap concurrent web tools in one model round; providers rate-limit bursts. */
+const MAX_PARALLEL_TOOLS = 3;
+
+/** Run async work with bounded concurrency, preserving input result order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, limit), items.length) },
+    async () => {
+      while (true) {
+        const index = next;
+        next += 1;
+        if (index >= items.length) return;
+        results[index] = await run(items[index], index);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   isConversationMessage,
   newMessageId,
@@ -57,20 +57,31 @@ function sourceLabel(title: string, url: string): string {
   }
 }
 
+const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+});
+const FULL_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+/** Small bounded cache: many rows share timestamps, and rows re-render often. */
+const timeLabelCache = new Map<string, { label: string; full: string }>();
+
 /** Short local clock time plus a full, hoverable/AT-friendly label. */
 function formatMessageTime(timestamp: string): { label: string; full: string } {
+  const cached = timeLabelCache.get(timestamp);
+  if (cached) return cached;
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return { label: "", full: "" };
-  return {
-    label: date.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    full: date.toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }),
+  const formatted = {
+    label: TIME_FORMATTER.format(date),
+    full: FULL_TIME_FORMATTER.format(date),
   };
+  if (timeLabelCache.size > 500) timeLabelCache.clear();
+  timeLabelCache.set(timestamp, formatted);
+  return formatted;
 }
 
 /** One item in the assistant message's "Refine" menu. */
@@ -105,7 +116,7 @@ function RefineItem({
   );
 }
 
-export default function MessageList({
+function MessageList({
   onStart,
   onResend,
   onRegenerate,
@@ -1017,3 +1028,5 @@ export default function MessageList({
     </div>
   );
 }
+
+export default memo(MessageList);

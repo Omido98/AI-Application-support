@@ -33,18 +33,24 @@ export default function FitMatrixCard({
   const certifications = useProfileStore((s) => s.certifications);
   const otherEngagements = useProfileStore((s) => s.otherEngagements);
 
+  const requirements = application.requirements;
+  const jobDescription = application.jobDescription;
   const matrix = useMemo(
     () =>
-      buildFitMatrix(application, {
-        skills,
-        workExperience,
-        education,
-        languages,
-        certifications,
-        otherEngagements,
-      }),
+      buildFitMatrix(
+        { requirements, jobDescription },
+        {
+          skills,
+          workExperience,
+          education,
+          languages,
+          certifications,
+          otherEngagements,
+        },
+      ),
     [
-      application,
+      requirements,
+      jobDescription,
       skills,
       workExperience,
       education,

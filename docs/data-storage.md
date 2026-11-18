@@ -53,7 +53,12 @@ Keeping JSON also preserves the current guarantees without new work:
 
 - crash-safe atomic writes with `.bak` rotation and quarantining (Rust);
 - user-readable, hand-editable files and simple backup/export;
-- one data-directory contract, no migration or schema versioning.
+- one data-directory contract, no migration or schema versioning;
+- a per-process "known good" file stamp: after this process writes or loads a
+  file, saving it again skips re-reading and re-parsing the old bytes while its
+  size/mtime stamp matches. An external edit invalidates the stamp and falls
+  back to the full validation path, so the corrupt-main/good-backup guarantee is
+  unchanged.
 
 ## If the threshold is ever met
 

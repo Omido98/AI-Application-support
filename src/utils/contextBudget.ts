@@ -118,3 +118,52 @@ export function fitHistoryToBudget(
     overBudget: historyTokens > availableTokens,
   };
 }
+
+export interface ContextUsageEstimate {
+  /** Prompt + kept history + draft, in estimated tokens. */
+  tokens: number;
+  /** Older messages omitted to stay inside the input budget. */
+  droppedCount: number;
+}
+
+/**
+ * Estimate what the next request would send after history trimming.
+ *
+ * The prompt text is expensive to build, so callers pass its precomputed token
+ * count (and, when a conversation summary exists, the summary prompt count).
+ * The summary is only used once something is actually omitted, matching the
+ * send path in `ChatTab`.
+ */
+export function estimateContextUsage(
+  messages: ChatMessage[],
+  options: {
+    inputBudget: number;
+    basePromptTokens: number;
+    /** Prompt token count with the summary appended, when a summary exists. */
+    summaryPromptTokens?: number;
+    draftTokens?: number;
+  },
+): ContextUsageEstimate {
+  const draftTokens = options.draftTokens ?? 0;
+  const baseReserved = options.basePromptTokens + draftTokens;
+  const base = fitHistoryToBudget(messages, {
+    inputBudget: options.inputBudget,
+    reservedTokens: baseReserved,
+  });
+  if (base.droppedCount === 0 || options.summaryPromptTokens === undefined) {
+    return {
+      tokens: baseReserved + base.historyTokens,
+      droppedCount: base.droppedCount,
+    };
+  }
+
+  const summaryReserved = options.summaryPromptTokens + draftTokens;
+  const withSummary = fitHistoryToBudget(messages, {
+    inputBudget: options.inputBudget,
+    reservedTokens: summaryReserved,
+  });
+  return {
+    tokens: summaryReserved + withSummary.historyTokens,
+    droppedCount: withSummary.droppedCount,
+  };
+}

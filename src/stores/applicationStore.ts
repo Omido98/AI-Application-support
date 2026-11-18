@@ -1,11 +1,8 @@
 import { create } from "zustand";
-import {
-  saveJson,
-  loadJson,
-  deleteFile,
-  reportDataIssue,
-} from "@/utils/storage";
+import { saveJson, loadJson, reportDataIssue } from "@/utils/storage";
+import { createSaveQueue } from "@/utils/saveQueue";
 import { normalizeApplicationsPayload } from "@/utils/dataValidation";
+import { deleteChatThread } from "@/stores/chatStore";
 import type { JobApplication } from "@/types";
 
 // ──────────────────────────────────────────────
@@ -13,6 +10,7 @@ import type { JobApplication } from "@/types";
 // ──────────────────────────────────────────────
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+const saveQueue = createSaveQueue();
 
 function writeSnapshot() {
   const s = useApplicationStore.getState();
@@ -24,20 +22,23 @@ function writeSnapshot() {
 
 function debouncedSave() {
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
+  saveTimer = setTimeout(() => {
     saveTimer = null;
-    await writeSnapshot();
+    void saveQueue.enqueue(writeSnapshot);
   }, 500);
 }
 
 /** Flush any pending debounced save immediately (called on window close). */
 export async function flushApplicationSave(): Promise<boolean> {
+  const hadTimer = saveTimer !== null;
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    return writeSnapshot();
   }
-  return true;
+  if (hadTimer) {
+    return saveQueue.enqueue(writeSnapshot);
+  }
+  return saveQueue.whenIdle();
 }
 
 // ──────────────────────────────────────────────
@@ -215,7 +216,7 @@ export const useApplicationStore = create<ApplicationState>((set, get) => ({
   },
 
   deleteApplicationThread: async (id) => {
-    await deleteFile(`chat_${id}.json`);
+    await deleteChatThread(id);
   },
 
   updateApplication: (id, patch) => {

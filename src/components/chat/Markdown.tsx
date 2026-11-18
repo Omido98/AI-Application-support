@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { isSafeExternalUrl, openExternalUrl } from "@/utils/links";
@@ -50,7 +51,7 @@ const markdownComponents: Components = {
 };
 
 /** Render assistant text as the app's serif document block. */
-export default function Markdown({ children }: { children: string }) {
+function Markdown({ children }: { children: string }) {
   return (
     <div className="chat-markdown prose prose-sm max-w-none dark:prose-invert">
       <ReactMarkdown
@@ -62,3 +63,8 @@ export default function Markdown({ children }: { children: string }) {
     </div>
   );
 }
+
+// Markdown parsing is the expensive part of a message render. Memoising by the
+// text means parent re-renders (composer, stream bubble, action state) do not
+// re-parse every historical message.
+export default memo(Markdown);

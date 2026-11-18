@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { saveJson, loadJson, reportDataIssue } from "@/utils/storage";
+import { createSaveQueue } from "@/utils/saveQueue";
 import { normalizeProfileData } from "@/utils/dataValidation";
 import {
   applyImportedProfile as mergeProfile,
@@ -22,6 +23,7 @@ import type {
 // ──────────────────────────────────────────────
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+const saveQueue = createSaveQueue();
 
 function writeSnapshot() {
   const s = useProfileStore.getState();
@@ -49,20 +51,23 @@ function writeSnapshot() {
 
 function debouncedSave() {
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
+  saveTimer = setTimeout(() => {
     saveTimer = null;
-    await writeSnapshot();
+    void saveQueue.enqueue(writeSnapshot);
   }, 500);
 }
 
 /** Flush any pending debounced save immediately (called on window close). */
 export async function flushProfileSave(): Promise<boolean> {
+  const hadTimer = saveTimer !== null;
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    return writeSnapshot();
   }
-  return true;
+  if (hadTimer) {
+    return saveQueue.enqueue(writeSnapshot);
+  }
+  return saveQueue.whenIdle();
 }
 
 // ──────────────────────────────────────────────

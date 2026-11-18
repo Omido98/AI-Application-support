@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import type { JobApplication } from "@/types";
+import type { JobApplication, ProfileData } from "@/types";
 
 /**
  * Shared browser-mode seed data. Written with an init script so localStorage
@@ -56,7 +56,7 @@ export function makeApplication(
   };
 }
 
-const profile = {
+export const defaultProfile: ProfileData = {
   fullName: "Jane Doe",
   email: "jane@example.com",
   city: "Copenhagen",
@@ -123,6 +123,14 @@ export interface SeedOptions {
   accent?: string;
   /** Seed an API key and one chat thread so the chat UI is meaningful. */
   withChat?: boolean;
+  /** Replace the seeded chat thread messages (used by perf/scroll tests). */
+  threadMessages?: unknown[];
+  /** Replace the default profile fixture (e.g. to add work experience). */
+  profile?: ProfileData;
+  /** Extra CV documents keyed by application id. */
+  cvDocuments?: Record<string, unknown>;
+  /** Extra CV history files keyed by application id. */
+  cvHistory?: Record<string, unknown>;
 }
 
 export async function seed(
@@ -141,8 +149,12 @@ export async function seed(
     notificationLog: { day: "", keys: [] },
   };
   const config = options.withChat ? chatConfig : null;
-  const thread =
+  const baseThread =
     options.withChat && applications[0] ? makeThread(applications[0]) : null;
+  const thread =
+    baseThread && options.threadMessages
+      ? { ...baseThread, value: options.threadMessages }
+      : baseThread;
 
   await page.addInitScript(
     ({
@@ -155,6 +167,8 @@ export async function seed(
       profileValue,
       configValue,
       threadValue,
+      cvDocuments,
+      cvHistory,
     }) => {
       localStorage.setItem(settingsKey, JSON.stringify(settingsValue));
       localStorage.setItem(
@@ -174,6 +188,20 @@ export async function seed(
           JSON.stringify(threadValue.value),
         );
       }
+      for (const [applicationId, document] of Object.entries(
+        cvDocuments ?? {},
+      )) {
+        localStorage.setItem(
+          `aas:cv_${applicationId}.json`,
+          JSON.stringify(document),
+        );
+      }
+      for (const [applicationId, history] of Object.entries(cvHistory ?? {})) {
+        localStorage.setItem(
+          `aas:cv_history_${applicationId}.json`,
+          JSON.stringify(history),
+        );
+      }
     },
     {
       settingsKey: SETTINGS_KEY,
@@ -182,9 +210,11 @@ export async function seed(
       configKey: CONFIG_KEY,
       settingsValue: settings,
       apps: applications,
-      profileValue: profile,
+      profileValue: options.profile ?? defaultProfile,
       configValue: config,
       threadValue: thread,
+      cvDocuments: options.cvDocuments ?? {},
+      cvHistory: options.cvHistory ?? {},
     },
   );
 }

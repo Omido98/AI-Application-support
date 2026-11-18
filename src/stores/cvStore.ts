@@ -33,6 +33,8 @@ interface CvState {
   errors: Record<string, string | null>;
   generating: Record<string, boolean>;
   generationErrors: Record<string, string | null>;
+  /** Finished AI drafts waiting for review, scoped to their application. */
+  generationProposals: Record<string, CvDocument>;
 
   loadCv: (applicationId: string) => Promise<void>;
   saveCv: (applicationId: string) => Promise<boolean>;
@@ -49,6 +51,7 @@ interface CvState {
     config: ApiConfig;
     options: CvGenerationOptions;
   }) => Promise<CvDocument | null>;
+  clearGenerationProposal: (applicationId: string) => void;
   applyGeneratedCv: (
     applicationId: string,
     document: CvDocument,
@@ -116,6 +119,7 @@ export const useCvStore = create<CvState>((set, get) => ({
   errors: {},
   generating: {},
   generationErrors: {},
+  generationProposals: {},
 
   loadCv: async (applicationId) => {
     if (get().loaded[applicationId] || get().loading[applicationId]) return;
@@ -281,13 +285,30 @@ export const useCvStore = create<CvState>((set, get) => ({
       generationErrors: { ...state.generationErrors, [application.id]: null },
     }));
     try {
-      return await generateCvDocument({
+      const document = await generateCvDocument({
         application,
         profile,
         config,
         options,
         signal: controller.signal,
       });
+      if (
+        !document ||
+        controller.signal.aborted ||
+        deletedApplications.has(application.id)
+      ) {
+        return null;
+      }
+      // Keep the proposal in the store, keyed by application, so switching
+      // tabs or applications cannot lose it and it can never be accepted by a
+      // different application.
+      set((state) => ({
+        generationProposals: {
+          ...state.generationProposals,
+          [application.id]: document,
+        },
+      }));
+      return document;
     } catch (error) {
       if (
         controller.signal.aborted ||
@@ -303,13 +324,25 @@ export const useCvStore = create<CvState>((set, get) => ({
       }));
       return null;
     } finally {
-      if (controllers.get(application.id) === controller) {
+      // A newer generation for the same application may have replaced this
+      // controller; do not clear the newer request's busy flag.
+      const isCurrent = controllers.get(application.id) === controller;
+      if (isCurrent) {
         controllers.delete(application.id);
+        set((state) => ({
+          generating: { ...state.generating, [application.id]: false },
+        }));
       }
-      set((state) => ({
-        generating: { ...state.generating, [application.id]: false },
-      }));
     }
+  },
+
+  clearGenerationProposal: (applicationId) => {
+    set((state) => {
+      if (!(applicationId in state.generationProposals)) return {};
+      const generationProposals = { ...state.generationProposals };
+      delete generationProposals[applicationId];
+      return { generationProposals };
+    });
   },
 
   applyGeneratedCv: async (applicationId, document) => {
@@ -332,6 +365,9 @@ export const useCvStore = create<CvState>((set, get) => ({
   cancelGeneration: (applicationId) => {
     controllers.get(applicationId)?.abort();
     controllers.delete(applicationId);
+    set((state) => ({
+      generating: { ...state.generating, [applicationId]: false },
+    }));
   },
 
   deleteCv: async (applicationId) => {
@@ -362,9 +398,12 @@ export const useCvStore = create<CvState>((set, get) => ({
       delete documents[applicationId];
       const history = { ...state.history };
       delete history[applicationId];
+      const generationProposals = { ...state.generationProposals };
+      delete generationProposals[applicationId];
       return {
         documents,
         history,
+        generationProposals,
         loaded: { ...state.loaded, [applicationId]: false },
       };
     });
@@ -375,6 +414,7 @@ export const useCvStore = create<CvState>((set, get) => ({
     controllers.clear();
     for (const timer of saveTimers.values()) clearTimeout(timer);
     saveTimers.clear();
+    deletedApplications.clear();
     for (const applicationId of Object.keys(get().documents)) {
       deletedApplications.add(applicationId);
       bumpRevision(applicationId);
@@ -389,6 +429,7 @@ export const useCvStore = create<CvState>((set, get) => ({
       errors: {},
       generating: {},
       generationErrors: {},
+      generationProposals: {},
     });
   },
 }));

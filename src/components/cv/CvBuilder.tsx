@@ -49,8 +49,10 @@ import { analyzeCvDocument } from "@/utils/cvAnalysis";
 import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
 import { analyzeCoverLetterConsistency } from "@/utils/cvConsistency";
 import CvConsistencyPanel from "@/components/cv/CvConsistencyPanel";
-import BufferedTextarea from "@/components/cv/BufferedTextarea";
+import BufferedTextarea from "@/components/common/BufferedTextarea";
+import BufferedInput from "@/components/common/BufferedInput";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { splitLines as lines } from "@/utils/lines";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
 import { flushPendingEdits } from "@/utils/pendingEdits";
 import { clearAiSection } from "@/utils/cvProvenance";
@@ -74,7 +76,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -93,13 +94,6 @@ const textareaClass =
 function inferLanguage(application: JobApplication): CvLanguage {
   const value = application.applicationLanguage.trim().toLowerCase();
   return value.includes("sv") || value.includes("swedish") ? "sv" : "en";
-}
-
-function lines(value: string): string[] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
 }
 
 function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
@@ -186,7 +180,7 @@ function SectionCard({
           </div>
         </div>
         <div id={`cv-section-body-${section}`} hidden={collapsed}>
-          {children}
+          {!collapsed && children}
         </div>
       </CardContent>
     </Card>
@@ -274,6 +268,9 @@ export default function CvBuilder({
   const generationError = useCvStore(
     (state) => state.generationErrors[application.id],
   );
+  const generationProposal = useCvStore(
+    (state) => state.generationProposals[application.id] ?? null,
+  );
   const loadCv = useCvStore((state) => state.loadCv);
   const setCv = useCvStore((state) => state.setCv);
   const updateCv = useCvStore((state) => state.updateCv);
@@ -281,6 +278,9 @@ export default function CvBuilder({
   const restoreSnapshot = useCvStore((state) => state.restoreSnapshot);
   const saveCv = useCvStore((state) => state.saveCv);
   const generateCv = useCvStore((state) => state.generateCv);
+  const clearGenerationProposal = useCvStore(
+    (state) => state.clearGenerationProposal,
+  );
   const applyGeneratedCv = useCvStore((state) => state.applyGeneratedCv);
   const cancelGeneration = useCvStore((state) => state.cancelGeneration);
 
@@ -302,8 +302,6 @@ export default function CvBuilder({
   const [historyBusy, setHistoryBusy] = useState(false);
   const [chatContextBusy, setChatContextBusy] = useState(false);
   const [showAllAts, setShowAllAts] = useState(false);
-  const [generationProposal, setGenerationProposal] =
-    useState<CvDocument | null>(null);
   const [generationBusy, setGenerationBusy] = useState(false);
   const [previousDocument, setPreviousDocument] = useState<CvDocument | null>(
     null,
@@ -345,10 +343,19 @@ export default function CvBuilder({
     setPreviousDocument(null);
     setView("edit");
     setHistoryOpen(false);
-    setGenerationProposal(null);
     setGenerationBusy(false);
     setShowAllAts(false);
   }, [application.id]);
+
+  // A section rewrite is a modal interaction; leaving the builder must abort
+  // the request rather than let its result land somewhere else.
+  useEffect(
+    () => () => {
+      rewriteController.current?.abort();
+      rewriteController.current = null;
+    },
+    [],
+  );
 
   const profileHasContent = Boolean(
     profile.fullName.trim() ||
@@ -393,10 +400,10 @@ export default function CvBuilder({
   );
   const consistency = useMemo(
     () =>
-      document
-        ? analyzeCoverLetterConsistency(document, profile, application)
+      analysisDocument
+        ? analyzeCoverLetterConsistency(analysisDocument, profile, application)
         : null,
-    [application, document, profile],
+    [analysisDocument, application, profile],
   );
   const visiblePages =
     view === "preview" && previewPages
@@ -422,6 +429,21 @@ export default function CvBuilder({
 
   const patch = (updater: (current: CvDocument) => CvDocument) => {
     updateCv(application.id, updater);
+  };
+
+  /**
+   * Removing a hand-written CV entry is destructive and not otherwise
+   * recoverable (manual edits are never snapshotted). Take a Versions snapshot
+   * first so a misclick can be restored.
+   */
+  const removeEntry = async (
+    label: string,
+    updater: (current: CvDocument) => CvDocument,
+  ) => {
+    if (!document) return;
+    flushPendingEdits();
+    await snapshotCurrent(application.id, `Before removing ${label}`);
+    patch(updater);
   };
 
   const setField = <K extends keyof CvDocument>(
@@ -543,8 +565,8 @@ export default function CvBuilder({
     flushPendingEdits();
     const current = useCvStore.getState().documents[application.id] ?? document;
     setExportStatus(null);
-    setGenerationProposal(null);
-    const proposal = await generateCv({
+    clearGenerationProposal(application.id);
+    await generateCv({
       application,
       profile,
       config: apiConfig,
@@ -555,7 +577,8 @@ export default function CvBuilder({
         template: current?.template ?? template,
       },
     });
-    if (proposal) setGenerationProposal(proposal);
+    // The store owns the proposal so it survives navigation; the subscription
+    // above opens the review dialog for this application only.
   };
 
   const handleAcceptGenerated = async () => {
@@ -568,7 +591,7 @@ export default function CvBuilder({
       setTemplate(generationProposal.template ?? "classic");
       setExtraContext(generationProposal.extraContext);
       if (before) setPreviousDocument(before);
-      setGenerationProposal(null);
+      clearGenerationProposal(application.id);
       setExportStatus("Applied generated CV.");
     } finally {
       setGenerationBusy(false);
@@ -577,7 +600,7 @@ export default function CvBuilder({
 
   const handleDiscardGenerated = () => {
     if (generationBusy) return;
-    setGenerationProposal(null);
+    clearGenerationProposal(application.id);
     setExportStatus("Discarded generated CV.");
   };
 
@@ -609,8 +632,7 @@ export default function CvBuilder({
     setChatContextBusy(true);
     try {
       const messages = await loadChatMessagesFor(application.id);
-      const block = buildChatContextBlock(messages);
-      const recentCount = block ? block.split("\n").length - 1 : 0;
+      const { block, count: recentCount } = buildChatContextBlock(messages);
       if (!block) {
         setExportStatus("No chat messages to add for this application.");
         return;
@@ -1057,12 +1079,17 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.experience.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
-                      ...current,
-                      experience: current.experience.filter(
-                        (entry) => entry.id !== item.id,
-                      ),
-                    }))
+                    void removeEntry(
+                      `${item.role || "experience"} at ${
+                        item.company || "company"
+                      }`,
+                      (current) => ({
+                        ...current,
+                        experience: current.experience.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      }),
+                    )
                   }
                   label={`${item.role || "experience"} at ${
                     item.company || "company"
@@ -1073,51 +1100,45 @@ export default function CvBuilder({
                   `${item.role || "role"} bullets`,
                 )}
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
+                  <BufferedInput
                     value={item.role}
-                    onChange={(event) =>
-                      updateExperience(item.id, { role: event.target.value })
+                    onCommit={(value) =>
+                      updateExperience(item.id, { role: value })
                     }
                     placeholder="Role"
                     className={fieldClass}
                     aria-label={`Role for ${item.company || "experience"}`}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.company}
-                    onChange={(event) =>
-                      updateExperience(item.id, { company: event.target.value })
+                    onCommit={(value) =>
+                      updateExperience(item.id, { company: value })
                     }
                     placeholder="Company"
                     className={fieldClass}
                     aria-label={`Company for ${item.role || "experience"}`}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.location}
-                    onChange={(event) =>
-                      updateExperience(item.id, {
-                        location: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateExperience(item.id, { location: value })
                     }
                     placeholder="Location (optional)"
                     className={fieldClass}
                   />
                   <div className="grid grid-cols-2 gap-2">
-                    <Input
+                    <BufferedInput
                       value={item.startDate}
-                      onChange={(event) =>
-                        updateExperience(item.id, {
-                          startDate: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        updateExperience(item.id, { startDate: value })
                       }
                       placeholder="Start"
                       className={fieldClass}
                     />
-                    <Input
+                    <BufferedInput
                       value={item.endDate}
-                      onChange={(event) =>
-                        updateExperience(item.id, {
-                          endDate: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        updateExperience(item.id, { endDate: value })
                       }
                       placeholder="End"
                       className={fieldClass}
@@ -1208,7 +1229,7 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.education.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
+                    void removeEntry(item.school || "education", (current) => ({
                       ...current,
                       education: current.education.filter(
                         (entry) => entry.id !== item.id,
@@ -1218,47 +1239,43 @@ export default function CvBuilder({
                   label={item.school || "education"}
                 />
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
+                  <BufferedInput
                     value={item.school}
-                    onChange={(event) =>
-                      updateEducation(item.id, { school: event.target.value })
+                    onCommit={(value) =>
+                      updateEducation(item.id, { school: value })
                     }
                     placeholder="School"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.degree}
-                    onChange={(event) =>
-                      updateEducation(item.id, { degree: event.target.value })
+                    onCommit={(value) =>
+                      updateEducation(item.id, { degree: value })
                     }
                     placeholder="Degree"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.field}
-                    onChange={(event) =>
-                      updateEducation(item.id, { field: event.target.value })
+                    onCommit={(value) =>
+                      updateEducation(item.id, { field: value })
                     }
                     placeholder="Field / programme"
                     className={fieldClass}
                   />
                   <div className="grid grid-cols-2 gap-2">
-                    <Input
+                    <BufferedInput
                       value={item.startDate}
-                      onChange={(event) =>
-                        updateEducation(item.id, {
-                          startDate: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        updateEducation(item.id, { startDate: value })
                       }
                       placeholder="Start"
                       className={fieldClass}
                     />
-                    <Input
+                    <BufferedInput
                       value={item.endDate}
-                      onChange={(event) =>
-                        updateEducation(item.id, {
-                          endDate: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        updateEducation(item.id, { endDate: value })
                       }
                       placeholder="End"
                       className={fieldClass}
@@ -1328,12 +1345,15 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.projects.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
-                      ...current,
-                      projects: current.projects.filter(
-                        (entry) => entry.id !== item.id,
-                      ),
-                    }))
+                    void removeEntry(
+                      item.title || item.description || "project",
+                      (current) => ({
+                        ...current,
+                        projects: current.projects.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      }),
+                    )
                   }
                   label={item.title || item.description || "project"}
                 />
@@ -1341,18 +1361,16 @@ export default function CvBuilder({
                   { kind: "project", id: item.id },
                   `${item.title || "project"} text`,
                 )}
-                <Input
+                <BufferedInput
                   value={item.title}
-                  onChange={(event) =>
-                    updateProject(item.id, { title: event.target.value })
-                  }
+                  onCommit={(value) => updateProject(item.id, { title: value })}
                   placeholder="Project title"
                   className={fieldClass}
                 />
-                <Input
+                <BufferedInput
                   value={item.period}
-                  onChange={(event) =>
-                    updateProject(item.id, { period: event.target.value })
+                  onCommit={(value) =>
+                    updateProject(item.id, { period: value })
                   }
                   placeholder="Dates (e.g. Jan 2024 – Jun 2025)"
                   className={fieldClass}
@@ -1429,42 +1447,39 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.certifications.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
-                      ...current,
-                      certifications: current.certifications.filter(
-                        (entry) => entry.id !== item.id,
-                      ),
-                    }))
+                    void removeEntry(
+                      item.name || "certification",
+                      (current) => ({
+                        ...current,
+                        certifications: current.certifications.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      }),
+                    )
                   }
                   label={item.name || "certification"}
                 />
                 <div className="grid gap-2 sm:grid-cols-3">
-                  <Input
+                  <BufferedInput
                     value={item.name}
-                    onChange={(event) =>
-                      updateCertification(item.id, {
-                        name: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateCertification(item.id, { name: value })
                     }
                     placeholder="Certification"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.issuer}
-                    onChange={(event) =>
-                      updateCertification(item.id, {
-                        issuer: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateCertification(item.id, { issuer: value })
                     }
                     placeholder="Issuer"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.date}
-                    onChange={(event) =>
-                      updateCertification(item.id, {
-                        date: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateCertification(item.id, { date: value })
                     }
                     placeholder="Date"
                     className={fieldClass}
@@ -1521,7 +1536,7 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.languages.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
+                    void removeEntry(item.name || "language", (current) => ({
                       ...current,
                       languages: current.languages.filter(
                         (entry) => entry.id !== item.id,
@@ -1531,18 +1546,18 @@ export default function CvBuilder({
                   label={item.name || "language"}
                 />
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
+                  <BufferedInput
                     value={item.name}
-                    onChange={(event) =>
-                      updateLanguage(item.id, { name: event.target.value })
+                    onCommit={(value) =>
+                      updateLanguage(item.id, { name: value })
                     }
                     placeholder="Language"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.level}
-                    onChange={(event) =>
-                      updateLanguage(item.id, { level: event.target.value })
+                    onCommit={(value) =>
+                      updateLanguage(item.id, { level: value })
                     }
                     placeholder="Level"
                     className={fieldClass}
@@ -1596,12 +1611,15 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.otherEngagements.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
-                      ...current,
-                      otherEngagements: current.otherEngagements.filter(
-                        (entry) => entry.id !== item.id,
-                      ),
-                    }))
+                    void removeEntry(
+                      item.organization || "other experience",
+                      (current) => ({
+                        ...current,
+                        otherEngagements: current.otherEngagements.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      }),
+                    )
                   }
                   label={item.organization || "other experience"}
                 />
@@ -1610,36 +1628,32 @@ export default function CvBuilder({
                   `${item.organization || "other experience"} bullets`,
                 )}
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Input
+                  <BufferedInput
                     value={item.organization}
-                    onChange={(event) =>
-                      updateOther(item.id, {
-                        organization: event.target.value,
-                      })
+                    onCommit={(value) =>
+                      updateOther(item.id, { organization: value })
                     }
                     placeholder="Organization"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.role}
-                    onChange={(event) =>
-                      updateOther(item.id, { role: event.target.value })
-                    }
+                    onCommit={(value) => updateOther(item.id, { role: value })}
                     placeholder="Role"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.startDate}
-                    onChange={(event) =>
-                      updateOther(item.id, { startDate: event.target.value })
+                    onCommit={(value) =>
+                      updateOther(item.id, { startDate: value })
                     }
                     placeholder="Start"
                     className={fieldClass}
                   />
-                  <Input
+                  <BufferedInput
                     value={item.endDate}
-                    onChange={(event) =>
-                      updateOther(item.id, { endDate: event.target.value })
+                    onCommit={(value) =>
+                      updateOther(item.id, { endDate: value })
                     }
                     placeholder="End"
                     className={fieldClass}
@@ -1738,7 +1752,7 @@ export default function CvBuilder({
             disabled={snapshots.length === 0}
             title={
               snapshots.length === 0
-                ? "Versions are saved before AI regeneration, before an accepted rewrite and before a restore"
+                ? "Versions are saved before AI regeneration, before an accepted rewrite, before removing an entry and before a restore"
                 : "Restore an earlier CV version"
             }
           >
@@ -1923,14 +1937,14 @@ export default function CvBuilder({
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-full-name">Full name</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-full-name"
                       value={document.contact.fullName}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          fullName: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, fullName: value },
+                        }))
                       }
                       placeholder="Full name"
                       className={fieldClass}
@@ -1938,14 +1952,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-email">Email</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-email"
                       value={document.contact.email}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          email: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, email: value },
+                        }))
                       }
                       placeholder="Email"
                       className={fieldClass}
@@ -1953,14 +1967,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-phone">Phone</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-phone"
                       value={document.contact.phone}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          phone: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, phone: value },
+                        }))
                       }
                       placeholder="Phone"
                       className={fieldClass}
@@ -1968,14 +1982,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-location">Location</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-location"
                       value={document.contact.location}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          location: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, location: value },
+                        }))
                       }
                       placeholder="Location"
                       className={fieldClass}
@@ -1983,14 +1997,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-linkedin">LinkedIn URL</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-linkedin"
                       value={document.contact.linkedinUrl}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          linkedinUrl: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, linkedinUrl: value },
+                        }))
                       }
                       placeholder="LinkedIn URL"
                       className={fieldClass}
@@ -2000,14 +2014,14 @@ export default function CvBuilder({
                     <Label htmlFor="cv-contact-portfolio">
                       Portfolio / website
                     </Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-portfolio"
                       value={document.contact.portfolioUrl}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          portfolioUrl: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, portfolioUrl: value },
+                        }))
                       }
                       placeholder="Portfolio / website"
                       className={fieldClass}
@@ -2015,14 +2029,14 @@ export default function CvBuilder({
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="cv-contact-github">GitHub URL</Label>
-                    <Input
+                    <BufferedInput
                       id="cv-contact-github"
                       value={document.contact.githubUrl}
-                      onChange={(event) =>
-                        setField("contact", {
-                          ...document.contact,
-                          githubUrl: event.target.value,
-                        })
+                      onCommit={(value) =>
+                        patch((current) => ({
+                          ...current,
+                          contact: { ...current.contact, githubUrl: value },
+                        }))
                       }
                       placeholder="GitHub URL"
                       className={fieldClass}
@@ -2037,10 +2051,10 @@ export default function CvBuilder({
                 <h3 className="text-sm font-semibold text-text-primary">
                   Headline
                 </h3>
-                <Input
+                <BufferedInput
                   value={document.headline}
-                  onChange={(event) =>
-                    setContentField("summary", "headline", event.target.value)
+                  onCommit={(value) =>
+                    setContentField("summary", "headline", value)
                   }
                   placeholder="Headline, e.g. Frontend Engineer focused on accessible design systems"
                   className={fieldClass}

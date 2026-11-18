@@ -42,6 +42,13 @@ export interface CvGenerationOptions {
 
 export class CvGenerationError extends Error {}
 
+/** Cancellation is not a generation error: the caller keeps the old CV. */
+function abortError(): Error {
+  const error = new Error("CV generation cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -306,6 +313,9 @@ export async function generateCvDocument({
     systemPrompt,
     { signal, onDelta },
   );
+  // A stopped stream can still carry parseable partial JSON. Never treat it as
+  // a complete CV, and never fire a repair request after the user cancelled.
+  if (signal?.aborted || response.stopped) throw abortError();
   usages.push(response.usage);
   if (response.error) throw new CvGenerationError(response.error);
 
@@ -328,6 +338,7 @@ export async function generateCvDocument({
       systemPrompt,
       { signal, onDelta },
     );
+    if (signal?.aborted || response.stopped) throw abortError();
     usages.push(response.usage);
     if (response.error) throw new CvGenerationError(response.error);
     parsed = parseGeneratedCvJson(response.content);

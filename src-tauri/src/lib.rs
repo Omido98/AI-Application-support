@@ -678,48 +678,71 @@ impl StreamAccumulator {
 /// UI spinning forever.
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Read an SSE response body chunk-by-chunk, feed events into the
-/// accumulator (emitting text deltas as they arrive), and finish with the
-/// fully assembled response. When `token` is cancelled, the HTTP connection
-/// is dropped and whatever text was accumulated so far is still delivered.
-async fn stream_sse(
-    response: reqwest::Response,
+/// Keep reading for this long after a provider signals the answer is complete.
+/// OpenAI sends a trailing usage-only chunk after `finish_reason`, before
+/// `[DONE]`; returning at `finish_reason` would drop token usage (and cost).
+const STREAM_FINISH_GRACE: Duration = Duration::from_secs(3);
+
+/// Read an SSE byte stream, feed events into the accumulator (emitting text
+/// deltas as they arrive), and finish with the fully assembled response.
+///
+/// The generic stream and callback keep this testable without a Tauri channel.
+/// A provider that signals completion is still drained briefly so trailing
+/// metadata such as OpenAI's usage chunk is not lost.
+async fn consume_sse_stream<S, B, E, F>(
+    stream: S,
     provider: &str,
-    on_event: &Channel<ChatStreamEvent>,
     token: &CancellationToken,
-) -> Result<(), String> {
-    let mut stream = response.bytes_stream();
+    mut emit: F,
+) -> Result<(), String>
+where
+    S: futures_util::Stream<Item = Result<B, E>>,
+    B: AsRef<[u8]>,
+    E: std::fmt::Display,
+    F: FnMut(ChatStreamEvent) -> Result<(), String>,
+{
+    let mut stream = Box::pin(stream);
     let mut buffer: Vec<u8> = Vec::new();
     let mut event_data = String::new();
     let mut acc = StreamAccumulator::new(provider);
 
     let consume = async {
-        loop {
-            let next = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next())
-                .await
-                .map_err(|_| {
-                    "No data was received from the model for 120 seconds, so the request was cancelled."
-                        .to_string()
-                })?;
+        'outer: loop {
+            let wait = if acc.is_finished() {
+                STREAM_FINISH_GRACE
+            } else {
+                STREAM_IDLE_TIMEOUT
+            };
+            let next = match tokio::time::timeout(wait, stream.next()).await {
+                Ok(next) => next,
+                // After the answer is complete, a provider that keeps the
+                // connection open is not an error: stop at the grace limit.
+                Err(_) if acc.is_finished() => break,
+                Err(_) => {
+                    return Err(
+                        "No data was received from the model for 120 seconds, so the request was cancelled."
+                            .to_string(),
+                    )
+                }
+            };
             let Some(chunk) = next else {
                 break;
             };
             let chunk = chunk.map_err(|e| format!("Failed to read response stream: {e}"))?;
-            buffer.extend_from_slice(&chunk);
+            buffer.extend_from_slice(chunk.as_ref());
             while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
                 let line: Vec<u8> = buffer.drain(..=pos).collect();
                 let line = String::from_utf8_lossy(&line);
                 let line = line.trim_end_matches(['\r', '\n']);
                 if line.is_empty() {
                     if !event_data.is_empty() {
+                        let done = event_data.trim() == "[DONE]";
                         if let Some(delta) = acc.feed(&event_data)? {
-                            on_event
-                                .send(ChatStreamEvent::Delta { text: delta })
-                                .map_err(|e| format!("Failed to send stream event: {e}"))?;
+                            emit(ChatStreamEvent::Delta { text: delta })?;
                         }
                         event_data.clear();
-                        if acc.is_finished() {
-                            return Ok::<(), String>(());
+                        if done {
+                            break 'outer;
                         }
                     }
                 } else if let Some(data) = line.strip_prefix("data:") {
@@ -734,9 +757,7 @@ async fn stream_sse(
         // A trailing event that was not terminated by a blank line.
         if !event_data.is_empty() {
             if let Some(delta) = acc.feed(&event_data)? {
-                on_event
-                    .send(ChatStreamEvent::Delta { text: delta })
-                    .map_err(|e| format!("Failed to send stream event: {e}"))?;
+                emit(ChatStreamEvent::Delta { text: delta })?;
             }
         }
         Ok::<(), String>(())
@@ -748,9 +769,24 @@ async fn stream_sse(
         result = consume => result?,
     }
 
-    on_event
-        .send(ChatStreamEvent::Done { data: acc.finish() })
-        .map_err(|e| format!("Failed to send stream event: {e}"))
+    emit(ChatStreamEvent::Done { data: acc.finish() })
+}
+
+/// Read an SSE response body chunk-by-chunk and forward events to the frontend.
+/// When `token` is cancelled, the HTTP connection is dropped and whatever text
+/// was accumulated so far is still delivered.
+async fn stream_sse(
+    response: reqwest::Response,
+    provider: &str,
+    on_event: &Channel<ChatStreamEvent>,
+    token: &CancellationToken,
+) -> Result<(), String> {
+    consume_sse_stream(response.bytes_stream(), provider, token, |event| {
+        on_event
+            .send(event)
+            .map_err(|e| format!("Failed to send stream event: {e}"))
+    })
+    .await
 }
 
 /// Send a chat request with `stream: true` and forward the response to the
@@ -1117,19 +1153,33 @@ async fn resolve_public_addrs(host: &str, port: u16) -> Result<Vec<SocketAddr>, 
 /// the addresses that were just checked. Pinning closes the TOCTOU window where
 /// reqwest would resolve the name a second time and could be handed a private
 /// address by a rebinding DNS server.
-async fn send_fetch_request(url: &reqwest::Url) -> Result<reqwest::Response, String> {
+///
+/// Clients are cached per host/port for one redirect chain: a redirect back to
+/// the same origin reuses its connection pool and TLS session instead of
+/// building a new client for every hop.
+async fn send_fetch_request(
+    url: &reqwest::Url,
+    clients: &mut HashMap<(String, u16), reqwest::Client>,
+) -> Result<reqwest::Response, String> {
     let (host, port) = validate_fetch_url(url)?;
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .user_agent(BROWSER_USER_AGENT)
-        .redirect(reqwest::redirect::Policy::none());
-    if host.parse::<IpAddr>().is_err() {
-        let addrs = resolve_public_addrs(&host, port).await?;
-        builder = builder.resolve_to_addrs(&host, &addrs);
-    }
-    let client = builder
-        .build()
-        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+    let key = (host.clone(), port);
+    let client = if let Some(client) = clients.get(&key).cloned() {
+        client
+    } else {
+        let mut builder = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .user_agent(BROWSER_USER_AGENT)
+            .redirect(reqwest::redirect::Policy::none());
+        if host.parse::<IpAddr>().is_err() {
+            let addrs = resolve_public_addrs(&host, port).await?;
+            builder = builder.resolve_to_addrs(&host, &addrs);
+        }
+        let client = builder
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+        clients.insert(key, client.clone());
+        client
+    };
     client
         .get(url.clone())
         .timeout(Duration::from_secs(30))
@@ -1147,8 +1197,9 @@ async fn zen_fetch_page(url: String) -> Result<String, String> {
     // Follow redirects by hand so every hop passes the same public-address
     // checks. reqwest's automatic redirects would happily visit localhost.
     let mut redirects = 0usize;
+    let mut clients: HashMap<(String, u16), reqwest::Client> = HashMap::new();
     let mut response = loop {
-        let candidate = send_fetch_request(&current).await?;
+        let candidate = send_fetch_request(&current, &mut clients).await?;
         if !candidate.status().is_redirection() {
             break candidate;
         }
@@ -1582,13 +1633,75 @@ fn sync_directory(dir: &Path) {
 #[cfg(not(unix))]
 fn sync_directory(_dir: &Path) {}
 
+/// Metadata stamp of a data file written or loaded by this process.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: SystemTime,
+}
+
+/// Files this process last wrote or successfully loaded, with their stamp.
+/// A save may skip re-reading/parsing the existing file only while its
+/// metadata still matches this entry.
+static DATA_FILE_STAMPS: LazyLock<Mutex<HashMap<PathBuf, FileStamp>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn file_stamp(path: &Path) -> Option<FileStamp> {
+    let metadata = fs::metadata(path).ok()?;
+    Some(FileStamp {
+        len: metadata.len(),
+        modified: metadata.modified().ok()?,
+    })
+}
+
+fn mark_data_file_good(path: &Path) {
+    let Some(stamp) = file_stamp(path) else {
+        return;
+    };
+    if let Ok(mut stamps) = DATA_FILE_STAMPS.lock() {
+        stamps.insert(path.to_path_buf(), stamp);
+    }
+}
+
+fn forget_data_file(path: &Path) {
+    if let Ok(mut stamps) = DATA_FILE_STAMPS.lock() {
+        stamps.remove(path);
+    }
+}
+
+fn data_file_is_trusted(path: &Path) -> bool {
+    let Some(current) = file_stamp(path) else {
+        return false;
+    };
+    DATA_FILE_STAMPS
+        .lock()
+        .ok()
+        .and_then(|stamps| stamps.get(path).copied())
+        .is_some_and(|known| known == current)
+}
+
 /// Write `bytes` to `path` via a synced temporary file, preserving the last
 /// valid file as `path.bak`. The destination is never truncated in place.
 ///
 /// Ordering: write+sync temp -> verify/rotate main to .bak -> rename temp over
 /// main. A crash between the last two steps leaves the backup recoverable on
 /// the next launch.
+/// Test helper: the normal save path always decides whether validation can be
+/// skipped from the known-good stamp.
+#[cfg(test)]
 fn save_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    save_bytes_atomic_with(path, bytes, true)
+}
+
+/// `validate_existing` reads and parses the current file before rotating it,
+/// so a corrupt main file can never overwrite a good backup. Callers may pass
+/// false only when `data_file_is_trusted` confirmed this process wrote the
+/// current bytes and its metadata has not changed since.
+fn save_bytes_atomic_with(
+    path: &Path,
+    bytes: &[u8],
+    validate_existing: bool,
+) -> Result<(), String> {
     if bytes.len() as u64 > MAX_DATA_FILE_BYTES {
         return Err(format!(
             "Refusing to write {}: data is larger than the {} MB limit.",
@@ -1618,22 +1731,24 @@ fn save_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
         let backup = backup_path(path);
         if path.exists() {
-            match read_json_file(path)? {
-                DataFileRead::Valid(_) => {
-                    if backup.exists() {
-                        fs::remove_file(&backup).map_err(|err| {
-                            format!("Could not replace backup {}: {err}", backup.display())
-                        })?;
-                    }
-                    fs::rename(path, &backup).map_err(|err| {
-                        format!("Could not rotate {} to backup: {err}", path.display())
+            let rotate = if validate_existing {
+                matches!(read_json_file(path)?, DataFileRead::Valid(_))
+            } else {
+                true
+            };
+            if rotate {
+                if backup.exists() {
+                    fs::remove_file(&backup).map_err(|err| {
+                        format!("Could not replace backup {}: {err}", backup.display())
                     })?;
                 }
-                DataFileRead::Invalid(_) | DataFileRead::Missing => {
-                    // Never let a corrupt main file destroy the last known-good
-                    // backup: move it aside instead of rotating it over .bak.
-                    let _ = quarantine_file(path);
-                }
+                fs::rename(path, &backup).map_err(|err| {
+                    format!("Could not rotate {} to backup: {err}", path.display())
+                })?;
+            } else {
+                // Never let a corrupt main file destroy the last known-good
+                // backup: move it aside instead of rotating it over .bak.
+                let _ = quarantine_file(path);
             }
         }
 
@@ -1658,9 +1773,16 @@ fn save_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 #[tauri::command]
 async fn load_data_file(app: tauri::AppHandle, name: String) -> Result<LoadDataFileResult, String> {
     let path = app_data_file_path(&app, &name)?;
-    tauri::async_runtime::spawn_blocking(move || load_data_file_at(&path))
+    let cache_path = path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || load_data_file_at(&path))
         .await
-        .map_err(|err| format!("Data load task failed: {err}"))?
+        .map_err(|err| format!("Data load task failed: {err}"))??;
+    if result.data.is_some() && result.error.is_none() {
+        mark_data_file_good(&cache_path);
+    } else {
+        forget_data_file(&cache_path);
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1672,14 +1794,27 @@ async fn save_data_file(
     let path = app_data_file_path(&app, &name)?;
     let bytes = serde_json::to_vec_pretty(&data)
         .map_err(|err| format!("Could not serialize {name}: {err}"))?;
-    tauri::async_runtime::spawn_blocking(move || save_bytes_atomic(&path, &bytes))
-        .await
-        .map_err(|err| format!("Data save task failed: {err}"))?
+    let cache_path = path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        // Check the stamp as close to the write as possible; an external edit
+        // between the command call and this task falls back to validation.
+        let validate_existing = !data_file_is_trusted(&path);
+        save_bytes_atomic_with(&path, &bytes, validate_existing)
+    })
+    .await
+    .map_err(|err| format!("Data save task failed: {err}"))?;
+    if result.is_ok() {
+        mark_data_file_good(&cache_path);
+    } else {
+        forget_data_file(&cache_path);
+    }
+    result
 }
 
 #[tauri::command]
 async fn delete_data_file(app: tauri::AppHandle, name: String) -> Result<(), String> {
     let path = app_data_file_path(&app, &name)?;
+    forget_data_file(&path);
     let backup = backup_path(&path);
     tauri::async_runtime::spawn_blocking(move || {
         for target in [path, backup] {
@@ -2807,6 +2942,53 @@ mod tests {
     }
 
     #[test]
+    fn data_file_trust_requires_an_unchanged_stamp() {
+        let dir = test_data_dir("trust-stamp");
+        let path = dir.join("applications.json");
+        fs::write(&path, br#"{"version":1}"#).unwrap();
+
+        assert!(!data_file_is_trusted(&path));
+        mark_data_file_good(&path);
+        assert!(data_file_is_trusted(&path));
+
+        // Use a different length as well as different content: some Windows
+        // filesystems can report the same mtime for two writes in the same
+        // clock tick, and the stamp intentionally falls back to validation on
+        // any size/mtime mismatch.
+        fs::write(&path, br#"{"version":2,"external":true}"#).unwrap();
+        assert!(!data_file_is_trusted(&path));
+
+        forget_data_file(&path);
+        fs::remove_file(&path).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn trusted_save_skips_revalidation_and_rotates_the_backup() {
+        let dir = test_data_dir("trusted-save");
+        let path = dir.join("applications.json");
+
+        fs::write(&path, br#"{"version":1}"#).unwrap();
+        mark_data_file_good(&path);
+        assert!(data_file_is_trusted(&path));
+
+        // The trusted path skips read_json_file but still preserves the old
+        // bytes as the backup before installing the new file.
+        save_bytes_atomic_with(&path, br#"{"version":2}"#, false).unwrap();
+        mark_data_file_good(&path);
+
+        let current: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let backup: serde_json::Value =
+            serde_json::from_slice(&fs::read(backup_path(&path)).unwrap()).unwrap();
+        assert_eq!(current["version"], 2);
+        assert_eq!(backup["version"], 1);
+        assert!(data_file_is_trusted(&path));
+
+        forget_data_file(&path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn missing_data_file_is_a_normal_first_run() {
         let dir = test_data_dir("missing");
         let loaded = load_data_file_at(&dir.join("applications.json")).unwrap();
@@ -3130,5 +3312,111 @@ mod tests {
         assert!(validate_fetch_url(&parse("https://example.com/jobs")).is_ok());
         assert!(validate_fetch_url(&parse("http://example.com:80/")).is_ok());
         assert!(validate_fetch_url(&parse("http://localhost/")).is_ok());
+    }
+
+    fn sse_events(payload: &str) -> Vec<u8> {
+        format!("data: {payload}\n\n").into_bytes()
+    }
+
+    fn done_usage(events: &[ChatStreamEvent]) -> (u64, u64) {
+        match events.last() {
+            Some(ChatStreamEvent::Done { data }) => (
+                data["usage"]["input_tokens"].as_u64().unwrap_or(0),
+                data["usage"]["output_tokens"].as_u64().unwrap_or(0),
+            ),
+            _ => panic!("expected a Done event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_stream_reads_usage_after_finish_reason() {
+        // This is OpenAI's documented stream shape: the usage-only chunk comes
+        // after the finish_reason chunk, before [DONE].
+        let chunks: Vec<Result<Vec<u8>, std::io::Error>> = vec![
+            Ok(sse_events(r#"{"choices":[{"delta":{"content":"Hi"}}]}"#)),
+            Ok(sse_events(
+                r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            )),
+            Ok(sse_events(
+                r#"{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}"#,
+            )),
+            Ok(sse_events("[DONE]")),
+        ];
+        let token = CancellationToken::new();
+        let mut events = Vec::new();
+
+        consume_sse_stream(
+            futures_util::stream::iter(chunks),
+            "openai",
+            &token,
+            |event| {
+                events.push(event);
+                Ok::<(), String>(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(done_usage(&events), (11, 7));
+        match &events[0] {
+            ChatStreamEvent::Delta { text } => assert_eq!(text, "Hi"),
+            _ => panic!("expected a Delta event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_stream_drains_usage_from_the_same_chunk() {
+        let mut chunk = sse_events(r#"{"choices":[{"delta":{"content":"Hi"}}]}"#);
+        chunk.extend(sse_events(
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        ));
+        chunk.extend(sse_events(
+            r#"{"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#,
+        ));
+        chunk.extend(sse_events("[DONE]"));
+        let token = CancellationToken::new();
+        let mut events = Vec::new();
+
+        consume_sse_stream(
+            futures_util::stream::iter(vec![Ok::<Vec<u8>, std::io::Error>(chunk)]),
+            "openai",
+            &token,
+            |event| {
+                events.push(event);
+                Ok::<(), String>(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(done_usage(&events), (3, 2));
+    }
+
+    #[tokio::test]
+    async fn cancelled_stream_still_emits_done_with_partial_state() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let mut events = Vec::new();
+
+        consume_sse_stream(
+            futures_util::stream::pending::<Result<Vec<u8>, std::io::Error>>(),
+            "openai",
+            &token,
+            |event| {
+                events.push(event);
+                Ok::<(), String>(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatStreamEvent::Done { data } => {
+                assert!(data["choices"][0]["message"]["content"].is_null());
+            }
+            _ => panic!("expected a Done event"),
+        }
     }
 }
