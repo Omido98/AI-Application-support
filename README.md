@@ -50,8 +50,7 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   check phrase/synonym keyword matches and requirement priorities, use a
   deterministic grounding review, get page-fit feedback, switch between two
   ATS-safe templates, export Word or PDF, and add recent chat details
-  explicitly. See [docs/cv-builder.md](docs/cv-builder.md) and the
-  [improvement plan](docs/cv-improvement-plan.md).
+  explicitly. See [docs/cv-builder.md](docs/cv-builder.md).
 - **Profile** — education, work experience, certifications, skills, languages,
   previous cover letters, phone and portfolio/GitHub links, per-role
   achievements, and a public profile (e.g. LinkedIn) URL that the AI can
