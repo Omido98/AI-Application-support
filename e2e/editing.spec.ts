@@ -293,6 +293,41 @@ test("tracker long fields commit and survive an app switch", async ({
   );
 });
 
+test("restored application tags replace the local tags draft", async ({
+  page,
+}) => {
+  const application = makeApplication("tags-app", "Tags Corp", "applied", {
+    tags: ["old-tag"],
+  });
+  await seed(page, { applications: [application], lastTab: "application" });
+  await page.goto("/");
+  await expect(page.locator("#app-tags")).toHaveValue("old-tag");
+
+  await page.evaluate(async (applicationId) => {
+    const { restoreBackupBundle } = await import("/src/utils/backup.ts");
+    const { useApplicationStore } =
+      await import("/src/stores/applicationStore.ts");
+    const current = useApplicationStore
+      .getState()
+      .applications.find((item) => item.id === applicationId);
+    if (!current) throw new Error("missing seeded application");
+    await restoreBackupBundle({
+      format: "ai-application-support-backup",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      files: {
+        "applications.json": {
+          applications: [{ ...current, tags: ["new-tag", "restored"] }],
+          selectedApplicationId: applicationId,
+        },
+      },
+    });
+    await useApplicationStore.getState().loadApplications();
+  }, application.id);
+
+  await expect(page.locator("#app-tags")).toHaveValue("new-tag, restored");
+});
+
 test("archived applications do not show overdue deadline chips", async ({
   page,
 }) => {

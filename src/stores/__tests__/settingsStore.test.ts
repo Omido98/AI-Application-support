@@ -10,6 +10,7 @@ vi.mock("@/utils/storage", () => ({
 import { saveJson, loadJson } from "@/utils/storage";
 import {
   DEFAULT_SETTINGS,
+  flushSettingsSave,
   getAccentForeground,
   getContrastRatio,
   getReadableAccent,
@@ -19,7 +20,8 @@ import {
 const saveJsonMock = saveJson as Mock;
 const loadJsonMock = loadJson as Mock;
 
-beforeEach(() => {
+beforeEach(async () => {
+  await flushSettingsSave();
   saveJsonMock.mockReset();
   loadJsonMock.mockReset();
   saveJsonMock.mockResolvedValue(true);
@@ -68,8 +70,9 @@ describe("deadline reminder settings", () => {
     expect(state.notificationLog).toEqual({ day: "", keys: [] });
   });
 
-  it("persists the toggle immediately", () => {
+  it("persists the toggle immediately", async () => {
     useSettingsStore.getState().setNotificationsEnabled(true);
+    await flushSettingsSave();
 
     expect(useSettingsStore.getState().notificationsEnabled).toBe(true);
     expect(saveJsonMock).toHaveBeenCalledWith(
@@ -78,7 +81,22 @@ describe("deadline reminder settings", () => {
     );
   });
 
-  it("persists a deduplicated daily ledger and caps its size", () => {
+  it("serializes rapid changes and leaves the latest snapshot on disk", async () => {
+    useSettingsStore.getState().setTheme("light");
+    useSettingsStore.getState().setTheme("dark");
+    useSettingsStore.getState().setAccent("#123456");
+    await flushSettingsSave();
+
+    const settingsCalls = saveJsonMock.mock.calls.filter(
+      ([name]) => name === "settings.json",
+    );
+    expect(settingsCalls.length).toBeGreaterThan(0);
+    expect(settingsCalls.at(-1)?.[1]).toEqual(
+      expect.objectContaining({ theme: "dark", accent: "#123456" }),
+    );
+  });
+
+  it("persists a deduplicated daily ledger and caps its size", async () => {
     const keys = Array.from(
       { length: 250 },
       (_, index) => `app-${index}:deadline:2026-05-20`,
@@ -86,6 +104,7 @@ describe("deadline reminder settings", () => {
     useSettingsStore
       .getState()
       .markNotificationsSent("2026-05-20", [...keys, keys[0]]);
+    await flushSettingsSave();
 
     const log = useSettingsStore.getState().notificationLog;
     expect(log.day).toBe("2026-05-20");

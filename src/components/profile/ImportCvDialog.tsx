@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileUp, Loader2 } from "lucide-react";
 import { useChatStore } from "@/stores/chatStore";
 import { useProfileStore } from "@/stores/profileStore";
@@ -36,6 +36,7 @@ export default function ImportCvDialog({
   const [textChars, setTextChars] = useState(0);
   const [imported, setImported] = useState<ProfileData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const importController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (open && !configLoaded) void loadConfig();
@@ -43,6 +44,8 @@ export default function ImportCvDialog({
 
   useEffect(() => {
     if (!open) {
+      importController.current?.abort();
+      importController.current = null;
       setPhase("idle");
       setFileName("");
       setTextChars(0);
@@ -50,6 +53,14 @@ export default function ImportCvDialog({
       setError(null);
     }
   }, [open]);
+
+  useEffect(
+    () => () => {
+      importController.current?.abort();
+      importController.current = null;
+    },
+    [],
+  );
 
   const handleChoose = async () => {
     setError(null);
@@ -62,20 +73,31 @@ export default function ImportCvDialog({
       setError("Configure an AI provider and API key in Settings first.");
       return;
     }
+    importController.current?.abort();
+    const controller = new AbortController();
+    importController.current = controller;
     try {
       const picked = await pickCvDocument();
       if (!picked) return;
+      if (controller.signal.aborted) return;
       setFileName(picked.name);
       setPhase("reading");
       const text = await extractCvText(picked.name, picked.bytes);
+      if (controller.signal.aborted) return;
       setTextChars(text.length);
       setPhase("analyzing");
-      const result = await analyzeCvText(text, config);
+      const result = await analyzeCvText(text, config, controller.signal);
+      if (controller.signal.aborted) return;
       setImported(result);
       setPhase("ready");
     } catch (err) {
+      if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : String(err));
       setPhase("error");
+    } finally {
+      if (importController.current === controller) {
+        importController.current = null;
+      }
     }
   };
 

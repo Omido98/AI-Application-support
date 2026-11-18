@@ -73,6 +73,7 @@ function makeDocument() {
 async function extractPdf(bytes: Uint8Array): Promise<{
   pages: number;
   text: string;
+  items: { str: string; y: number }[];
 }> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const task = pdfjs.getDocument({
@@ -88,10 +89,14 @@ async function extractPdf(bytes: Uint8Array): Promise<{
   const pdf = await task.promise;
   const page = await pdf.getPage(1);
   const content = await page.getTextContent();
-  const text = content.items
-    .map((item) => ("str" in item ? item.str : ""))
-    .join(" ");
-  return { pages: pdf.numPages, text };
+  const items = content.items
+    .map((item) => ({
+      str: "str" in item ? item.str : "",
+      y: "transform" in item ? item.transform[5] : 0,
+    }))
+    .filter((item) => item.str.trim().length > 0);
+  const text = items.map((item) => item.str).join(" ");
+  return { pages: pdf.numPages, text, items };
 }
 
 describe("renderCvPdf", () => {
@@ -106,6 +111,20 @@ describe("renderCvPdf", () => {
     expect(result.text).toContain("TypeScript");
     expect(result.text).toContain("tillgänglighet");
     expect(result.pages).toBeGreaterThanOrEqual(1);
+  });
+
+  it("leaves enough vertical space for the large name", async () => {
+    const document = makeDocument();
+    document.headline = "Platform Engineer";
+    const result = await extractPdf(await renderCvPdf(document));
+    const name = result.items.find((item) => item.str.includes("Jane Doe"));
+    const headline = result.items.find((item) =>
+      item.str.includes("Platform Engineer"),
+    );
+
+    expect(name).toBeDefined();
+    expect(headline).toBeDefined();
+    expect(name!.y - headline!.y).toBeGreaterThanOrEqual(20);
   });
 
   it("supports the compact template and US Letter", async () => {

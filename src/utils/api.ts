@@ -84,6 +84,40 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function abortError(): Error {
+  const error = new Error("Request cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
+/**
+ * Stop waiting for a non-streaming Tauri command as soon as the user cancels.
+ * The underlying Rust request still finishes on its own, but the UI must not
+ * keep the generation open or commit its answer after Stop.
+ */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(abortError());
+    };
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 async function pace(): Promise<void> {
   if (PACE_DELAY_MS > 0) {
     await sleep(PACE_DELAY_MS);
@@ -799,6 +833,30 @@ async function sendOpenAICompatMessage(
   // Text streamed so far; returned as the partial answer when the user stops.
   let streamedContent = "";
 
+  // Provider usage is per request, so sum it across tool/research rounds and
+  // retries instead of reporting only the final round's tokens.
+  let totalUsage: TokenUsage | undefined;
+  const addUsage = (data: unknown) => {
+    const usage = extractUsage(data);
+    if (!usage) return;
+    totalUsage = {
+      ...(usage.inputTokens !== undefined ||
+      totalUsage?.inputTokens !== undefined
+        ? {
+            inputTokens:
+              (totalUsage?.inputTokens ?? 0) + (usage.inputTokens ?? 0),
+          }
+        : {}),
+      ...(usage.outputTokens !== undefined ||
+      totalUsage?.outputTokens !== undefined
+        ? {
+            outputTokens:
+              (totalUsage?.outputTokens ?? 0) + (usage.outputTokens ?? 0),
+          }
+        : {}),
+    };
+  };
+
   // Counts of every tool call signature made so far, to detect looping
   // models. A call only counts as stuck once the same signature appears a
   // third time: models legitimately re-search a topic or re-fetch a page
@@ -856,15 +914,20 @@ async function sendOpenAICompatMessage(
   const runNonStreamingRound = async (
     withTools: boolean,
   ): Promise<{ data?: ChatResponse; error?: string; stopped?: boolean }> => {
+    if (options.signal?.aborted) return { stopped: true };
     try {
-      const data = await invoke<ChatResponse>("zen_chat", {
-        baseUrl,
-        apiKey,
-        provider: config.provider,
-        payload: buildPayload(withTools, false),
-      });
+      const data = await abortable(
+        invoke<ChatResponse>("zen_chat", {
+          baseUrl,
+          apiKey,
+          provider: config.provider,
+          payload: buildPayload(withTools, false),
+        }),
+        options.signal,
+      );
       return { data };
     } catch (err) {
+      if (options.signal?.aborted) return { stopped: true };
       const message =
         typeof err === "string" ? err : "An unknown error occurred.";
       return { error: message };
@@ -891,23 +954,39 @@ async function sendOpenAICompatMessage(
     }
 
     const retry = await runNonStreamingRound(false);
+    if (retry.stopped) {
+      return {
+        content: streamedContent,
+        stopped: true,
+        ...(totalUsage ? { usage: totalUsage } : {}),
+      };
+    }
     if (retry.error) {
       return { content: "", error: retry.error };
     }
+    addUsage(retry.data);
     const content = retry.data?.choices?.[0]?.message?.content;
     if (content == null) {
       return partialContent
-        ? { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` }
+        ? {
+            content: `${PARTIAL_ANSWER_NOTE}${partialContent}`,
+            ...(totalUsage ? { usage: totalUsage } : {}),
+          }
         : { content: "", error: fallbackError };
     }
     return {
       content: `[Web research stopped — answering without it]\n\n${content}`,
+      ...(totalUsage ? { usage: totalUsage } : {}),
     };
   };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (options.signal?.aborted) {
-      return { content: streamedContent, stopped: true };
+      return {
+        content: streamedContent,
+        stopped: true,
+        ...(totalUsage ? { usage: totalUsage } : {}),
+      };
     }
 
     let result = useStream
@@ -925,7 +1004,11 @@ async function sendOpenAICompatMessage(
       : await runNonStreamingRound(useTools);
 
     if (result.stopped) {
-      return { content: streamedContent, stopped: true };
+      return {
+        content: streamedContent,
+        stopped: true,
+        ...(totalUsage ? { usage: totalUsage } : {}),
+      };
     }
 
     if (result.error) {
@@ -950,7 +1033,11 @@ async function sendOpenAICompatMessage(
           },
         );
         if (result.stopped) {
-          return { content: streamedContent, stopped: true };
+          return {
+            content: streamedContent,
+            stopped: true,
+            ...(totalUsage ? { usage: totalUsage } : {}),
+          };
         }
       }
 
@@ -963,6 +1050,14 @@ async function sendOpenAICompatMessage(
       ) {
         useStream = false;
         result = await runNonStreamingRound(useTools);
+      }
+
+      if (result.stopped) {
+        return {
+          content: streamedContent,
+          stopped: true,
+          ...(totalUsage ? { usage: totalUsage } : {}),
+        };
       }
 
       if (result.error) {
@@ -978,9 +1073,17 @@ async function sendOpenAICompatMessage(
           }
 
           const retry = await runNonStreamingRound(false);
+          if (retry.stopped) {
+            return {
+              content: streamedContent,
+              stopped: true,
+              ...(totalUsage ? { usage: totalUsage } : {}),
+            };
+          }
           if (retry.error) {
             return { content: "", error: retry.error };
           }
+          addUsage(retry.data);
           const content = retry.data?.choices?.[0]?.message?.content;
           if (content == null) {
             return {
@@ -990,6 +1093,7 @@ async function sendOpenAICompatMessage(
           }
           return {
             content: `[Web search unavailable — answering without it]\n\n${content}`,
+            ...(totalUsage ? { usage: totalUsage } : {}),
           };
         }
         return { content: "", error: result.error };
@@ -997,6 +1101,7 @@ async function sendOpenAICompatMessage(
     }
 
     const data = result.data as ChatResponse | undefined;
+    addUsage(data);
     const message = data?.choices?.[0]?.message;
     const toolCalls = message?.tool_calls;
     const drafted = message?.content;
@@ -1061,7 +1166,7 @@ async function sendOpenAICompatMessage(
       };
     }
     const finishReason = data?.choices?.[0]?.finish_reason ?? null;
-    const usage = extractUsage(data);
+    const usage = totalUsage;
     return {
       content: drafted,
       ...(finishReason ? { finishReason } : {}),
@@ -1170,6 +1275,30 @@ async function sendAnthropicMessage(
   // Text streamed so far; returned as the partial answer when the user stops.
   let streamedContent = "";
 
+  // Provider usage is per request, so sum it across tool/research rounds and
+  // retries instead of reporting only the final round's tokens.
+  let totalUsage: TokenUsage | undefined;
+  const addUsage = (data: unknown) => {
+    const usage = extractUsage(data);
+    if (!usage) return;
+    totalUsage = {
+      ...(usage.inputTokens !== undefined ||
+      totalUsage?.inputTokens !== undefined
+        ? {
+            inputTokens:
+              (totalUsage?.inputTokens ?? 0) + (usage.inputTokens ?? 0),
+          }
+        : {}),
+      ...(usage.outputTokens !== undefined ||
+      totalUsage?.outputTokens !== undefined
+        ? {
+            outputTokens:
+              (totalUsage?.outputTokens ?? 0) + (usage.outputTokens ?? 0),
+          }
+        : {}),
+    };
+  };
+
   // Counts of every tool call signature made so far, to detect looping
   // models. A call only counts as stuck once the same signature appears a
   // third time: models legitimately re-search a topic or re-fetch a page
@@ -1204,15 +1333,20 @@ async function sendAnthropicMessage(
     error?: string;
     stopped?: boolean;
   }> => {
+    if (options.signal?.aborted) return { stopped: true };
     try {
-      const data = await invoke<AnthropicResponse>("zen_chat", {
-        baseUrl,
-        apiKey,
-        provider: "anthropic",
-        payload: buildPayload(withTools, false),
-      });
+      const data = await abortable(
+        invoke<AnthropicResponse>("zen_chat", {
+          baseUrl,
+          apiKey,
+          provider: "anthropic",
+          payload: buildPayload(withTools, false),
+        }),
+        options.signal,
+      );
       return { data };
     } catch (err) {
+      if (options.signal?.aborted) return { stopped: true };
       const message =
         typeof err === "string" ? err : "An unknown error occurred.";
       return { error: message };
@@ -1232,23 +1366,39 @@ async function sendAnthropicMessage(
     toolContext = [];
 
     const retry = await runNonStreamingRound(false);
+    if (retry.stopped) {
+      return {
+        content: streamedContent,
+        stopped: true,
+        ...(totalUsage ? { usage: totalUsage } : {}),
+      };
+    }
     if (retry.error) {
       return { content: "", error: retry.error };
     }
+    addUsage(retry.data);
     const text = textFromAnthropicBlocks(retry.data?.content);
     if (text == null) {
       return partialContent
-        ? { content: `${PARTIAL_ANSWER_NOTE}${partialContent}` }
+        ? {
+            content: `${PARTIAL_ANSWER_NOTE}${partialContent}`,
+            ...(totalUsage ? { usage: totalUsage } : {}),
+          }
         : { content: "", error: fallbackError };
     }
     return {
       content: `[Web research stopped — answering without it]\n\n${text}`,
+      ...(totalUsage ? { usage: totalUsage } : {}),
     };
   };
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (options.signal?.aborted) {
-      return { content: streamedContent, stopped: true };
+      return {
+        content: streamedContent,
+        stopped: true,
+        ...(totalUsage ? { usage: totalUsage } : {}),
+      };
     }
 
     let result = useStream
@@ -1266,7 +1416,11 @@ async function sendAnthropicMessage(
       : await runNonStreamingRound(useTools);
 
     if (result.stopped) {
-      return { content: streamedContent, stopped: true };
+      return {
+        content: streamedContent,
+        stopped: true,
+        ...(totalUsage ? { usage: totalUsage } : {}),
+      };
     }
 
     if (result.error) {
@@ -1277,15 +1431,31 @@ async function sendAnthropicMessage(
         result = await runNonStreamingRound(useTools);
       }
 
+      if (result.stopped) {
+        return {
+          content: streamedContent,
+          stopped: true,
+          ...(totalUsage ? { usage: totalUsage } : {}),
+        };
+      }
+
       if (result.error) {
         // Some models reject the `tools` field; retry once without it.
         if (useTools && /tool/i.test(result.error)) {
           toolContext = [];
 
           const retry = await runNonStreamingRound(false);
+          if (retry.stopped) {
+            return {
+              content: streamedContent,
+              stopped: true,
+              ...(totalUsage ? { usage: totalUsage } : {}),
+            };
+          }
           if (retry.error) {
             return { content: "", error: retry.error };
           }
+          addUsage(retry.data);
           const text = textFromAnthropicBlocks(retry.data?.content);
           if (text == null) {
             return {
@@ -1295,6 +1465,7 @@ async function sendAnthropicMessage(
           }
           return {
             content: `[Web search unavailable — answering without it]\n\n${text}`,
+            ...(totalUsage ? { usage: totalUsage } : {}),
           };
         }
         return { content: "", error: result.error };
@@ -1302,6 +1473,7 @@ async function sendAnthropicMessage(
     }
 
     const data = result.data as AnthropicResponse | undefined;
+    addUsage(data);
     const blocks = data?.content ?? [];
     const toolUses = blocks.filter((b) => b.type === "tool_use");
 
@@ -1360,7 +1532,7 @@ async function sendAnthropicMessage(
         error: "API response did not contain a message.",
       };
     }
-    const usage = extractUsage(data);
+    const usage = totalUsage;
     return {
       content: text,
       ...(data?.stop_reason ? { finishReason: data.stop_reason } : {}),
@@ -1400,7 +1572,10 @@ async function searchWeb(
   options: SendMessageOptions,
 ): Promise<string> {
   options.onToolActivity?.({ tool: "web_search", detail: query });
-  const results = await invoke<WebResult[]>("zen_web_search", { query });
+  const results = await abortable(
+    invoke<WebResult[]>("zen_web_search", { query }),
+    options.signal,
+  );
   if (!results || results.length === 0) {
     return "The web search returned no results.";
   }
@@ -1422,7 +1597,10 @@ async function fetchPage(
   options: SendMessageOptions,
 ): Promise<string> {
   options.onToolActivity?.({ tool: "fetch_page", detail: url });
-  const text = await invoke<string>("zen_fetch_page", { url });
+  const text = await abortable(
+    invoke<string>("zen_fetch_page", { url }),
+    options.signal,
+  );
   options.onSource?.({ title: sourceTitle(url), url });
   return text;
 }

@@ -85,14 +85,17 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
     doc.setFontSize(size);
     doc.setTextColor(color);
     const lines = doc.splitTextToSize(text, width) as string[];
+    // Body line height is too tight for large runs (the 18 pt name). Advance
+    // by whichever is larger so wrapped headers cannot overlap.
+    const advance = Math.max(lineHeight, size * 1.2);
     for (const line of lines) {
-      ensureSpace(lineHeight);
+      ensureSpace(advance);
       if (align === "center") {
         doc.text(line, pageWidth / 2, y, { align: "center" });
       } else {
         doc.text(line, x, y);
       }
-      y += lineHeight;
+      y += advance;
     }
   };
   const heading = (section: CvSectionId) => {

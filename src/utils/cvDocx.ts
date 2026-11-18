@@ -139,7 +139,13 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
   children.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: headerAfter },
+      // The exact body line height is too short for the 18 pt name run; use
+      // a name-specific minimum so Word does not clip the header.
+      spacing: {
+        after: headerAfter,
+        line: nameSize * 12,
+        lineRule: LineRuleType.AT_LEAST,
+      },
       children: [
         new TextRun({
           text: document.contact.fullName.trim() || "Curriculum Vitae",

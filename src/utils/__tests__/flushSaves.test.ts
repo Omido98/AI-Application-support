@@ -30,6 +30,12 @@ vi.mock("@/stores/cvStore", () => ({
     return true;
   }),
 }));
+vi.mock("@/stores/settingsStore", () => ({
+  flushSettingsSave: vi.fn(async () => {
+    order.push("settings");
+    return true;
+  }),
+}));
 
 import { flushAllSaves } from "@/utils/flushSaves";
 import { registerPendingEditFlush } from "@/utils/pendingEdits";
@@ -51,6 +57,7 @@ describe("flushAllSaves", () => {
           "chat",
           "drafts",
           "cv",
+          "settings",
         ]),
       );
     } finally {

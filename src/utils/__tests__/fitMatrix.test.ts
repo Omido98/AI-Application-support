@@ -117,4 +117,61 @@ describe("buildFitMatrix", () => {
     const matrix = buildFitMatrix(application, null);
     expect(matrix.rows.every((row) => row.level === "gap")).toBe(true);
   });
+
+  it("uses work achievements and project achievements as evidence", () => {
+    const withAchievements: ProfileData = {
+      ...profile,
+      skills: [],
+      workExperience: [
+        {
+          ...profile.workExperience[0],
+          jobDescription: "",
+          achievements: ["Led an accessibility migration."],
+          projects: [
+            {
+              id: "p1",
+              name: "Design system",
+              startMonth: "",
+              startYear: "",
+              isCurrent: false,
+              achievements: ["Built reusable components."],
+            },
+          ],
+        },
+      ],
+    };
+    const matrix = buildFitMatrix(
+      {
+        ...application,
+        requirements:
+          "Led accessibility migration.\nBuilt reusable components.",
+      },
+      withAchievements,
+    );
+
+    expect(matrix.rows.every((row) => row.level !== "gap")).toBe(true);
+    expect(matrix.gap).toBe(0);
+  });
+
+  it("matches short and symbol-bearing skills such as C++, C# and UX", () => {
+    const withSkills: ProfileData = {
+      ...profile,
+      workExperience: [],
+      skills: [
+        { id: "s1", name: "C++" },
+        { id: "s2", name: "C#" },
+        { id: "s3", name: "UX" },
+      ],
+    };
+    const matrix = buildFitMatrix(
+      {
+        ...application,
+        requirements: "C++\nC#\nUX",
+      },
+      withSkills,
+    );
+
+    expect(matrix.rows).toHaveLength(3);
+    expect(matrix.rows.every((row) => row.level !== "gap")).toBe(true);
+  });
 });
