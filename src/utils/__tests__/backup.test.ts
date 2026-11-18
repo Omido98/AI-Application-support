@@ -4,11 +4,13 @@ import type { Mock } from "vitest";
 vi.mock("@/utils/storage", () => ({
   saveJson: vi.fn(),
   loadJson: vi.fn(),
+  deleteFile: vi.fn(),
   pruneOrphanChatFiles: vi.fn(),
   pruneOrphanCvFiles: vi.fn(),
 }));
 
 import {
+  deleteFile,
   loadJson,
   pruneOrphanChatFiles,
   pruneOrphanCvFiles,
@@ -25,6 +27,7 @@ import {
 
 const saveJsonMock = saveJson as Mock;
 const loadJsonMock = loadJson as Mock;
+const deleteFileMock = deleteFile as Mock;
 const pruneChatMock = pruneOrphanChatFiles as Mock;
 const pruneCvMock = pruneOrphanCvFiles as Mock;
 
@@ -45,9 +48,11 @@ const configWithSecret = {
 beforeEach(() => {
   saveJsonMock.mockReset();
   loadJsonMock.mockReset();
+  deleteFileMock.mockReset();
   pruneChatMock.mockReset();
   pruneCvMock.mockReset();
   saveJsonMock.mockResolvedValue(true);
+  deleteFileMock.mockResolvedValue(true);
   pruneChatMock.mockResolvedValue([]);
   pruneCvMock.mockResolvedValue([]);
   loadJsonMock.mockImplementation(async (name: string) => {
@@ -287,6 +292,77 @@ describe("restoreBackupBundle", () => {
 
     expect(pruneChatMock).toHaveBeenCalledWith([app.id]);
     expect(pruneCvMock).toHaveBeenCalledWith([app.id]);
+  });
+
+  it("removes app files that the backup does not contain", async () => {
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "applications.json": { applications: [app] },
+        [`chat_${app.id}.json`]: [],
+      },
+    };
+
+    await restoreBackupBundle(bundle);
+
+    expect(deleteFileMock).toHaveBeenCalledWith(`cv_${app.id}.json`);
+    expect(deleteFileMock).toHaveBeenCalledWith(`cv_history_${app.id}.json`);
+    expect(deleteFileMock).not.toHaveBeenCalledWith(`chat_${app.id}.json`);
+  });
+
+  it("does not delete app files for a partial settings-only import", async () => {
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: { "settings.json": { theme: "dark", accent: "#fff" } },
+    };
+
+    await restoreBackupBundle(bundle);
+
+    expect(deleteFileMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects the import instead of reporting success when a write fails", async () => {
+    saveJsonMock.mockImplementation(
+      async (name: string) => name !== "settings.json",
+    );
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "applications.json": { applications: [app] },
+        "settings.json": { theme: "dark", accent: "#fff" },
+      },
+    };
+
+    await expect(restoreBackupBundle(bundle)).rejects.toThrow(/settings\.json/);
+    expect(pruneChatMock).not.toHaveBeenCalled();
+    expect(pruneCvMock).not.toHaveBeenCalled();
+    expect(deleteFileMock).not.toHaveBeenCalled();
+  });
+
+  it("aborts when an app file missing from the backup cannot be removed", async () => {
+    deleteFileMock.mockImplementation(
+      async (name: string) => name !== `cv_${app.id}.json`,
+    );
+    const bundle: BackupBundle = {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      files: {
+        "applications.json": { applications: [app] },
+      },
+    };
+
+    await expect(restoreBackupBundle(bundle)).rejects.toThrow(
+      new RegExp(`cv_${app.id}\\.json`),
+    );
+    expect(pruneChatMock).not.toHaveBeenCalled();
+    expect(pruneCvMock).not.toHaveBeenCalled();
   });
 
   it("keeps the current application ids when the bundle omits them", async () => {

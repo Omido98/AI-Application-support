@@ -23,6 +23,11 @@ import SuggestionCard from "@/components/chat/SuggestionCard";
 import { Button } from "@/components/ui/button";
 import { formatTokenCount } from "@/utils/tokens";
 import { openExternalUrl } from "@/utils/links";
+import {
+  registerChatAction,
+  subscribeChatActionReset,
+  unregisterChatAction,
+} from "@/utils/chatActions";
 import { formatUsageCost } from "@/utils/zenPricing";
 import { applicationContextFrom } from "@/utils/systemPrompt";
 import {
@@ -187,6 +192,7 @@ function MessageList({
     null,
   );
   const actionControllerRef = useRef<AbortController | null>(null);
+  const actionThreadRef = useRef<string | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const anyActionPending = !!(
@@ -229,6 +235,34 @@ function MessageList({
         : "Working…";
 
   const stopAction = () => actionControllerRef.current?.abort();
+
+  const releaseAction = (threadId: string, controller: AbortController) => {
+    unregisterChatAction(threadId, controller);
+    if (actionControllerRef.current === controller) {
+      actionControllerRef.current = null;
+      actionThreadRef.current = null;
+    }
+  };
+
+  // Reset Chat clears the conversation from ChatTab; this component owns the
+  // refine-action pending state, so clear it as soon as that reset happens.
+  useEffect(
+    () =>
+      subscribeChatActionReset((threadId) => {
+        if (actionThreadRef.current !== threadId) return;
+        actionControllerRef.current = null;
+        actionThreadRef.current = null;
+        setDeslopPendingId(null);
+        setReviewPendingId(null);
+        setImprovePendingId(null);
+        setDeepImprovePendingId(null);
+        setImproveStep(null);
+        setImprovePreview("");
+        setActionActivity(null);
+        setOpenRefineKey(null);
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!anyActionPending) return;
@@ -425,38 +459,54 @@ function MessageList({
     }
     const controller = new AbortController();
     actionControllerRef.current = controller;
+    actionThreadRef.current = threadId;
+    registerChatAction(threadId, controller);
     setDeslopPendingId(msgId);
     setActionActivity(null);
     setThreadError(threadId, null);
     const sources: WebSource[] = [];
-    const result = await deslopText(content, config, {
-      signal: controller.signal,
-      onSource: (source) => {
-        if (!sources.some((entry) => entry.url === source.url)) {
-          sources.push(source);
-        }
-      },
-    });
-    setDeslopPendingId(null);
-    setActionActivity(null);
-    if (actionControllerRef.current === controller) {
-      actionControllerRef.current = null;
-    }
-    if (controller.signal.aborted || result.stopped) return;
-    if (result.error) {
-      reportActionError(threadId, result.error);
-      return;
-    }
-    if (result.content.trim() && threadStillExists(threadId)) {
-      await appendMessageToThread(threadId, {
-        id: newMessageId(),
-        role: "assistant",
-        content: result.content,
-        timestamp: new Date().toISOString(),
-        kind: "deslop",
-        sourceKey: msgId,
-        ...(sources.length > 0 ? { sources } : {}),
+    try {
+      const result = await deslopText(content, config, {
+        signal: controller.signal,
+        onSource: (source) => {
+          if (!sources.some((entry) => entry.url === source.url)) {
+            sources.push(source);
+          }
+        },
       });
+      if (controller.signal.aborted || result.stopped) return;
+      if (result.error) {
+        reportActionError(threadId, result.error);
+        return;
+      }
+      if (result.content.trim() && threadStillExists(threadId)) {
+        await appendMessageToThread(
+          threadId,
+          {
+            id: newMessageId(),
+            role: "assistant",
+            content: result.content,
+            timestamp: new Date().toISOString(),
+            kind: "deslop",
+            sourceKey: msgId,
+            ...(sources.length > 0 ? { sources } : {}),
+          },
+          controller.signal,
+        );
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        reportActionError(
+          threadId,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    } finally {
+      if (actionControllerRef.current === controller) {
+        setDeslopPendingId(null);
+        setActionActivity(null);
+      }
+      releaseAction(threadId, controller);
     }
   };
 
@@ -474,43 +524,61 @@ function MessageList({
     }
     const controller = new AbortController();
     actionControllerRef.current = controller;
+    actionThreadRef.current = threadId;
+    registerChatAction(threadId, controller);
     setReviewPendingId(msgId);
     setActionActivity(null);
     setThreadError(threadId, null);
 
     const appCtx = applicationContextFrom(application);
-
-    const profileData = await loadProfileData();
     const sources: WebSource[] = [];
-    const result = await reviewDraft(content, appCtx, profileData, config, {
-      signal: controller.signal,
-      onToolActivity: setActionActivity,
-      onSource: (source) => {
-        if (!sources.some((entry) => entry.url === source.url)) {
-          sources.push(source);
-        }
-      },
-    });
-    setReviewPendingId(null);
-    setActionActivity(null);
-    if (actionControllerRef.current === controller) {
-      actionControllerRef.current = null;
-    }
-    if (controller.signal.aborted || result.stopped) return;
-    if (result.error) {
-      reportActionError(threadId, result.error);
-      return;
-    }
-    if (result.content.trim() && threadStillExists(threadId)) {
-      await appendMessageToThread(threadId, {
-        id: newMessageId(),
-        role: "assistant",
-        content: result.content,
-        timestamp: new Date().toISOString(),
-        kind: "review",
-        sourceKey: msgId,
-        ...(sources.length > 0 ? { sources } : {}),
+
+    try {
+      const profileData = await loadProfileData();
+      const result = await reviewDraft(content, appCtx, profileData, config, {
+        signal: controller.signal,
+        onToolActivity: (activity) => {
+          if (!controller.signal.aborted) setActionActivity(activity);
+        },
+        onSource: (source) => {
+          if (!sources.some((entry) => entry.url === source.url)) {
+            sources.push(source);
+          }
+        },
       });
+      if (controller.signal.aborted || result.stopped) return;
+      if (result.error) {
+        reportActionError(threadId, result.error);
+        return;
+      }
+      if (result.content.trim() && threadStillExists(threadId)) {
+        await appendMessageToThread(
+          threadId,
+          {
+            id: newMessageId(),
+            role: "assistant",
+            content: result.content,
+            timestamp: new Date().toISOString(),
+            kind: "review",
+            sourceKey: msgId,
+            ...(sources.length > 0 ? { sources } : {}),
+          },
+          controller.signal,
+        );
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        reportActionError(
+          threadId,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    } finally {
+      if (actionControllerRef.current === controller) {
+        setReviewPendingId(null);
+        setActionActivity(null);
+      }
+      releaseAction(threadId, controller);
     }
   };
 
@@ -565,25 +633,32 @@ function MessageList({
     else setImprovePendingId(msgId);
     const controller = new AbortController();
     actionControllerRef.current = controller;
+    actionThreadRef.current = threadId;
+    registerChatAction(threadId, controller);
     setImproveStep("review");
     setImprovePreview("");
     setActionActivity(null);
     setThreadError(threadId, null);
 
     const appCtx = applicationContextFrom(application);
-
-    const profileData = await loadProfileData();
     const sources: WebSource[] = [];
 
     const options = {
       signal: controller.signal,
       onStep: (step: ImproveStep) => {
+        if (controller.signal.aborted) return;
         setImproveStep(step);
         // The revise pass streams live; the other steps replace the preview.
         if (step !== "revise") setImprovePreview("");
       },
-      onDelta: (text: string) => setImprovePreview((prev) => prev + text),
-      onToolActivity: setActionActivity,
+      onDelta: (text: string) => {
+        if (!controller.signal.aborted) {
+          setImprovePreview((prev) => prev + text);
+        }
+      },
+      onToolActivity: (activity: ToolActivity) => {
+        if (!controller.signal.aborted) setActionActivity(activity);
+      },
       onSource: (source: WebSource) => {
         if (!sources.some((entry) => entry.url === source.url)) {
           sources.push(source);
@@ -591,34 +666,55 @@ function MessageList({
       },
     };
 
-    const result =
-      depth === "deep"
-        ? await deepImproveDraft(content, appCtx, profileData, config, options)
-        : await improveDraft(content, appCtx, profileData, config, options);
+    try {
+      const profileData = await loadProfileData();
+      const result =
+        depth === "deep"
+          ? await deepImproveDraft(
+              content,
+              appCtx,
+              profileData,
+              config,
+              options,
+            )
+          : await improveDraft(content, appCtx, profileData, config, options);
 
-    setImprovePendingId(null);
-    setDeepImprovePendingId(null);
-    setImproveStep(null);
-    setImprovePreview("");
-    setActionActivity(null);
-    if (actionControllerRef.current === controller) {
-      actionControllerRef.current = null;
-    }
-    if (controller.signal.aborted || result.stopped) return;
-    if (result.error) {
-      reportActionError(threadId, result.error);
-      return;
-    }
-    if (result.content.trim() && threadStillExists(threadId)) {
-      await appendMessageToThread(threadId, {
-        id: newMessageId(),
-        role: "assistant",
-        content: result.content,
-        timestamp: new Date().toISOString(),
-        kind: "improve",
-        sourceKey: msgId,
-        ...(sources.length > 0 ? { sources } : {}),
-      });
+      if (controller.signal.aborted || result.stopped) return;
+      if (result.error) {
+        reportActionError(threadId, result.error);
+        return;
+      }
+      if (result.content.trim() && threadStillExists(threadId)) {
+        await appendMessageToThread(
+          threadId,
+          {
+            id: newMessageId(),
+            role: "assistant",
+            content: result.content,
+            timestamp: new Date().toISOString(),
+            kind: "improve",
+            sourceKey: msgId,
+            ...(sources.length > 0 ? { sources } : {}),
+          },
+          controller.signal,
+        );
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        reportActionError(
+          threadId,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    } finally {
+      if (actionControllerRef.current === controller) {
+        setImprovePendingId(null);
+        setDeepImprovePendingId(null);
+        setImproveStep(null);
+        setImprovePreview("");
+        setActionActivity(null);
+      }
+      releaseAction(threadId, controller);
     }
   };
 

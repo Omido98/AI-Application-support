@@ -2035,12 +2035,32 @@ fn write_bytes_file_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
             file.sync_all()
                 .map_err(|err| format!("Could not flush {}: {err}", temp.display()))?;
         }
-        if path.exists() {
-            fs::remove_file(path)
-                .map_err(|err| format!("Could not replace {}: {err}", path.display()))?;
+
+        // Never remove the existing export before the replacement is safely
+        // on disk. Move it aside, install the new file, then drop the old one.
+        // If installing fails, put the original back.
+        let old = if path.exists() {
+            let old = temp_path(path);
+            fs::rename(path, &old).map_err(|err| {
+                format!(
+                    "Could not move the existing {} aside: {err}",
+                    path.display()
+                )
+            })?;
+            Some(old)
+        } else {
+            None
+        };
+
+        if let Err(err) = fs::rename(&temp, path) {
+            if let Some(old) = &old {
+                let _ = fs::rename(old, path);
+            }
+            return Err(format!("Could not replace {}: {err}", path.display()));
         }
-        fs::rename(&temp, path)
-            .map_err(|err| format!("Could not replace {}: {err}", path.display()))?;
+        if let Some(old) = old {
+            let _ = fs::remove_file(old);
+        }
         sync_directory(parent);
         Ok(())
     })();
@@ -3046,6 +3066,13 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), r#"{"version":2}"#);
         // A one-off export does not create a .bak beside the user's file.
         assert!(!backup_path(&path).exists());
+        // The replace path must clean up its temporary old copy.
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["export.json".to_string()]);
 
         let _ = fs::remove_dir_all(&dir);
     }

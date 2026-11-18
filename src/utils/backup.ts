@@ -1,6 +1,7 @@
 import {
   saveJson,
   loadJson,
+  deleteFile,
   pruneOrphanChatFiles,
   pruneOrphanCvFiles,
 } from "@/utils/storage";
@@ -186,12 +187,38 @@ function draftsForApplications(
   );
 }
 
+/** Per-application files that belong to a restored application. */
+const APPLICATION_FILE_PREFIXES = ["chat", "cv", "cv_history"] as const;
+
+/**
+ * Remove application-owned files that this backup did not contain. Without
+ * this, importing an older backup leaves later chats, CV drafts and version
+ * history in place, so the result is a merge rather than the promised restore.
+ */
+async function removeFilesMissingFromBundle(
+  applicationIds: string[],
+  bundleFiles: Record<string, unknown>,
+): Promise<void> {
+  for (const applicationId of applicationIds) {
+    for (const prefix of APPLICATION_FILE_PREFIXES) {
+      const name = `${prefix}_${applicationId}.json`;
+      if (name in bundleFiles) continue;
+      if (!(await deleteFile(name))) {
+        throw new Error(
+          `Could not remove the old ${name} that is not part of this backup. Your current data was not fully replaced.`,
+        );
+      }
+    }
+  }
+}
+
 /** Write every file of the bundle back to the data directory. */
 export async function restoreBackupBundle(
   bundle: BackupBundle,
 ): Promise<string[]> {
   const applicationIds = await restoredApplicationIds(bundle);
   const restored: string[] = [];
+  const failed: string[] = [];
   for (const [name, data] of Object.entries(bundle.files)) {
     if (!SAFE_NAME_RE.test(name)) continue;
     const safe =
@@ -199,8 +226,25 @@ export async function restoreBackupBundle(
         ? draftsForApplications(fileForBackup(name, data), applicationIds)
         : fileForBackup(name, data);
     if (safe == null) continue;
-    await saveJson(name, safe);
-    restored.push(name);
+    if (await saveJson(name, safe)) {
+      restored.push(name);
+    } else {
+      failed.push(name);
+    }
+  }
+
+  if (failed.length > 0) {
+    throw new Error(
+      `Could not write ${failed.join(", ")}. The import was stopped before cleanup; your safety copy is still available.`,
+    );
+  }
+
+  // A restore of applications.json is a full application restore: files for
+  // its applications that are absent from the bundle must not survive from
+  // the previous data set. Keep the current files when the bundle deliberately
+  // omits applications.json (a partial settings/profile import).
+  if (applicationIds !== null && "applications.json" in bundle.files) {
+    await removeFilesMissingFromBundle(applicationIds, bundle.files);
   }
 
   // Thread/CV files for applications that no longer exist would otherwise

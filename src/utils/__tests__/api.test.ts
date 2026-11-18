@@ -60,6 +60,7 @@ type Round =
   | { kind: "streamError"; message: string }
   | { kind: "hang"; deltas?: string[] }
   | { kind: "plain"; data: unknown }
+  | { kind: "plainHang" }
   | { kind: "plainError"; message: string };
 
 /**
@@ -101,6 +102,7 @@ function mockChatSequence(rounds: Round[]) {
       const current = rounds[Math.min(round, rounds.length - 1)];
       round += 1;
       if (current.kind === "plain") return current.data;
+      if (current.kind === "plainHang") return new Promise(() => {});
       if (current.kind === "plainError") throw current.message;
       throw `unexpected zen_chat call (round ${round}, kind ${current.kind})`;
     }
@@ -294,6 +296,35 @@ describe("sendMessage (OpenAI-compatible)", () => {
     for (const call of chatCalls) {
       expect(call[1]).not.toHaveProperty("payload.tools");
     }
+  });
+
+  it("sums provider usage across tool rounds", async () => {
+    mockChatSequence([
+      {
+        kind: "stream",
+        data: {
+          ...(openaiMessage({
+            content: null,
+            tool_calls: [openaiToolCall("web_search", "Acme Corp")],
+          }) as object),
+          usage: { prompt_tokens: 10, completion_tokens: 2 },
+        },
+      },
+      {
+        kind: "stream",
+        data: {
+          ...(openaiMessage({ content: "Acme is a company." }) as object),
+          usage: { prompt_tokens: 20, completion_tokens: 5 },
+        },
+      },
+    ]);
+
+    const result = await sendMessage([], baseConfig, "system");
+
+    expect(result).toEqual({
+      content: "Acme is a company.",
+      usage: { inputTokens: 30, outputTokens: 7 },
+    });
   });
 
   it("allows a repeated call and finishes normally", async () => {
@@ -549,6 +580,24 @@ describe("sendMessage (OpenAI-compatible)", () => {
     ]);
     const result = await sendMessage([], baseConfig, "system");
     expect(result.content).toBe("One-shot answer.");
+  });
+
+  it("stops a non-streaming fallback when the signal aborts", async () => {
+    mockChatSequence([
+      {
+        kind: "streamError",
+        message: "SSE streaming is not supported by this provider",
+      },
+      { kind: "plainHang" },
+    ]);
+    const controller = new AbortController();
+    const pending = sendMessage([], baseConfig, "system", {
+      signal: controller.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+
+    await expect(pending).resolves.toEqual({ content: "", stopped: true });
   });
 
   it("returns the partial answer when stopped mid-stream", async () => {

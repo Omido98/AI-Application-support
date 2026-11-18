@@ -298,6 +298,14 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
     }
   };
 
+  const handleRemoveKey = async () => {
+    await setConfig({ apiKey: "" });
+    setApiKey("");
+    setDetectedProvider(null);
+    setTestStatus("idle");
+    setTestMessage("");
+  };
+
   const handleTest = async () => {
     if (!apiKey.trim()) {
       setTestStatus("error");
@@ -414,9 +422,20 @@ function ApiConfigFormInner({ onDone }: ApiConfigFormProps) {
 
         {/* API Key */}
         <div className="space-y-1.5">
-          <Label htmlFor="api-key" className="text-text-secondary text-xs">
-            API Key
-          </Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="api-key" className="text-text-secondary text-xs">
+              API Key
+            </Label>
+            {(apiKey.trim() !== "" || config.apiKey.trim() !== "") && (
+              <button
+                type="button"
+                onClick={() => void handleRemoveKey()}
+                className="text-[11px] text-destructive transition-colors hover:text-destructive/80"
+              >
+                Remove key
+              </button>
+            )}
+          </div>
           <Input
             id="api-key"
             type="password"

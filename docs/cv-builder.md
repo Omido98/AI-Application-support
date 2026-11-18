@@ -182,9 +182,12 @@ previous saved version.
 ## Backup and cleanup
 
 Backups include `cv_<applicationId>.json` alongside chat threads. Restoring a
-backup removes CV drafts for applications that no longer exist. Deleting an
-application (after the undo window) deletes its CV draft; resetting all data
-clears it with the rest of the data folder.
+backup replaces the per-application files for the applications in that backup:
+chat threads, CV drafts and version history that were created after the backup
+are removed rather than left behind. A write failure aborts the import instead
+of reporting a partial restore as complete. Deleting an application (after the
+undo window) deletes its CV draft; resetting all data clears it with the rest of
+the data folder.
 
 ## Limits and privacy
 

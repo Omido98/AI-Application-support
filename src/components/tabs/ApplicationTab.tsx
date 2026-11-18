@@ -167,6 +167,12 @@ function TagsEditor({
   onChange: (tags: string[]) => void;
 }) {
   const [draft, setDraft] = useState(tags.join(", "));
+  // Imported/restored data can replace this application's tags while the
+  // editor is mounted. Adopt the new value so blurring cannot write the old
+  // tags back over the imported ones.
+  useEffect(() => {
+    setDraft(tags.join(", "));
+  }, [tags]);
   const commit = () => {
     const parsed = [
       ...new Set(
