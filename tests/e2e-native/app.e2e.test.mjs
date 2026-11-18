@@ -410,6 +410,12 @@ test(
       { message: "compact template did not reach the preview" },
     );
     await driver.clickXPath("//button[normalize-space(.)='Edit']");
+    // WebKitGTK does not always scroll a nested editor panel before clicking;
+    // bring the CV settings control into view explicitly first.
+    await driver.execute(
+      "document.querySelector('#cv-language-edit')?.scrollIntoView({ block: 'center' });",
+    );
+    await sleep(250);
 
     await driver.clickXPath("//*[@id='cv-language-edit']");
     await driver.waitFor(
