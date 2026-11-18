@@ -49,8 +49,9 @@ import { analyzeCvDocument } from "@/utils/cvAnalysis";
 import CvGroundingPanel from "@/components/cv/CvGroundingPanel";
 import { analyzeCoverLetterConsistency } from "@/utils/cvConsistency";
 import CvConsistencyPanel from "@/components/cv/CvConsistencyPanel";
-import BufferedTextarea from "@/components/cv/BufferedTextarea";
+import BufferedTextarea from "@/components/common/BufferedTextarea";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { splitLines as lines } from "@/utils/lines";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
 import { flushPendingEdits } from "@/utils/pendingEdits";
 import { clearAiSection } from "@/utils/cvProvenance";
@@ -93,13 +94,6 @@ const textareaClass =
 function inferLanguage(application: JobApplication): CvLanguage {
   const value = application.applicationLanguage.trim().toLowerCase();
   return value.includes("sv") || value.includes("swedish") ? "sv" : "en";
-}
-
-function lines(value: string): string[] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
 }
 
 function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
@@ -274,6 +268,9 @@ export default function CvBuilder({
   const generationError = useCvStore(
     (state) => state.generationErrors[application.id],
   );
+  const generationProposal = useCvStore(
+    (state) => state.generationProposals[application.id] ?? null,
+  );
   const loadCv = useCvStore((state) => state.loadCv);
   const setCv = useCvStore((state) => state.setCv);
   const updateCv = useCvStore((state) => state.updateCv);
@@ -281,6 +278,9 @@ export default function CvBuilder({
   const restoreSnapshot = useCvStore((state) => state.restoreSnapshot);
   const saveCv = useCvStore((state) => state.saveCv);
   const generateCv = useCvStore((state) => state.generateCv);
+  const clearGenerationProposal = useCvStore(
+    (state) => state.clearGenerationProposal,
+  );
   const applyGeneratedCv = useCvStore((state) => state.applyGeneratedCv);
   const cancelGeneration = useCvStore((state) => state.cancelGeneration);
 
@@ -302,8 +302,6 @@ export default function CvBuilder({
   const [historyBusy, setHistoryBusy] = useState(false);
   const [chatContextBusy, setChatContextBusy] = useState(false);
   const [showAllAts, setShowAllAts] = useState(false);
-  const [generationProposal, setGenerationProposal] =
-    useState<CvDocument | null>(null);
   const [generationBusy, setGenerationBusy] = useState(false);
   const [previousDocument, setPreviousDocument] = useState<CvDocument | null>(
     null,
@@ -345,10 +343,19 @@ export default function CvBuilder({
     setPreviousDocument(null);
     setView("edit");
     setHistoryOpen(false);
-    setGenerationProposal(null);
     setGenerationBusy(false);
     setShowAllAts(false);
   }, [application.id]);
+
+  // A section rewrite is a modal interaction; leaving the builder must abort
+  // the request rather than let its result land somewhere else.
+  useEffect(
+    () => () => {
+      rewriteController.current?.abort();
+      rewriteController.current = null;
+    },
+    [],
+  );
 
   const profileHasContent = Boolean(
     profile.fullName.trim() ||
@@ -422,6 +429,21 @@ export default function CvBuilder({
 
   const patch = (updater: (current: CvDocument) => CvDocument) => {
     updateCv(application.id, updater);
+  };
+
+  /**
+   * Removing a hand-written CV entry is destructive and not otherwise
+   * recoverable (manual edits are never snapshotted). Take a Versions snapshot
+   * first so a misclick can be restored.
+   */
+  const removeEntry = async (
+    label: string,
+    updater: (current: CvDocument) => CvDocument,
+  ) => {
+    if (!document) return;
+    flushPendingEdits();
+    await snapshotCurrent(application.id, `Before removing ${label}`);
+    patch(updater);
   };
 
   const setField = <K extends keyof CvDocument>(
@@ -543,8 +565,8 @@ export default function CvBuilder({
     flushPendingEdits();
     const current = useCvStore.getState().documents[application.id] ?? document;
     setExportStatus(null);
-    setGenerationProposal(null);
-    const proposal = await generateCv({
+    clearGenerationProposal(application.id);
+    await generateCv({
       application,
       profile,
       config: apiConfig,
@@ -555,7 +577,8 @@ export default function CvBuilder({
         template: current?.template ?? template,
       },
     });
-    if (proposal) setGenerationProposal(proposal);
+    // The store owns the proposal so it survives navigation; the subscription
+    // above opens the review dialog for this application only.
   };
 
   const handleAcceptGenerated = async () => {
@@ -568,7 +591,7 @@ export default function CvBuilder({
       setTemplate(generationProposal.template ?? "classic");
       setExtraContext(generationProposal.extraContext);
       if (before) setPreviousDocument(before);
-      setGenerationProposal(null);
+      clearGenerationProposal(application.id);
       setExportStatus("Applied generated CV.");
     } finally {
       setGenerationBusy(false);
@@ -577,7 +600,7 @@ export default function CvBuilder({
 
   const handleDiscardGenerated = () => {
     if (generationBusy) return;
-    setGenerationProposal(null);
+    clearGenerationProposal(application.id);
     setExportStatus("Discarded generated CV.");
   };
 
@@ -1057,12 +1080,17 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.experience.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
-                      ...current,
-                      experience: current.experience.filter(
-                        (entry) => entry.id !== item.id,
-                      ),
-                    }))
+                    void removeEntry(
+                      `${item.role || "experience"} at ${
+                        item.company || "company"
+                      }`,
+                      (current) => ({
+                        ...current,
+                        experience: current.experience.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      }),
+                    )
                   }
                   label={`${item.role || "experience"} at ${
                     item.company || "company"
@@ -1208,7 +1236,7 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.education.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
+                    void removeEntry(item.school || "education", (current) => ({
                       ...current,
                       education: current.education.filter(
                         (entry) => entry.id !== item.id,
@@ -1328,12 +1356,15 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.projects.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
-                      ...current,
-                      projects: current.projects.filter(
-                        (entry) => entry.id !== item.id,
-                      ),
-                    }))
+                    void removeEntry(
+                      item.title || item.description || "project",
+                      (current) => ({
+                        ...current,
+                        projects: current.projects.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      }),
+                    )
                   }
                   label={item.title || item.description || "project"}
                 />
@@ -1429,12 +1460,15 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.certifications.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
-                      ...current,
-                      certifications: current.certifications.filter(
-                        (entry) => entry.id !== item.id,
-                      ),
-                    }))
+                    void removeEntry(
+                      item.name || "certification",
+                      (current) => ({
+                        ...current,
+                        certifications: current.certifications.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      }),
+                    )
                   }
                   label={item.name || "certification"}
                 />
@@ -1521,7 +1555,7 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.languages.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
+                    void removeEntry(item.name || "language", (current) => ({
                       ...current,
                       languages: current.languages.filter(
                         (entry) => entry.id !== item.id,
@@ -1596,12 +1630,15 @@ export default function CvBuilder({
                   canMoveUp={itemIndex > 0}
                   canMoveDown={itemIndex < document.otherEngagements.length - 1}
                   onDelete={() =>
-                    patch((current) => ({
-                      ...current,
-                      otherEngagements: current.otherEngagements.filter(
-                        (entry) => entry.id !== item.id,
-                      ),
-                    }))
+                    void removeEntry(
+                      item.organization || "other experience",
+                      (current) => ({
+                        ...current,
+                        otherEngagements: current.otherEngagements.filter(
+                          (entry) => entry.id !== item.id,
+                        ),
+                      }),
+                    )
                   }
                   label={item.organization || "other experience"}
                 />
@@ -1738,7 +1775,7 @@ export default function CvBuilder({
             disabled={snapshots.length === 0}
             title={
               snapshots.length === 0
-                ? "Versions are saved before AI regeneration, before an accepted rewrite and before a restore"
+                ? "Versions are saved before AI regeneration, before an accepted rewrite, before removing an entry and before a restore"
                 : "Restore an earlier CV version"
             }
           >

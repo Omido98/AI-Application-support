@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useProfileStore } from "@/stores/profileStore";
+import BufferedTextarea from "@/components/common/BufferedTextarea";
+import { splitLines } from "@/utils/lines";
 import { Trash2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import type { WorkExperience, Project } from "@/types";
 import { YEARS, rangeWarning } from "@/utils/yearOptions";
@@ -418,16 +420,13 @@ export default function WorkExperienceSection() {
                       >
                         Key achievements (one per line)
                       </Label>
-                      <Textarea
+                      <BufferedTextarea
                         id={`work-${index}-achievements`}
                         className={textareaClass}
                         value={(we.achievements ?? []).join("\n")}
-                        onChange={(e) =>
+                        onCommit={(value) =>
                           updateWorkExperience(we.id, {
-                            achievements: e.target.value
-                              .split("\n")
-                              .map((item) => item.trim())
-                              .filter(Boolean),
+                            achievements: splitLines(value),
                           })
                         }
                         placeholder="Shipped a feature that reduced response time by 30%…"
@@ -502,18 +501,15 @@ export default function WorkExperienceSection() {
                             >
                               Project achievements (one per line)
                             </Label>
-                            <Textarea
+                            <BufferedTextarea
                               id={`work-${index}-project-${pi}-achievements`}
                               className={textareaClass}
                               value={(proj.achievements ?? []).join("\n")}
-                              onChange={(e) => {
+                              onCommit={(value) => {
                                 const next = [...we.projects];
                                 next[pi] = {
                                   ...proj,
-                                  achievements: e.target.value
-                                    .split("\n")
-                                    .map((item) => item.trim())
-                                    .filter(Boolean),
+                                  achievements: splitLines(value),
                                 };
                                 updateWorkExperience(we.id, {
                                   projects: next,

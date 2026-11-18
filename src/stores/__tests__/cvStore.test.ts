@@ -9,13 +9,22 @@ vi.mock("@/utils/storage", () => ({
   reportDataIssue: vi.fn(),
 }));
 
+vi.mock("@/utils/cvGeneration", () => ({
+  CvGenerationError: class CvGenerationError extends Error {},
+  generateCvDocument: vi.fn(),
+}));
+
 import { deleteFile, loadJson, saveJson } from "@/utils/storage";
+import { generateCvDocument } from "@/utils/cvGeneration";
 import { flushCvSaves, useCvStore } from "@/stores/cvStore";
 import { createCvDocumentFromProfile } from "@/utils/cvSchema";
+import type { ApiConfig } from "@/stores/chatStore";
+import type { CvDocument } from "@/types/cv";
 
 const loadJsonMock = loadJson as Mock;
 const saveJsonMock = saveJson as Mock;
 const deleteFileMock = deleteFile as Mock;
+const generateCvDocumentMock = generateCvDocument as Mock;
 
 const application: JobApplication = {
   id: "app-1",
@@ -69,11 +78,32 @@ function makeDocument() {
   });
 }
 
+const apiConfig = {
+  provider: "zen",
+  baseUrl: "https://example.test/v1",
+  apiKey: "test-key",
+  model: "test-model",
+  reasoningEffort: null,
+  contextWindow: 128_000,
+  webSearchEnabled: false,
+  systemPromptMode: "standard",
+  customSystemPrompt: "",
+  keychainAccount: null,
+  sessionKeyOnly: false,
+} as ApiConfig;
+
+const generationOptions = {
+  language: "en" as const,
+  pageSize: "a4" as const,
+  extraContext: "",
+};
+
 beforeEach(() => {
   useCvStore.getState().resetCache();
   loadJsonMock.mockReset();
   saveJsonMock.mockReset();
   deleteFileMock.mockReset();
+  generateCvDocumentMock.mockReset();
   saveJsonMock.mockResolvedValue(true);
   deleteFileMock.mockResolvedValue(true);
 });
@@ -244,5 +274,72 @@ describe("cvStore", () => {
 
     expect(useCvStore.getState().documents["app-1"]).toBeUndefined();
     expect(useCvStore.getState().errors["app-1"]).toContain("unexpected");
+  });
+
+  it("keeps generation proposals in the store, keyed by application", async () => {
+    const first = makeDocument();
+    const second = { ...makeDocument(), headline: "Second app" };
+    generateCvDocumentMock
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second);
+
+    const result = await useCvStore.getState().generateCv({
+      application,
+      profile,
+      config: apiConfig,
+      options: generationOptions,
+    });
+    expect(result).toBe(first);
+    expect(useCvStore.getState().generationProposals["app-1"]).toBe(first);
+
+    await useCvStore.getState().generateCv({
+      application: { ...application, id: "app-2" },
+      profile,
+      config: apiConfig,
+      options: generationOptions,
+    });
+    expect(useCvStore.getState().generationProposals["app-1"]).toBe(first);
+    expect(useCvStore.getState().generationProposals["app-2"]).toBe(second);
+
+    useCvStore.getState().clearGenerationProposal("app-1");
+    expect(useCvStore.getState().generationProposals["app-1"]).toBeUndefined();
+    expect(useCvStore.getState().generationProposals["app-2"]).toBe(second);
+  });
+
+  it("drops a proposal when generation is cancelled", async () => {
+    let resolveGeneration!: (document: CvDocument) => void;
+    generateCvDocumentMock.mockImplementation(
+      () =>
+        new Promise<CvDocument>((resolve) => {
+          resolveGeneration = resolve;
+        }),
+    );
+
+    const pending = useCvStore.getState().generateCv({
+      application,
+      profile,
+      config: apiConfig,
+      options: generationOptions,
+    });
+    await vi.waitFor(() =>
+      expect(generateCvDocumentMock).toHaveBeenCalledTimes(1),
+    );
+
+    useCvStore.getState().cancelGeneration("app-1");
+    resolveGeneration(makeDocument());
+
+    await expect(pending).resolves.toBeNull();
+    expect(useCvStore.getState().generationProposals["app-1"]).toBeUndefined();
+    expect(useCvStore.getState().generating["app-1"]).toBe(false);
+  });
+
+  it("clears a pending proposal when the application's CV is deleted", async () => {
+    useCvStore.setState({
+      generationProposals: { "app-1": makeDocument() },
+    });
+
+    await useCvStore.getState().deleteCv("app-1");
+
+    expect(useCvStore.getState().generationProposals["app-1"]).toBeUndefined();
   });
 });

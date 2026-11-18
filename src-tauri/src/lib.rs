@@ -678,48 +678,71 @@ impl StreamAccumulator {
 /// UI spinning forever.
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Read an SSE response body chunk-by-chunk, feed events into the
-/// accumulator (emitting text deltas as they arrive), and finish with the
-/// fully assembled response. When `token` is cancelled, the HTTP connection
-/// is dropped and whatever text was accumulated so far is still delivered.
-async fn stream_sse(
-    response: reqwest::Response,
+/// Keep reading for this long after a provider signals the answer is complete.
+/// OpenAI sends a trailing usage-only chunk after `finish_reason`, before
+/// `[DONE]`; returning at `finish_reason` would drop token usage (and cost).
+const STREAM_FINISH_GRACE: Duration = Duration::from_secs(3);
+
+/// Read an SSE byte stream, feed events into the accumulator (emitting text
+/// deltas as they arrive), and finish with the fully assembled response.
+///
+/// The generic stream and callback keep this testable without a Tauri channel.
+/// A provider that signals completion is still drained briefly so trailing
+/// metadata such as OpenAI's usage chunk is not lost.
+async fn consume_sse_stream<S, B, E, F>(
+    stream: S,
     provider: &str,
-    on_event: &Channel<ChatStreamEvent>,
     token: &CancellationToken,
-) -> Result<(), String> {
-    let mut stream = response.bytes_stream();
+    mut emit: F,
+) -> Result<(), String>
+where
+    S: futures_util::Stream<Item = Result<B, E>>,
+    B: AsRef<[u8]>,
+    E: std::fmt::Display,
+    F: FnMut(ChatStreamEvent) -> Result<(), String>,
+{
+    let mut stream = Box::pin(stream);
     let mut buffer: Vec<u8> = Vec::new();
     let mut event_data = String::new();
     let mut acc = StreamAccumulator::new(provider);
 
     let consume = async {
-        loop {
-            let next = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next())
-                .await
-                .map_err(|_| {
-                    "No data was received from the model for 120 seconds, so the request was cancelled."
-                        .to_string()
-                })?;
+        'outer: loop {
+            let wait = if acc.is_finished() {
+                STREAM_FINISH_GRACE
+            } else {
+                STREAM_IDLE_TIMEOUT
+            };
+            let next = match tokio::time::timeout(wait, stream.next()).await {
+                Ok(next) => next,
+                // After the answer is complete, a provider that keeps the
+                // connection open is not an error: stop at the grace limit.
+                Err(_) if acc.is_finished() => break,
+                Err(_) => {
+                    return Err(
+                        "No data was received from the model for 120 seconds, so the request was cancelled."
+                            .to_string(),
+                    )
+                }
+            };
             let Some(chunk) = next else {
                 break;
             };
             let chunk = chunk.map_err(|e| format!("Failed to read response stream: {e}"))?;
-            buffer.extend_from_slice(&chunk);
+            buffer.extend_from_slice(chunk.as_ref());
             while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
                 let line: Vec<u8> = buffer.drain(..=pos).collect();
                 let line = String::from_utf8_lossy(&line);
                 let line = line.trim_end_matches(['\r', '\n']);
                 if line.is_empty() {
                     if !event_data.is_empty() {
+                        let done = event_data.trim() == "[DONE]";
                         if let Some(delta) = acc.feed(&event_data)? {
-                            on_event
-                                .send(ChatStreamEvent::Delta { text: delta })
-                                .map_err(|e| format!("Failed to send stream event: {e}"))?;
+                            emit(ChatStreamEvent::Delta { text: delta })?;
                         }
                         event_data.clear();
-                        if acc.is_finished() {
-                            return Ok::<(), String>(());
+                        if done {
+                            break 'outer;
                         }
                     }
                 } else if let Some(data) = line.strip_prefix("data:") {
@@ -734,9 +757,7 @@ async fn stream_sse(
         // A trailing event that was not terminated by a blank line.
         if !event_data.is_empty() {
             if let Some(delta) = acc.feed(&event_data)? {
-                on_event
-                    .send(ChatStreamEvent::Delta { text: delta })
-                    .map_err(|e| format!("Failed to send stream event: {e}"))?;
+                emit(ChatStreamEvent::Delta { text: delta })?;
             }
         }
         Ok::<(), String>(())
@@ -748,9 +769,24 @@ async fn stream_sse(
         result = consume => result?,
     }
 
-    on_event
-        .send(ChatStreamEvent::Done { data: acc.finish() })
-        .map_err(|e| format!("Failed to send stream event: {e}"))
+    emit(ChatStreamEvent::Done { data: acc.finish() })
+}
+
+/// Read an SSE response body chunk-by-chunk and forward events to the frontend.
+/// When `token` is cancelled, the HTTP connection is dropped and whatever text
+/// was accumulated so far is still delivered.
+async fn stream_sse(
+    response: reqwest::Response,
+    provider: &str,
+    on_event: &Channel<ChatStreamEvent>,
+    token: &CancellationToken,
+) -> Result<(), String> {
+    consume_sse_stream(response.bytes_stream(), provider, token, |event| {
+        on_event
+            .send(event)
+            .map_err(|e| format!("Failed to send stream event: {e}"))
+    })
+    .await
 }
 
 /// Send a chat request with `stream: true` and forward the response to the
@@ -3130,5 +3166,111 @@ mod tests {
         assert!(validate_fetch_url(&parse("https://example.com/jobs")).is_ok());
         assert!(validate_fetch_url(&parse("http://example.com:80/")).is_ok());
         assert!(validate_fetch_url(&parse("http://localhost/")).is_ok());
+    }
+
+    fn sse_events(payload: &str) -> Vec<u8> {
+        format!("data: {payload}\n\n").into_bytes()
+    }
+
+    fn done_usage(events: &[ChatStreamEvent]) -> (u64, u64) {
+        match events.last() {
+            Some(ChatStreamEvent::Done { data }) => (
+                data["usage"]["input_tokens"].as_u64().unwrap_or(0),
+                data["usage"]["output_tokens"].as_u64().unwrap_or(0),
+            ),
+            _ => panic!("expected a Done event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_stream_reads_usage_after_finish_reason() {
+        // This is OpenAI's documented stream shape: the usage-only chunk comes
+        // after the finish_reason chunk, before [DONE].
+        let chunks: Vec<Result<Vec<u8>, std::io::Error>> = vec![
+            Ok(sse_events(r#"{"choices":[{"delta":{"content":"Hi"}}]}"#)),
+            Ok(sse_events(
+                r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            )),
+            Ok(sse_events(
+                r#"{"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7}}"#,
+            )),
+            Ok(sse_events("[DONE]")),
+        ];
+        let token = CancellationToken::new();
+        let mut events = Vec::new();
+
+        consume_sse_stream(
+            futures_util::stream::iter(chunks),
+            "openai",
+            &token,
+            |event| {
+                events.push(event);
+                Ok::<(), String>(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(done_usage(&events), (11, 7));
+        match &events[0] {
+            ChatStreamEvent::Delta { text } => assert_eq!(text, "Hi"),
+            _ => panic!("expected a Delta event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_stream_drains_usage_from_the_same_chunk() {
+        let mut chunk = sse_events(r#"{"choices":[{"delta":{"content":"Hi"}}]}"#);
+        chunk.extend(sse_events(
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        ));
+        chunk.extend(sse_events(
+            r#"{"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}"#,
+        ));
+        chunk.extend(sse_events("[DONE]"));
+        let token = CancellationToken::new();
+        let mut events = Vec::new();
+
+        consume_sse_stream(
+            futures_util::stream::iter(vec![Ok::<Vec<u8>, std::io::Error>(chunk)]),
+            "openai",
+            &token,
+            |event| {
+                events.push(event);
+                Ok::<(), String>(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(done_usage(&events), (3, 2));
+    }
+
+    #[tokio::test]
+    async fn cancelled_stream_still_emits_done_with_partial_state() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let mut events = Vec::new();
+
+        consume_sse_stream(
+            futures_util::stream::pending::<Result<Vec<u8>, std::io::Error>>(),
+            "openai",
+            &token,
+            |event| {
+                events.push(event);
+                Ok::<(), String>(())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatStreamEvent::Done { data } => {
+                assert!(data["choices"][0]["message"]["content"].is_null());
+            }
+            _ => panic!("expected a Done event"),
+        }
     }
 }

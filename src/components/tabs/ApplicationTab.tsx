@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Search,
@@ -242,11 +242,14 @@ export default function ApplicationTab() {
   const deletedAppRef = useRef<JobApplication | null>(null);
   deletedAppRef.current = deletedApp;
 
-  const finalizeDeletion = (app: JobApplication) => {
-    useChatStore.getState().discardDraft(app.id);
-    void deleteApplicationThread(app.id);
-    void useCvStore.getState().deleteCv(app.id);
-  };
+  const finalizeDeletion = useCallback(
+    (app: JobApplication) => {
+      useChatStore.getState().discardDraft(app.id);
+      void deleteApplicationThread(app.id);
+      void useCvStore.getState().deleteCv(app.id);
+    },
+    [deleteApplicationThread],
+  );
 
   const handleDelete = () => {
     if (!pendingDeleteId) return;
@@ -278,18 +281,32 @@ export default function ApplicationTab() {
     setDeletedApp(null);
   };
 
-  // Leaving the tab ends the undo window; never leave an orphaned chat file.
+  // Leaving the tab ends the undo window; never leave orphaned chat/CV files.
   useEffect(
     () => () => {
-      if (undoTimer.current) clearTimeout(undoTimer.current);
-      const app = deletedAppRef.current;
-      if (app) {
-        useChatStore.getState().discardDraft(app.id);
-        void useApplicationStore.getState().deleteApplicationThread(app.id);
+      if (undoTimer.current) {
+        clearTimeout(undoTimer.current);
+        undoTimer.current = null;
       }
+      const app = deletedAppRef.current;
+      if (app) finalizeDeletion(app);
     },
-    [],
+    [finalizeDeletion],
   );
+
+  const undoToast = deletedApp ? (
+    <div
+      role="status"
+      className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
+    >
+      <span className="text-sm text-text-primary">
+        Deleted {deletedApp.companyName.trim() || "application"}
+      </span>
+      <Button size="sm" variant="outline" onClick={handleUndoDelete}>
+        Undo
+      </Button>
+    </div>
+  ) : null;
 
   const handleExportCsv = async () => {
     setExportStatus(null);
@@ -424,23 +441,26 @@ export default function ApplicationTab() {
   // ── Empty state (no applications at all) ──
   if (applications.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-        <p className="text-text-primary text-lg font-semibold">
-          Track your job applications
-        </p>
-        <p className="text-text-muted text-sm mt-2 max-w-md">
-          Add the job you're applying for — the company, the job description,
-          and what the application requires. The AI assistant will then help you
-          craft your application.
-        </p>
-        <Button
-          className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
-          onClick={handleCreate}
-        >
-          <Plus className="size-4 mr-1.5" />
-          Add your first application
-        </Button>
-      </div>
+      <>
+        <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+          <p className="text-text-primary text-lg font-semibold">
+            Track your job applications
+          </p>
+          <p className="text-text-muted text-sm mt-2 max-w-md">
+            Add the job you're applying for — the company, the job description,
+            and what the application requires. The AI assistant will then help
+            you craft your application.
+          </p>
+          <Button
+            className="bg-primary hover:bg-primary/80 text-primary-foreground mt-6"
+            onClick={handleCreate}
+          >
+            <Plus className="size-4 mr-1.5" />
+            Add your first application
+          </Button>
+        </div>
+        {undoToast}
+      </>
     );
   }
 
@@ -769,7 +789,7 @@ export default function ApplicationTab() {
             </div>
 
             {detailView === "cv" ? (
-              <CvBuilder application={selected} />
+              <CvBuilder key={selected.id} application={selected} />
             ) : (
               <>
                 {/* Status */}
@@ -1335,19 +1355,7 @@ export default function ApplicationTab() {
         </DialogContent>
       </Dialog>
 
-      {deletedApp && (
-        <div
-          role="status"
-          className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
-        >
-          <span className="text-sm text-text-primary">
-            Deleted {deletedApp.companyName.trim() || "application"}
-          </span>
-          <Button size="sm" variant="outline" onClick={handleUndoDelete}>
-            Undo
-          </Button>
-        </div>
-      )}
+      {undoToast}
     </div>
   );
 }

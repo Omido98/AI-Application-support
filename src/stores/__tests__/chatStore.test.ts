@@ -12,6 +12,7 @@ import {
   useChatStore,
   messageKey,
   newMessageId,
+  deleteChatThread,
   flushChatSave,
   flushDraftsSave,
   isConversationMessage,
@@ -68,8 +69,14 @@ const assistantMessage = (
 });
 
 beforeEach(async () => {
-  // Drain any debounced save left over from the previous test so a stale
-  // timer cannot fire into the next test's assertions.
+  // Drop any queue/timer left by a failed test before draining, then drain
+  // the drafts queue so a stale save cannot fire into the next test.
+  useChatStore.setState({
+    threads: {},
+    activeThreadId: null,
+    draftsLoaded: false,
+  });
+  useChatStore.getState().resetThreadCache();
   await flushChatSave();
   await flushDraftsSave();
   saveJsonMock.mockReset();
@@ -439,6 +446,74 @@ describe("thread persistence", () => {
     expect(saveJsonMock).not.toHaveBeenCalledWith("chat_app-1.json", [
       expect.objectContaining({ content: "old" }),
     ]);
+  });
+
+  it("waits for an in-flight thread save before flushing", async () => {
+    const inFlight = deferred<boolean>();
+    saveJsonMock.mockReturnValueOnce(inFlight.promise);
+    useChatStore.setState({ threads: { "app-flush": thread() } });
+
+    useChatStore.getState().addMessage("app-flush", userMessage("flush me"));
+    const flushing = flushChatSave();
+    await vi.waitFor(() =>
+      expect(saveJsonMock).toHaveBeenCalledWith("chat_app-flush.json", [
+        expect.objectContaining({ content: "flush me" }),
+      ]),
+    );
+
+    let settled = false;
+    void flushing.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    inFlight.resolve(true);
+    await expect(flushing).resolves.toBe(true);
+  });
+
+  it("waits for an in-flight save before clearing, then allows a new save", async () => {
+    const inFlight = deferred<boolean>();
+    saveJsonMock.mockReturnValueOnce(inFlight.promise);
+    useChatStore.setState({
+      threads: { "app-clear": thread() },
+      activeThreadId: "app-clear",
+      draftsLoaded: true,
+    });
+    useChatStore.getState().addMessage("app-clear", userMessage("old"));
+
+    const saving = flushChatSave();
+    await vi.waitFor(() =>
+      expect(saveJsonMock).toHaveBeenCalledWith("chat_app-clear.json", [
+        expect.objectContaining({ content: "old" }),
+      ]),
+    );
+
+    const clearing = useChatStore.getState().clearMessages();
+    await Promise.resolve();
+    expect(deleteFileMock).not.toHaveBeenCalled();
+
+    inFlight.resolve(true);
+    await saving;
+    await clearing;
+    expect(deleteFileMock).toHaveBeenCalledWith("chat_app-clear.json");
+    expect(useChatStore.getState().threads["app-clear"].messages).toEqual([]);
+
+    saveJsonMock.mockClear();
+    useChatStore.getState().addMessage("app-clear", userMessage("new"));
+    await flushChatSave();
+    expect(saveJsonMock).toHaveBeenCalledWith("chat_app-clear.json", [
+      expect.objectContaining({ content: "new" }),
+    ]);
+  });
+
+  it("does not recreate a deleted thread file", async () => {
+    await deleteChatThread("app-deleted");
+
+    useChatStore.getState().addMessage("app-deleted", userMessage("late"));
+    await flushChatSave();
+
+    expect(saveJsonMock).not.toHaveBeenCalled();
   });
 });
 

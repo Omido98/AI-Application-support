@@ -5,6 +5,7 @@ import {
   deleteFile,
   reportDataIssue,
 } from "@/utils/storage";
+import { createSaveQueue } from "@/utils/saveQueue";
 import {
   normalizeApiConfigData,
   normalizeDraftsData,
@@ -314,14 +315,51 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 /** Per-thread debounced save timers. */
 const threadSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/** Per-thread write queues so two saves for one file cannot overlap. */
+const threadSaveQueues = new Map<string, ReturnType<typeof createSaveQueue>>();
+
+/** Threads whose files must not be recreated by a late save. */
+const deletedThreads = new Set<string>();
+
+function threadQueue(threadId: string) {
+  const existing = threadSaveQueues.get(threadId);
+  if (existing) return existing;
+  const queue = createSaveQueue();
+  threadSaveQueues.set(threadId, queue);
+  return queue;
+}
+
 /** Monotonic token per thread, so a slow load cannot overwrite newer data. */
 const threadLoadGeneration = new Map<string, number>();
 
 /** Write one thread's current messages now. Missing/failed loads are skipped. */
 async function saveThread(threadId: string): Promise<boolean> {
-  const thread = useChatStore.getState().threads[threadId];
-  if (!thread || !thread.loaded) return true;
-  return saveJson(`chat_${threadId}.json`, thread.messages);
+  return threadQueue(threadId).enqueue(async () => {
+    if (deletedThreads.has(threadId)) return true;
+    const thread = useChatStore.getState().threads[threadId];
+    if (!thread || !thread.loaded) return true;
+    return saveJson(`chat_${threadId}.json`, thread.messages);
+  });
+}
+
+/**
+ * Delete one thread file safely: stop its timer, wait for an in-flight write,
+ * then remove the file. The thread stays blocked so a late save cannot
+ * recreate it. Callers that want to write a new thread afterwards must clear
+ * the marker (see `clearMessages`).
+ */
+export async function deleteChatThread(threadId: string): Promise<void> {
+  deletedThreads.add(threadId);
+  cancelThreadSave(threadId);
+  const queue = threadSaveQueues.get(threadId);
+  if (queue) {
+    try {
+      await queue.whenIdle();
+    } catch {
+      // A failed save must not prevent deletion.
+    }
+  }
+  await deleteFile(`chat_${threadId}.json`);
 }
 
 /** Debounce a save of one thread; other threads' pending saves are untouched. */
@@ -350,15 +388,20 @@ function cancelThreadSave(threadId: string) {
  * failed; the storage banner reports the reason.
  */
 export async function flushChatSave(): Promise<boolean> {
-  const threadIds = [...threadSaveTimers.keys()];
-  for (const threadId of threadIds) {
+  const timedIds = [...threadSaveTimers.keys()];
+  for (const threadId of timedIds) {
     cancelThreadSave(threadId);
   }
-  let ok = true;
-  for (const threadId of threadIds) {
-    if (!(await saveThread(threadId))) ok = false;
-  }
-  return ok;
+  const queuedIds = [...threadSaveQueues.keys()].filter(
+    (threadId) => !timedIds.includes(threadId),
+  );
+  const results = await Promise.all([
+    ...timedIds.map((threadId) => saveThread(threadId)),
+    ...queuedIds.map(
+      (threadId) => threadSaveQueues.get(threadId)?.whenIdle() ?? true,
+    ),
+  ]);
+  return results.every(Boolean);
 }
 
 // ──────────────────────────────────────────────
@@ -367,6 +410,7 @@ export async function flushChatSave(): Promise<boolean> {
 
 const DRAFTS_FILE = "drafts.json";
 let draftsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const draftsSaveQueue = createSaveQueue();
 
 function collectDrafts(
   threads: Record<string, ThreadState>,
@@ -380,16 +424,23 @@ function collectDrafts(
   return drafts;
 }
 
+/** Capture the drafts file payload at write time, not schedule time. */
+function writeDraftsSnapshot(): Promise<boolean> {
+  const state = useChatStore.getState();
+  const drafts = collectDrafts(state.threads);
+  // Never overwrite the stored drafts with an empty object before the startup
+  // load has completed.
+  if (!state.draftsLoaded && Object.keys(drafts).length === 0) {
+    return Promise.resolve(true);
+  }
+  return saveJson(DRAFTS_FILE, drafts);
+}
+
 function scheduleDraftsSave() {
   if (draftsSaveTimer) clearTimeout(draftsSaveTimer);
-  draftsSaveTimer = setTimeout(async () => {
+  draftsSaveTimer = setTimeout(() => {
     draftsSaveTimer = null;
-    const state = useChatStore.getState();
-    const drafts = collectDrafts(state.threads);
-    // Never overwrite the stored drafts with an empty object before the
-    // startup load has completed.
-    if (!state.draftsLoaded && Object.keys(drafts).length === 0) return;
-    await saveJson(DRAFTS_FILE, drafts);
+    void draftsSaveQueue.enqueue(writeDraftsSnapshot);
   }, 500);
 }
 
@@ -399,14 +450,8 @@ export async function flushDraftsSave(): Promise<boolean> {
     clearTimeout(draftsSaveTimer);
     draftsSaveTimer = null;
   }
-  const state = useChatStore.getState();
-  const drafts = collectDrafts(state.threads);
-  // Do not overwrite the stored drafts with an empty object before the
-  // startup load has completed. A draft typed during the load still wins.
-  if (!state.draftsLoaded && Object.keys(drafts).length === 0) {
-    return true;
-  }
-  return saveJson(DRAFTS_FILE, drafts);
+  // Always write the current snapshot, behind any write already in flight.
+  return draftsSaveQueue.enqueue(writeDraftsSnapshot);
 }
 
 // ──────────────────────────────────────────────
@@ -451,6 +496,9 @@ async function loadThread(threadId: string, force = false): Promise<void> {
       },
     };
   });
+  if (useChatStore.getState().threads[threadId]) {
+    deletedThreads.delete(threadId);
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -699,7 +747,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
     }));
     scheduleDraftsSave();
-    await deleteFile(`chat_${threadId}.json`);
+    await deleteChatThread(threadId);
+    // The thread now exists again (empty), so a new message may save it.
+    deletedThreads.delete(threadId);
   },
 
   switchThread: async (applicationId, force = false) => {
@@ -712,8 +762,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   resetThreadCache: () => {
+    // The caller flushes writes before a backup import, so there is nothing
+    // worth blocking after a reset; restored threads are loaded on demand.
+    deletedThreads.clear();
     for (const timer of threadSaveTimers.values()) clearTimeout(timer);
     threadSaveTimers.clear();
+    threadSaveQueues.clear();
     threadLoadGeneration.clear();
     set({ threads: {}, activeThreadId: null });
   },
