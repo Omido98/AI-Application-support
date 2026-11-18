@@ -380,18 +380,11 @@ test(
       { message: "native history restore did not replace the CV" },
     );
     // The versions dialog can still be playing its exit animation after the
-    // restored document appears; clicking through it is not deterministic on
-    // slower Linux runners. Wait until the template control is actually the
-    // top element at its centre.
+    // restored document appears; clicking through its overlay is not
+    // deterministic on slower runners. Wait for the dialog portal to unmount
+    // before interacting with the editor again.
     await driver.waitFor(
-      `const el = document.querySelector('#cv-template-edit');
-       if (!el) return false;
-       const rect = el.getBoundingClientRect();
-       const top = document.elementFromPoint(
-         rect.left + rect.width / 2,
-         rect.top + rect.height / 2,
-       );
-       return !!top && (top === el || el.contains(top));`,
+      "return !document.querySelector('[role=\"dialog\"]');",
       { message: "CV history dialog did not finish closing" },
     );
 
