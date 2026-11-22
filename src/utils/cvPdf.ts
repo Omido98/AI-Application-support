@@ -2,6 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { CvDocument, CvSectionId } from "@/types/cv";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
 import { getCvLayout } from "@/utils/cvLayout";
+import {
+  experienceRangeLabel,
+  roleDateRange,
+  sortCvRoles,
+} from "@/utils/cvExperience";
 import { isTauriRuntime } from "@/utils/runtime";
 
 function safePdfName(document: CvDocument, company: string): string {
@@ -129,6 +134,56 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
     y += layout.bulletAfterPt;
   };
 
+  /**
+   * A left label and a right-aligned date range on the same baseline. The left
+   * text wraps within the space the right text leaves, so long employer names
+   * cannot collide with the dates.
+   */
+  const row = (
+    left: string,
+    right: string,
+    {
+      size = bodySize,
+      bold = false,
+      indent = 0,
+      rightSize = metaSize,
+    }: {
+      size?: number;
+      bold?: boolean;
+      indent?: number;
+      rightSize?: number;
+    } = {},
+  ) => {
+    let rightWidth = 0;
+    if (right) {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(rightSize);
+      rightWidth = doc.getTextWidth(right);
+    }
+    const leftWidth = right
+      ? Math.max(24, maxWidth - indent - rightWidth - 8)
+      : maxWidth - indent;
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    const lines = left
+      ? (doc.splitTextToSize(left, leftWidth) as string[])
+      : [];
+    const advance = Math.max(lineHeight, size * 1.2);
+    const height = advance * Math.max(1, lines.length);
+    ensureSpace(height);
+    doc.setTextColor(40);
+    lines.forEach((line, index) => {
+      doc.text(line, margin + indent, y + index * advance);
+    });
+    if (right) {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(rightSize);
+      doc.setTextColor(80);
+      doc.text(right, pageWidth - margin, y, { align: "right" });
+    }
+    y += height + layout.metaAfterPt;
+  };
+
   write(document.contact.fullName.trim() || "Curriculum Vitae", {
     size: layout.namePt,
     font: "bold",
@@ -174,15 +229,23 @@ export async function renderCvPdf(document: CvDocument): Promise<Uint8Array> {
       heading("experience");
       for (const item of document.experience) {
         if (!item.included) continue;
-        const title = [item.role, item.company].filter(Boolean).join(" — ");
-        if (title) {
-          ensureSpace(lineHeight + 2);
-          write(title, { size: headingSize, font: "bold", color: 40 });
-        }
-        const meta = [item.startDate, item.endDate, item.location]
+        const roles = sortCvRoles(item.roles);
+        const employer = [item.company, item.location]
           .filter(Boolean)
-          .join("  ·  ");
-        if (meta) write(meta, { size: metaSize, font: "italic", color: 40 });
+          .join(" · ");
+        const range = experienceRangeLabel(item, document.language);
+        if (employer || range) {
+          row(employer, range, { size: headingSize, bold: true });
+        }
+        for (const role of roles) {
+          const dates =
+            roles.length > 1 ? roleDateRange(role, document.language) : "";
+          if (!role.title.trim() && !dates) continue;
+          row(role.title.trim(), dates, {
+            size: bodySize,
+            indent: layout.roleIndentPt,
+          });
+        }
         for (const text of item.bullets) bullet(text);
         y += 3;
       }

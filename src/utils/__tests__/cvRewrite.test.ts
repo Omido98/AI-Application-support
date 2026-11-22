@@ -167,7 +167,7 @@ describe("proposal helpers", () => {
 
     expect(applied.experience[0].bullets).toEqual(["New bullet."]);
     expect(applied.experience[0].company).toBe(item.company);
-    expect(applied.experience[0].startDate).toBe(item.startDate);
+    expect(applied.experience[0].roles).toEqual(item.roles);
     expect(applied.experience[0].id).toBe(item.id);
   });
 });
@@ -311,6 +311,54 @@ describe("rewriteCvSection", () => {
       inputTokens: 120,
       outputTokens: 40,
     });
+  });
+
+  it("keeps up to ten rewritten bullets", async () => {
+    const document = makeDocument();
+    const bullets = Array.from(
+      { length: 10 },
+      (_, index) => `Rewritten bullet ${index + 1}.`,
+    );
+    sendMessageMock.mockResolvedValue({
+      content: JSON.stringify({ bullets }),
+      error: null,
+    });
+
+    const result = await rewriteCvSection({
+      application,
+      profile,
+      document,
+      target: { kind: "experience", id: document.experience[0].id },
+      instruction: "",
+      config,
+    });
+
+    expect(result).toEqual({ kind: "experience", bullets });
+  });
+
+  it("does not pull in a stale group source id when roles have ids", () => {
+    const document = makeDocument();
+    document.experience[0].sourceId = "work-removed";
+    const removedRole = {
+      ...profile.workExperience[0],
+      id: "work-removed",
+      company: "Removed Corp",
+      role: "Removed Role",
+      jobDescription: "Removed work.",
+      achievements: [],
+      projects: [],
+    };
+    const prompt = buildCvRewritePrompt(
+      application,
+      { ...profile, workExperience: [...profile.workExperience, removedRole] },
+      document,
+      { kind: "experience", id: document.experience[0].id },
+      "",
+    );
+
+    expect(prompt).not.toContain("Removed Corp");
+    expect(prompt).not.toContain("Removed Role");
+    expect(prompt).toContain("Fjordline");
   });
 
   it("retries once when the first response is not JSON", async () => {

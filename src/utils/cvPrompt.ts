@@ -2,6 +2,7 @@ import type { JobApplication, ProfileData } from "@/types";
 import type { CvLanguage, CvPageSize } from "@/types/cv";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
 import { extractJobKeywords } from "@/utils/cvAts";
+import { groupWorkExperience } from "@/utils/cvExperience";
 
 export interface CvPromptOptions {
   language: CvLanguage;
@@ -50,43 +51,62 @@ function profileSourceBlock(profile: ProfileData): string {
   }
 
   if (profile.workExperience.length > 0) {
-    lines.push("", "Work Experience:");
-    for (const work of profile.workExperience) {
-      lines.push(
-        `- [work:${work.id}] ${work.role || "(role)"} at ${
-          work.company || "(company)"
-        } (${range(
-          work.startMonth,
-          work.startYear,
-          work.endMonth,
-          work.endYear,
-          work.isCurrent,
-        )})`,
+    lines.push(
+      "",
+      "Work Experience (grouped by employer; roles newest first):",
+    );
+    for (const group of groupWorkExperience(profile.workExperience)) {
+      const newest = group[0];
+      const oldest = group[group.length - 1];
+      const groupRange = range(
+        oldest.startMonth,
+        oldest.startYear,
+        newest.endMonth,
+        newest.endYear,
+        group.some((work) => work.isCurrent),
       );
-      if (work.jobDescription.trim()) {
-        lines.push(`  Responsibilities: ${work.jobDescription.trim()}`);
-      }
-      if (work.achievements?.length) {
-        lines.push(`  Achievements: ${work.achievements.join(" | ")}`);
-      }
-      for (const project of work.projects) {
-        if (!project.name.trim() && !project.achievements?.length) {
-          continue;
-        }
-        const projectRange = range(
-          project.startMonth,
-          project.startYear,
-          project.endMonth,
-          project.endYear,
-          project.isCurrent,
-        );
+      const groupLabel = `[${"work:"}${newest.id}]`;
+      lines.push(
+        `- ${groupLabel} ${newest.company || "(company)"} (${groupRange})`,
+      );
+      lines.push("  Roles:");
+      for (const work of group) {
         lines.push(
-          `  - [project:${project.id}] ${project.name.trim() || "(no description)"}${
-            projectRange ? ` (${projectRange})` : ""
-          }`,
+          `  - ${work.role || "(role)"} (${range(
+            work.startMonth,
+            work.startYear,
+            work.endMonth,
+            work.endYear,
+            work.isCurrent,
+          )})`,
         );
-        if (project.achievements?.length) {
-          lines.push(`    Achievements: ${project.achievements.join(" | ")}`);
+        if (work.jobDescription.trim()) {
+          lines.push(`    Responsibilities: ${work.jobDescription.trim()}`);
+        }
+        if (work.achievements?.length) {
+          lines.push(`    Achievements: ${work.achievements.join(" | ")}`);
+        }
+        for (const project of work.projects) {
+          if (!project.name.trim() && !project.achievements?.length) {
+            continue;
+          }
+          const projectRange = range(
+            project.startMonth,
+            project.startYear,
+            project.endMonth,
+            project.endYear,
+            project.isCurrent,
+          );
+          lines.push(
+            `    - [project:${project.id}] ${project.name.trim() || "(no description)"}${
+              projectRange ? ` (${projectRange})` : ""
+            }`,
+          );
+          if (project.achievements?.length) {
+            lines.push(
+              `      Achievements: ${project.achievements.join(" | ")}`,
+            );
+          }
         }
       }
     }
@@ -244,15 +264,18 @@ export function buildCvGenerationPrompt(
     profileSourceBlock(profile),
     "",
     "Your task:",
-    "- Select and reorder the most relevant profile entries for this job.",
-    "- Prioritise evidence for the ATS priorities above; omit roles or projects that do not support them.",
-    "- Include the two or three most relevant roles rather than every role, unless the experience is very short. Use 3-6 bullets per role, strongest evidence first, without repeating the same claim.",
+    "- You write the prose. The app owns the document structure and the complete employment history.",
+    "- The experience section must contain every employer group from the profile, exactly once. Never omit, merge, split or reorder an employer group or a role, even when an older role is not relevant to this job.",
+    "- Relevance controls description depth, not presence. Give the most relevant employer groups more bullets and less relevant ones fewer. A group may have an empty bullets array when its titles and dates are enough; never invent filler to give it a description.",
+    "- For the other sections, select the most relevant entries for this job and omit entries that do not support it.",
+    "- Prioritise evidence for the ATS priorities above, but only where it is truthful.",
     "- Write a short headline and a 3-5 sentence professional summary in the requested language.",
-    "- Write 3-6 concrete, ATS-friendly bullets for each included role, using only responsibilities, achievements and metrics that appear in the profile or extra context.",
+    "- Write concrete, ATS-friendly bullets for each employer group where relevant, using only responsibilities, achievements and metrics that appear in the profile or extra context.",
+    "- There is no fixed number of bullets per employer group or per role. Do not pad weak groups to match strong ones and do not cut strong evidence to keep the groups even. Keep the whole CV within the one- or two-page target.",
     "- If the profile has responsibilities but no explicit achievements, reframe them as clear contribution bullets without inventing numbers, tools, scope, non-numeric outcomes or results.",
     "- Choose at most 15 skills from the profile that match the job; order them by relevance. Do not add a skill that is not supported by the profile or extra context.",
     "- Mirror important terms from the job description only when the candidate genuinely has that experience. Never keyword-stuff.",
-    "- Keep the CV to one or two pages. Use plain, specific language and strong action verbs. Follow the writing rules below.",
+    "- Use plain, specific language and strong action verbs. Follow the writing rules below.",
     "",
     "Writing rules:",
     "- No first-person pronouns, no clichés, no generic filler, no emojis, no tables or columns.",
@@ -267,7 +290,7 @@ export function buildCvGenerationPrompt(
   "summary": "",
   "skills": [],
   "experience": [
-    { "sourceId": "work:<profile id>", "bullets": [] }
+    { "sourceId": "work:<employer group id>", "bullets": [] }
   ],
   "education": [
     { "sourceId": "education:<profile id>", "details": [] }
@@ -288,12 +311,12 @@ export function buildCvGenerationPrompt(
     "",
     "Rules for JSON fields:",
     "- sourceId must be copied exactly from the bracketed IDs above (including the work:/education:/project:/certification:/language:/other: prefix).",
-    "- Include only entries that are relevant and supported. Omit irrelevant entries instead of inventing replacements.",
-    "- experience arrays may reorder roles; each bullets array must contain only truthful content.",
+    "- Return exactly one experience object for every employer group. Include its bullets array explicitly, even when it is empty. The app ignores the array order and always keeps every employer group.",
+    "- For every section except experience, include only entries that are relevant and supported. Omit irrelevant entries instead of inventing replacements.",
     "- education details may list the provided courses, thesis, grade or program only; do not infer new qualifications.",
     "- certifications and languages must come from the provided IDs only; include them in the order you want.",
     "- projects title may be a short label derived from the provided project description; description is filled by the app.",
-    "- The app supplies contact details, employers, dates and all other identifying fields; do not output them.",
+    "- The app supplies contact details, employers, roles, dates and all other identifying fields; do not output them.",
     `- The rendered section headings will be: ${Object.values(
       CV_SECTION_LABELS[options.language],
     ).join(", ")}.`,

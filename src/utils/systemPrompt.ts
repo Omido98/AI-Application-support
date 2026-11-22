@@ -760,6 +760,7 @@ export function buildCvExtractionPrompt(): string {
     "- Months are English names (January ... December); use an empty string when the month is unknown.",
     "- Years are four-digit strings; use an empty string when unknown.",
     "- isCurrent is true only when the CV says the role/engagement is ongoing.",
+    "- When one employer lists several consecutive roles or titles, return one workExperience entry per role, all with the same company spelling and their own start/end dates. Do not collapse them into one entry.",
     "- fluency must be one of: Beginner, Elementary, Intermediate, Upper Intermediate, Advanced, Fluent, Native. Use Intermediate when the CV does not state a level.",
     "- Keep job descriptions factual and compact; preserve technologies, metrics and named achievements.",
     "- Put concrete outcomes in achievements only when the CV states them; do not invent metrics or achievements.",

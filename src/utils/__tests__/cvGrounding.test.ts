@@ -80,7 +80,7 @@ const profile: ProfileData = {
 
 function makeDocument(overrides: Partial<CvDocument> = {}): CvDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     language: "en",
     pageSize: "a4",
     generatedAt: "2026-01-01T00:00:00.000Z",
@@ -105,11 +105,17 @@ function makeDocument(overrides: Partial<CvDocument> = {}): CvDocument {
         id: "cv-work-1",
         sourceId: "work-1",
         company: "Fjordline",
-        role: "Frontend Engineer",
         location: "",
-        startDate: "Jan 2022",
-        endDate: "",
-        current: true,
+        roles: [
+          {
+            id: "cv-role-1",
+            sourceId: "work-1",
+            title: "Frontend Engineer",
+            startDate: "Jan 2022",
+            endDate: "",
+            current: true,
+          },
+        ],
         bullets: [
           "Built accessible React components and reporting tools.",
           "Improved reporting performance.",

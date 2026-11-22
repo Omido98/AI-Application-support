@@ -73,7 +73,7 @@ function makeDocument() {
 async function extractPdf(bytes: Uint8Array): Promise<{
   pages: number;
   text: string;
-  items: { str: string; y: number }[];
+  items: { str: string; x: number; y: number }[];
 }> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const task = pdfjs.getDocument({
@@ -92,6 +92,7 @@ async function extractPdf(bytes: Uint8Array): Promise<{
   const items = content.items
     .map((item) => ({
       str: "str" in item ? item.str : "",
+      x: "transform" in item ? item.transform[4] : 0,
       y: "transform" in item ? item.transform[5] : 0,
     }))
     .filter((item) => item.str.trim().length > 0);
@@ -136,16 +137,62 @@ describe("renderCvPdf", () => {
     expect(result.pages).toBeGreaterThanOrEqual(1);
   });
 
+  it("right-aligns the dates of a grouped employer and keeps every role", async () => {
+    const document = makeDocument();
+    document.experience = [
+      {
+        id: "group-1",
+        company: "EY",
+        location: "",
+        roles: [
+          {
+            id: "role-2",
+            title: "Senior Management Consultant",
+            startDate: "Jan 2021",
+            endDate: "Present",
+            current: true,
+          },
+          {
+            id: "role-1",
+            title: "Management Consultant",
+            startDate: "Jan 2019",
+            endDate: "Dec 2020",
+            current: false,
+          },
+        ],
+        bullets: ["Led the transformation programme."],
+        included: true,
+      },
+    ];
+
+    const result = await extractPdf(await renderCvPdf(document));
+    expect(result.text).toContain("EY");
+    expect(result.text).toContain("Senior Management Consultant");
+    expect(result.text).toContain("Management Consultant");
+    expect(result.text).toContain("Led the transformation programme.");
+
+    const range = result.items.find((item) =>
+      item.str.includes("Jan 2019 – Present"),
+    );
+    expect(range).toBeDefined();
+    expect(range!.x).toBeGreaterThan(400);
+  });
+
   it("paginates a long CV without dropping content", async () => {
     const document = makeDocument();
     document.experience = Array.from({ length: 14 }, (_, index) => ({
       id: `role-${index}`,
       company: `Company ${index}`,
-      role: `Engineer ${index}`,
       location: "Remote",
-      startDate: "Jan 2020",
-      endDate: "Dec 2022",
-      current: false,
+      roles: [
+        {
+          id: `title-${index}`,
+          title: `Engineer ${index}`,
+          startDate: "Jan 2020",
+          endDate: "Dec 2022",
+          current: false,
+        },
+      ],
       bullets: Array.from(
         { length: 8 },
         (_, bullet) =>

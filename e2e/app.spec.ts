@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs/promises";
 import mammoth from "mammoth";
+import type { ProfileData } from "@/types";
 import {
   dateFromNow,
+  defaultProfile,
   makeApplication,
   seed,
   PROFILE_KEY,
@@ -269,6 +271,206 @@ test("CV sub-view starts from the profile and exports a Word file", async ({
   await expect(page.getByLabel("Full name")).toHaveValue("Jane Doe");
 });
 
+test("CV groups consecutive roles at the same employer", async ({ page }) => {
+  const application = makeApplication(
+    "cv-grouping",
+    "Grouping Corp",
+    "applied",
+  );
+  const profile: ProfileData = {
+    ...defaultProfile,
+    workExperience: [
+      {
+        id: "work-2",
+        company: "EY",
+        role: "Senior Management Consultant",
+        startMonth: "January",
+        startYear: "2021",
+        isCurrent: true,
+        jobDescription: "Lead the transformation programme.",
+        achievements: [],
+        projects: [],
+      },
+      {
+        id: "work-1",
+        company: "EY",
+        role: "Management Consultant",
+        startMonth: "January",
+        startYear: "2019",
+        isCurrent: false,
+        endMonth: "December",
+        endYear: "2020",
+        jobDescription: "Delivered operating-model analysis.",
+        achievements: [],
+        projects: [],
+      },
+    ],
+  };
+  await seed(page, {
+    applications: [application],
+    profile,
+    lastTab: "application",
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page.getByRole("button", { name: "Preview" }).click();
+
+  const preview = page.getByLabel("CV preview");
+  await expect(preview.getByText("EY", { exact: true })).toHaveCount(1);
+  await expect(preview.getByText("Senior Management Consultant")).toBeVisible();
+  await expect(
+    preview.getByText("Management Consultant", { exact: true }),
+  ).toBeVisible();
+  await expect(preview.getByText("Jan 2019 – Present")).toHaveCount(1);
+});
+
+test("removing one role from an employer group is recoverable", async ({
+  page,
+}) => {
+  const application = makeApplication(
+    "cv-role-remove",
+    "Role Remove Corp",
+    "applied",
+  );
+  const profile: ProfileData = {
+    ...defaultProfile,
+    workExperience: [
+      {
+        id: "work-2",
+        company: "EY",
+        role: "Senior Management Consultant",
+        startMonth: "January",
+        startYear: "2021",
+        isCurrent: true,
+        jobDescription: "Lead the programme.",
+        achievements: [],
+        projects: [],
+      },
+      {
+        id: "work-1",
+        company: "EY",
+        role: "Management Consultant",
+        startMonth: "January",
+        startYear: "2019",
+        isCurrent: false,
+        endMonth: "December",
+        endYear: "2020",
+        jobDescription: "Delivered analysis.",
+        achievements: [],
+        projects: [],
+      },
+    ],
+  };
+  await seed(page, {
+    applications: [application],
+    profile,
+    lastTab: "application",
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page
+    .getByRole("button", {
+      name: "Remove role Management Consultant from EY",
+    })
+    .click();
+
+  await expect(
+    page.getByRole("button", { name: "Versions (1)" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Preview" }).click();
+  const preview = page.getByLabel("CV preview");
+  await expect(preview.getByText("EY", { exact: true })).toHaveCount(1);
+  await expect(preview.getByText("Senior Management Consultant")).toBeVisible();
+  await expect(
+    preview.getByText("Management Consultant", { exact: true }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Versions (1)" }).click();
+  await expect(
+    page.getByText('Before removing the role "Management Consultant" at EY'),
+  ).toBeVisible();
+});
+
+test("removing the newest role rebases the employer group", async ({
+  page,
+}) => {
+  const application = makeApplication(
+    "cv-role-rebase",
+    "Role Rebase Corp",
+    "applied",
+  );
+  const profile: ProfileData = {
+    ...defaultProfile,
+    workExperience: [
+      {
+        id: "work-2",
+        company: "EY",
+        role: "Senior Management Consultant",
+        startMonth: "January",
+        startYear: "2021",
+        isCurrent: true,
+        jobDescription: "Lead the programme.",
+        achievements: [],
+        projects: [],
+      },
+      {
+        id: "work-1",
+        company: "EY",
+        role: "Management Consultant",
+        startMonth: "January",
+        startYear: "2019",
+        isCurrent: false,
+        endMonth: "December",
+        endYear: "2020",
+        jobDescription: "Delivered analysis.",
+        achievements: [],
+        projects: [],
+      },
+    ],
+  };
+  await seed(page, {
+    applications: [application],
+    profile,
+    lastTab: "application",
+  });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Tailored CV" }).click();
+  await page.getByRole("button", { name: "Start from profile" }).click();
+  await page
+    .getByRole("button", {
+      name: "Remove role Senior Management Consultant from EY",
+    })
+    .click();
+
+  await expect
+    .poll(async () =>
+      page.evaluate((applicationId) => {
+        const raw = localStorage.getItem(`aas:cv_${applicationId}.json`);
+        if (!raw) return null;
+        const document = JSON.parse(raw) as {
+          experience?: {
+            sourceId?: string;
+            roles?: { title: string }[];
+          }[];
+        };
+        return {
+          sourceId: document.experience?.[0]?.sourceId,
+          roles: document.experience?.[0]?.roles?.map((role) => role.title),
+        };
+      }, application.id),
+    )
+    .toEqual({
+      sourceId: "work-1",
+      roles: ["Management Consultant"],
+    });
+});
+
 test("CV can explicitly add recent chat details to its context", async ({
   page,
 }) => {
@@ -431,11 +633,16 @@ test("CV preview marks page boundaries on a long CV", async ({ page }) => {
     const roles = Array.from({ length: 12 }, (_, index) => ({
       id: `pages-role-${index}`,
       company: `Company ${index}`,
-      role: `Engineer ${index}`,
       location: "Remote",
-      startDate: "Jan 2020",
-      endDate: "Dec 2022",
-      current: false,
+      roles: [
+        {
+          id: `pages-title-${index}`,
+          title: `Engineer ${index}`,
+          startDate: "Jan 2020",
+          endDate: "Dec 2022",
+          current: false,
+        },
+      ],
       bullets: Array.from(
         { length: 8 },
         (_, bullet) =>
@@ -491,7 +698,7 @@ test("CV history restores a saved version and survives reload", async ({
   const application = makeApplication("cv-history", "History Corp", "applied");
   const now = "2026-01-01T00:00:00.000Z";
   const document = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     language: "en",
     pageSize: "a4",
     generatedAt: now,

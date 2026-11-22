@@ -268,7 +268,7 @@ describe("cvStore", () => {
   });
 
   it("reports malformed saved CVs without replacing data", async () => {
-    loadJsonMock.mockResolvedValue({ schemaVersion: 2 });
+    loadJsonMock.mockResolvedValue({ schemaVersion: 3 });
 
     await useCvStore.getState().loadCv("app-1");
 

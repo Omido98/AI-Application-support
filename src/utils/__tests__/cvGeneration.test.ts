@@ -179,9 +179,12 @@ describe("mergeGeneratedCv", () => {
     expect(document.experience[0]).toMatchObject({
       sourceId: "work-1",
       company: "Fjordline",
-      role: "Frontend Engineer",
-      startDate: "Jul 2022",
       bullets: ["Built accessible React components at scale."],
+    });
+    expect(document.experience[0].roles[0]).toMatchObject({
+      sourceId: "work-1",
+      title: "Frontend Engineer",
+      startDate: "Jul 2022",
     });
     expect(document.projects[0]).toMatchObject({
       sourceId: "project-1",
@@ -203,7 +206,152 @@ describe("mergeGeneratedCv", () => {
       options,
     );
 
-    expect(document.experience).toEqual([]);
+    expect(document.experience).toHaveLength(1);
+    expect(document.experience[0].bullets).toEqual(base.experience[0].bullets);
+  });
+});
+
+describe("mergeGeneratedCv experience coverage", () => {
+  const multiProfile: ProfileData = {
+    ...profile,
+    workExperience: [
+      {
+        id: "work-2",
+        company: "EY",
+        role: "Senior Management Consultant",
+        startMonth: "January",
+        startYear: "2021",
+        isCurrent: true,
+        jobDescription: "Lead transformation work.",
+        achievements: ["Grew the account"],
+        projects: [],
+      },
+      {
+        id: "work-3",
+        company: "EY",
+        role: "Management Consultant",
+        startMonth: "January",
+        startYear: "2019",
+        isCurrent: false,
+        endMonth: "December",
+        endYear: "2020",
+        jobDescription: "Delivered operating-model work.",
+        achievements: ["Managed a team"],
+        projects: [],
+      },
+      {
+        id: "work-1",
+        company: "Fjordline",
+        role: "Frontend Engineer",
+        startMonth: "July",
+        startYear: "2016",
+        isCurrent: false,
+        endMonth: "December",
+        endYear: "2018",
+        jobDescription: "Built accessible interfaces.",
+        achievements: ["Reduced reporting time"],
+        projects: [],
+      },
+    ],
+  };
+
+  function base() {
+    return createCvDocumentFromProfile(multiProfile, application, options);
+  }
+
+  it("keeps every employer group even when the model returns a subset", () => {
+    const document = mergeGeneratedCv(
+      {
+        ...generated,
+        experience: [
+          { sourceId: "work:work-1", bullets: ["Tailored frontend bullet."] },
+        ],
+      },
+      base(),
+      options,
+    );
+
+    expect(document.experience).toHaveLength(2);
+    expect(document.experience[0].sourceId).toBe("work-2");
+    expect(document.experience[0].bullets).toEqual([]);
+    expect(document.experience[1].sourceId).toBe("work-1");
+    expect(document.experience[1].bullets).toEqual([
+      "Tailored frontend bullet.",
+    ]);
+  });
+
+  it("respects an explicit empty bullets array", () => {
+    const document = mergeGeneratedCv(
+      {
+        ...generated,
+        experience: [
+          { sourceId: "work:work-2", bullets: [] },
+          {
+            sourceId: "work:work-1",
+            bullets: ["Fjordline tailored bullet."],
+          },
+        ],
+      },
+      base(),
+      options,
+    );
+
+    expect(document.experience[0].bullets).toEqual([]);
+    expect(document.experience[1].bullets).toEqual([
+      "Fjordline tailored bullet.",
+    ]);
+  });
+
+  it("falls back to profile bullets when a returned group has no bullets field", () => {
+    const baseDocument = base();
+    const document = mergeGeneratedCv(
+      {
+        ...generated,
+        experience: [{ sourceId: "work:work-2" }],
+      },
+      baseDocument,
+      options,
+    );
+
+    expect(document.experience[0].bullets).toEqual(
+      baseDocument.experience[0].bullets,
+    );
+    expect(document.experience[1].bullets).toEqual([]);
+  });
+
+  it("keeps the profile order even when the model reorders groups", () => {
+    const document = mergeGeneratedCv(
+      {
+        ...generated,
+        experience: [
+          { sourceId: "work:work-1", bullets: ["Fjordline bullet."] },
+          { sourceId: "work:work-2", bullets: ["EY bullet."] },
+        ],
+      },
+      base(),
+      options,
+    );
+
+    expect(document.experience.map((item) => item.sourceId)).toEqual([
+      "work-2",
+      "work-1",
+    ]);
+  });
+
+  it("maps a role-level source id back to its employer group", () => {
+    const document = mergeGeneratedCv(
+      {
+        ...generated,
+        experience: [
+          { sourceId: "work:work-3", bullets: ["Older EY role bullet."] },
+        ],
+      },
+      base(),
+      options,
+    );
+
+    expect(document.experience[0].sourceId).toBe("work-2");
+    expect(document.experience[0].bullets).toEqual(["Older EY role bullet."]);
   });
 });
 

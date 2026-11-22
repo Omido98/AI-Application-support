@@ -10,7 +10,7 @@ import {
 
 function document(overrides: Partial<CvDocument> = {}): CvDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     language: "en",
     pageSize: "a4",
     generatedAt: "2026-01-01T00:00:00.000Z",
@@ -85,7 +85,7 @@ describe("cv history", () => {
       schemaVersion: 1,
       snapshots: [
         null,
-        { id: "bad", document: { schemaVersion: 2 } },
+        { id: "bad", document: { schemaVersion: 3 } },
         { id: "good", document: document() },
       ],
     });

@@ -89,7 +89,7 @@ test("CV bullets keep spaces and new lines across autosave and reload", async ({
   await page.getByRole("button", { name: "Start from profile" }).click();
 
   const bullets = page.getByRole("textbox", {
-    name: "Bullets for Frontend Engineer",
+    name: "Bullets for Fjordline",
   });
   await expect(bullets).toBeVisible();
   await bullets.fill("");
@@ -107,7 +107,7 @@ test("CV bullets keep spaces and new lines across autosave and reload", async ({
 
   // A short buffered input commits on blur and must persist too.
   const company = page.getByRole("textbox", {
-    name: "Company for Frontend Engineer",
+    name: "Company for Fjordline",
   });
   await company.click();
   await company.press("End");
@@ -120,10 +120,10 @@ test("CV bullets keep spaces and new lines across autosave and reload", async ({
 
   await page.getByRole("button", { name: "Tailored CV" }).click();
   await expect(
-    page.getByRole("textbox", { name: "Bullets for Frontend Engineer" }),
+    page.getByRole("textbox", { name: "Bullets for Fjordline" }),
   ).toHaveValue("Led migration.\nSecond bullet");
   await expect(
-    page.getByRole("textbox", { name: "Company for Frontend Engineer" }),
+    page.getByRole("textbox", { name: "Company for Fjordline" }),
   ).toHaveValue("Fjordline AB");
 });
 
@@ -145,7 +145,7 @@ test("CV buffered fields adopt an external document update when not focused", as
   await page.getByRole("button", { name: "Tailored CV" }).click();
   await page.getByRole("button", { name: "Start from profile" }).click();
   const bullets = page.getByRole("textbox", {
-    name: "Bullets for Frontend Engineer",
+    name: "Bullets for Fjordline",
   });
   await expect(bullets).toBeVisible();
 
@@ -226,7 +226,7 @@ test("removing a CV entry is recoverable from Versions", async ({ page }) => {
 
   await page.getByRole("button", { name: "Tailored CV" }).click();
   const remove = page.getByRole("button", {
-    name: "Remove Frontend Engineer at Fjordline",
+    name: "Remove Fjordline",
   });
   await expect(remove).toBeVisible();
   await remove.click();
@@ -237,13 +237,13 @@ test("removing a CV entry is recoverable from Versions", async ({ page }) => {
   ).toBeVisible();
   await page.getByRole("button", { name: "Versions (1)" }).click();
   await expect(
-    page.getByText("Before removing Frontend Engineer at Fjordline"),
+    page.getByText('Before removing the employer group "Fjordline"'),
   ).toBeVisible();
   await page.getByRole("button", { name: "Restore" }).first().click();
 
   await expect(
     page.getByRole("button", {
-      name: "Remove Frontend Engineer at Fjordline",
+      name: "Remove Fjordline",
     }),
   ).toBeVisible();
 });

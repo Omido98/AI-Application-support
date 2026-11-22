@@ -2,6 +2,11 @@ import type { JobApplication, ProfileData } from "@/types";
 import type { CvDocument, CvLanguage, CvRewriteTarget } from "@/types/cv";
 import { extractJobKeywords } from "@/utils/cvAts";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
+import {
+  experienceRangeLabel,
+  roleDateRange,
+  sortCvRoles,
+} from "@/utils/cvExperience";
 
 const LANGUAGE_NAME: Record<CvLanguage, string> = {
   en: "English",
@@ -35,10 +40,14 @@ function currentSectionBlock(
     if (!item)
       throw new Error("The selected experience entry no longer exists.");
     return [
-      `Role: ${item.role || "(empty)"}`,
       `Company: ${item.company || "(empty)"}`,
-      `Dates: ${dateRange(item.startDate, item.endDate, item.current, document.language)}`,
+      `Dates: ${experienceRangeLabel(item, document.language) || "(empty)"}`,
       `Location: ${item.location || "(empty)"}`,
+      "Roles:",
+      ...sortCvRoles(item.roles).map(
+        (role) =>
+          `- ${role.title || "(role)"} (${roleDateRange(role, document.language)})`,
+      ),
       "Bullets:",
       ...item.bullets.map((bullet) => `- ${bullet}`),
     ].join("\n");
@@ -139,12 +148,23 @@ function relevantProfileFacts(
 
   if (target.kind === "experience") {
     const cvItem = document.experience.find((item) => item.id === target.id);
-    const work = cvItem?.sourceId
-      ? profile.workExperience.find((entry) => entry.id === cvItem.sourceId)
-      : undefined;
+    const sourceIds = new Set(
+      (cvItem?.roles ?? [])
+        .map((role) => role.sourceId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    // The group sourceId is only a fallback for a group whose roles have no
+    // profile references. Once roles are present, using their IDs prevents a
+    // stale group ID from pulling in a role that was deleted from the CV.
+    if (sourceIds.size === 0 && cvItem?.sourceId) {
+      sourceIds.add(cvItem.sourceId);
+    }
+    const targetRoles = profile.workExperience
+      .filter((work) => sourceIds.has(work.id))
+      .map((work) => workFacts(work, document.language));
     return {
       skills,
-      targetRole: work ? workFacts(work, document.language) : null,
+      targetRoles,
       extraContext,
     };
   }
@@ -248,7 +268,7 @@ export function buildCvRewritePrompt(
     "- Use strong action verbs, concrete language and no first-person pronouns, clichés, filler, emojis or markdown.",
     "- Mirror relevant job-description terms only where the candidate genuinely has that experience; never keyword-stuff.",
     `- Write the rewritten prose in ${LANGUAGE_NAME[document.language]}.`,
-    "- Keep bullets to 3–6 items unless the current section has fewer; each bullet should be one line.",
+    "- Keep the number of bullets roughly the same unless the candidate asks to shorten or expand; do not add filler or drop strong evidence just to hit a count. Each bullet should be one line.",
     "- Return ONLY one valid JSON object in this shape, with no fences or commentary:",
     outputSchema(target),
   ].join("\n");

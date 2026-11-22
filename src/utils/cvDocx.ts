@@ -2,6 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { CvDocument, CvSectionId } from "@/types/cv";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
 import { getCvLayout } from "@/utils/cvLayout";
+import {
+  experienceRangeLabel,
+  roleDateRange,
+  sortCvRoles,
+} from "@/utils/cvExperience";
 import { isTauriRuntime } from "@/utils/runtime";
 
 const PAGE_SIZES = {
@@ -65,6 +70,7 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
     LineRuleType,
     Packer,
     Paragraph,
+    TabStopType,
     TextRun,
   } = await import("docx");
 
@@ -134,6 +140,58 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
       children: [new TextRun({ text, size: bodySize })],
     });
 
+  const contentWidth = PAGE_SIZES[document.pageSize].width - margin * 2;
+  const roleIndent = layout.roleIndentPt * 20;
+  const row = (
+    left: string,
+    right: string,
+    {
+      size,
+      bold = false,
+      indent = 0,
+      before = headingAfter,
+      after = metaAfter,
+    }: {
+      size: number;
+      bold?: boolean;
+      indent?: number;
+      before?: number;
+      after?: number;
+    },
+  ) => {
+    const runs: InstanceType<typeof TextRun>[] = [];
+    if (left) {
+      runs.push(
+        new TextRun({
+          text: left,
+          size,
+          bold,
+          color: "111111",
+        }),
+      );
+    }
+    if (right) {
+      runs.push(
+        new TextRun({
+          text: `\t${right}`,
+          size: metaSize,
+          color: "555555",
+          italics: true,
+        }),
+      );
+    }
+    return new Paragraph({
+      ...(right
+        ? {
+            tabStops: [{ type: TabStopType.RIGHT, position: contentWidth }],
+          }
+        : {}),
+      ...(indent ? { indent: { left: indent } } : {}),
+      spacing: { before, after },
+      children: runs,
+    });
+  };
+
   const children: InstanceType<typeof Paragraph>[] = [];
   const contact = contactLines(document);
   children.push(
@@ -199,21 +257,28 @@ export async function renderCvDocx(document: CvDocument): Promise<Uint8Array> {
       children.push(heading("experience"));
       for (const item of document.experience) {
         if (!item.included) continue;
-        const title = [item.role, item.company].filter(Boolean).join(" — ");
-        if (title) {
+        const roles = sortCvRoles(item.roles);
+        const employer = [item.company, item.location]
+          .filter(Boolean)
+          .join(" · ");
+        const range = experienceRangeLabel(item, document.language);
+        if (employer || range) {
           children.push(
-            new Paragraph({
-              spacing: { before: headingAfter, after: bulletAfter },
-              children: [
-                new TextRun({ text: title, bold: true, size: headingSize }),
-              ],
+            row(employer, range, { size: headingSize, bold: true }),
+          );
+        }
+        for (const role of roles) {
+          const dates =
+            roles.length > 1 ? roleDateRange(role, document.language) : "";
+          if (!role.title.trim() && !dates) continue;
+          children.push(
+            row(role.title.trim(), dates, {
+              size: bodySize,
+              indent: roleIndent,
+              before: 0,
             }),
           );
         }
-        const meta = [item.startDate, item.endDate, item.location]
-          .filter(Boolean)
-          .join("  ·  ");
-        if (meta) children.push(muted(meta));
         for (const bulletText of item.bullets)
           children.push(bullet(bulletText));
       }

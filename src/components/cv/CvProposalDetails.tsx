@@ -1,4 +1,5 @@
 import type { CvDocument } from "@/types/cv";
+import { experienceRangeLabel, sortCvRoles } from "@/utils/cvExperience";
 
 function dateRange(start: string, end: string): string {
   return [start, end].filter(Boolean).join(" – ");
@@ -14,6 +15,10 @@ export default function CvProposalDetails({
   proposal: CvDocument;
 }) {
   const experience = proposal.experience.filter((item) => item.included);
+  const roleCount = experience.reduce(
+    (sum, item) => sum + item.roles.length,
+    0,
+  );
   const education = proposal.education.filter((item) => item.included);
   const projects = proposal.projects.filter((item) => item.included);
   const certifications = proposal.certifications.filter(
@@ -26,10 +31,12 @@ export default function CvProposalDetails({
     <div className="space-y-3 text-xs">
       <section>
         <h4 className="text-[10px] font-medium uppercase tracking-wide text-text-muted">
-          Selected roles ({experience.length})
+          Experience ({experience.length}{" "}
+          {experience.length === 1 ? "employer" : "employers"} · {roleCount}{" "}
+          {roleCount === 1 ? "role" : "roles"})
         </h4>
         {experience.length === 0 ? (
-          <p className="mt-1 text-text-muted">No roles selected.</p>
+          <p className="mt-1 text-text-muted">No experience.</p>
         ) : (
           <ul className="mt-1 space-y-1.5">
             {experience.map((item) => (
@@ -38,15 +45,24 @@ export default function CvProposalDetails({
                 className="rounded border border-border bg-field/40 p-2"
               >
                 <p className="font-medium text-text-primary">
-                  {[item.role, item.company].filter(Boolean).join(" — ")}
+                  {item.company || "Employer"}
                 </p>
                 <p className="text-[10px] text-text-muted">
-                  {[dateRange(item.startDate, item.endDate), item.location]
+                  {[
+                    experienceRangeLabel(item, proposal.language),
+                    item.location,
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
                   {item.bullets.length > 0
                     ? ` · ${item.bullets.length} bullet${item.bullets.length === 1 ? "" : "s"}`
                     : ""}
+                </p>
+                <p className="mt-0.5 text-[11px] text-text-secondary">
+                  {sortCvRoles(item.roles)
+                    .map((role) => role.title)
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
                 {item.bullets[0] && (
                   <p className="mt-1 line-clamp-2 text-[11px] text-text-secondary">

@@ -70,11 +70,16 @@ describe("estimateCvPages", () => {
     document.experience = Array.from({ length: 12 }, (_, index) => ({
       id: `role-${index}`,
       company: `Company ${index}`,
-      role: `Engineer ${index}`,
       location: "Remote",
-      startDate: "Jan 2020",
-      endDate: "Dec 2022",
-      current: false,
+      roles: [
+        {
+          id: `title-${index}`,
+          title: `Engineer ${index}`,
+          startDate: "Jan 2020",
+          endDate: "Dec 2022",
+          current: false,
+        },
+      ],
       bullets: Array.from(
         { length: 8 },
         (_, bullet) =>
@@ -100,11 +105,16 @@ describe("estimateCvPages", () => {
     document.experience = Array.from({ length: 8 }, (_, index) => ({
       id: `role-${index}`,
       company: `Company ${index}`,
-      role: `Engineer ${index}`,
       location: "Remote",
-      startDate: "Jan 2020",
-      endDate: "Dec 2022",
-      current: false,
+      roles: [
+        {
+          id: `title-${index}`,
+          title: `Engineer ${index}`,
+          startDate: "Jan 2020",
+          endDate: "Dec 2022",
+          current: false,
+        },
+      ],
       bullets: Array.from(
         { length: 8 },
         (_, bullet) => `Delivered reporting improvement ${index}-${bullet}.`,

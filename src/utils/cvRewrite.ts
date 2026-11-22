@@ -185,7 +185,7 @@ function asBullets(value: unknown): string[] {
     .filter((item): item is string => typeof item === "string")
     .map((item) => cleanProse(item))
     .filter(Boolean)
-    .slice(0, 8);
+    .slice(0, 10);
 }
 
 /** Tolerant parse for a single rewritten section. */

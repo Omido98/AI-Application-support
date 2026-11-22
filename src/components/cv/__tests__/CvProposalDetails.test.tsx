@@ -4,7 +4,7 @@ import type { CvDocument } from "@/types/cv";
 import CvProposalDetails from "@/components/cv/CvProposalDetails";
 
 const base: CvDocument = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   language: "en",
   pageSize: "a4",
   template: "classic",
@@ -28,23 +28,35 @@ const base: CvDocument = {
   experience: [
     {
       id: "role-1",
+      sourceId: "work-1",
       company: "Acme",
-      role: "Platform Engineer",
       location: "Remote",
-      startDate: "Jan 2022",
-      endDate: "Present",
-      current: true,
+      roles: [
+        {
+          id: "title-1",
+          sourceId: "work-1",
+          title: "Platform Engineer",
+          startDate: "Jan 2022",
+          endDate: "Present",
+          current: true,
+        },
+      ],
       bullets: ["Reduced reporting time."],
       included: true,
     },
     {
       id: "role-2",
       company: "Hidden",
-      role: "Old role",
       location: "",
-      startDate: "2010",
-      endDate: "2011",
-      current: false,
+      roles: [
+        {
+          id: "title-2",
+          title: "Old role",
+          startDate: "2010",
+          endDate: "2011",
+          current: false,
+        },
+      ],
       bullets: [],
       included: false,
     },
@@ -95,7 +107,7 @@ describe("CvProposalDetails", () => {
     expect(html).toContain("TypeScript");
     expect(html).toContain("MSc");
     expect(html).toContain("Accessible reports");
-    expect(html).toContain("Selected roles (1)");
+    expect(html).toContain("Experience (1 employer · 1 role)");
     expect(html).not.toContain("Hidden");
   });
 
@@ -112,7 +124,7 @@ describe("CvProposalDetails", () => {
       />,
     );
 
-    expect(html).toContain("No roles selected.");
+    expect(html).toContain("No experience.");
     expect(html).toContain("No skills selected.");
   });
 });

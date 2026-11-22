@@ -21,8 +21,7 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
   Deadlines and follow-ups due within a week (or overdue) are flagged in the
   list. Search covers postings, notes and tags, sort by status, recency,
   company or deadline, export everything to CSV, export a per-application
-  status timeline, and undo a deletion for eight seconds. A fit matrix matches
-  requirement lines against your profile evidence and highlights gaps.
+  status timeline, and undo a deletion for eight seconds.
 - **First-run walkthrough** — a three-step introduction to tracking,
   chatting and the profile, shown once.
 - **AI chat assistant** — one chat thread per application. The agent knows the
@@ -43,14 +42,16 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
     context note when needed.
   - Choose between the built-in standard prompt or your own custom prompt.
 - **Tailored CV builder** — generate an editable, ATS-friendly Word or PDF CV
-  from your profile and one application's job description. Edit every section,
-  reorder entries and sections, add extra context, preview the formatted page,
-  review the generated roles, skills and sections before accepting it, rewrite
-  sections with a before/after diff and presets, restore earlier CV versions,
-  check phrase/synonym keyword matches and requirement priorities, use a
-  deterministic grounding review, get page-fit feedback, switch between two
-  ATS-safe templates, export Word or PDF, and add recent chat details
-  explicitly. See [docs/cv-builder.md](docs/cv-builder.md).
+  from your profile and one application's job description. Consecutive roles at
+  the same employer are grouped under one employer header, with every role kept
+  for a complete timeline and description depth tailored to the job. Edit every
+  section, reorder employer groups and sections, add extra context, preview the
+  formatted page, review the generated groups, skills and sections before
+  accepting it, rewrite sections with a before/after diff and presets, restore
+  earlier CV versions, check phrase/synonym keyword matches and requirement
+  priorities, use a deterministic grounding review, get page-fit feedback,
+  switch between two ATS-safe templates, export Word or PDF, and add recent chat
+  details explicitly. See [docs/cv-builder.md](docs/cv-builder.md).
 - **Profile** — education, work experience, certifications, skills, languages,
   previous cover letters, phone and portfolio/GitHub links, per-role
   achievements, and a public profile (e.g. LinkedIn) URL that the AI can
