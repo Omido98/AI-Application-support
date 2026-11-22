@@ -114,11 +114,14 @@ const STOP_WORDS = new Set([
 
 /** Lowercase content words used for matching, without stop words. */
 export function contentWords(text: string): Set<string> {
-  const words = text.toLowerCase().match(/[\p{L}\p{N}+#]+/gu) ?? [];
+  const words = text.toLowerCase().match(/[\p{L}\p{N}+#.]+/gu) ?? [];
   return new Set(
     words
-      .map((word) => word.replace(/[+#]+$/, ""))
-      .filter((word) => word.length >= 3 && !STOP_WORDS.has(word)),
+      .map((word) => word.replace(/[.,]+$/, ""))
+      .filter(
+        (word) =>
+          word.length >= 2 && !/^\d+$/.test(word) && !STOP_WORDS.has(word),
+      ),
   );
 }
 
@@ -142,6 +145,14 @@ function profileEvidence(profile: FitProfile | null): Evidence[] {
     add(
       `${work.role || "Role"} at ${work.company || "company"}: ${work.jobDescription}`,
     );
+    for (const achievement of work.achievements ?? []) {
+      add(`Achievement: ${achievement}`);
+    }
+    for (const project of work.projects ?? []) {
+      add(
+        `Project: ${project.name || "Project"} ${(project.achievements ?? []).join(" ")}`,
+      );
+    }
   }
   for (const education of profile.education) {
     add(
@@ -185,7 +196,7 @@ function splitRequirements(application: FitApplication): string[] {
     const lines = source
       .split(/\r?\n|(?<=[.;])\s+/)
       .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
-      .filter((line) => line.length >= 12);
+      .filter((line) => line.length >= 2);
     candidates.push(...lines);
     if (candidates.length >= 12) break;
   }

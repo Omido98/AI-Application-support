@@ -130,6 +130,24 @@ describe("renderCvDocx", () => {
     expect(styles).toContain('w:lineRule="exact"');
   });
 
+  it("uses a taller line for the large name run", async () => {
+    const document = createCvDocumentFromProfile(profile, application, {
+      language: "en",
+      pageSize: "a4",
+      extraContext: "",
+    });
+
+    const bytes = await renderCvDocx(document);
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(bytes);
+    const body = await zip.file("word/document.xml")?.async("string");
+
+    expect(body).toBeTruthy();
+    // Classic name: 18 pt = 36 half-points; 1.2 line = 432 twips.
+    expect(body).toContain('w:line="432"');
+    expect(body).toContain('w:lineRule="atLeast"');
+  });
+
   it("uses Swedish section headings when the document language is Swedish", async () => {
     const document = createCvDocumentFromProfile(profile, application, {
       language: "sv",

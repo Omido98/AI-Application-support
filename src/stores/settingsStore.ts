@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { saveJson, loadJson, reportDataIssue } from "@/utils/storage";
+import { createSaveQueue } from "@/utils/saveQueue";
 import { normalizeSettingsData } from "@/utils/dataValidation";
 import {
   DEFAULT_PROFILE_SECTION_ORDER,
@@ -137,7 +138,8 @@ interface SettingsState extends Settings {
   markNotificationsSent: (day: string, keys: string[]) => void;
 }
 
-function persist(state: SettingsState) {
+function writeSnapshot(): Promise<boolean> {
+  const state = useSettingsStore.getState();
   const settings: Settings = {
     theme: state.theme,
     accent: state.accent,
@@ -149,10 +151,23 @@ function persist(state: SettingsState) {
     notificationsEnabled: state.notificationsEnabled,
     notificationLog: state.notificationLog,
   };
-  void saveJson("settings.json", settings);
+  return saveJson("settings.json", settings);
 }
 
-export const useSettingsStore = create<SettingsState>((set, get) => ({
+const saveQueue = createSaveQueue();
+
+function persist() {
+  // Serialize settings writes: rapid theme/accent/last-tab changes must not
+  // finish out of order, and the close handler must be able to wait for them.
+  void saveQueue.enqueue(writeSnapshot);
+}
+
+/** Flush pending settings writes (window close / explicit flush). */
+export async function flushSettingsSave(): Promise<boolean> {
+  return saveQueue.whenIdle();
+}
+
+export const useSettingsStore = create<SettingsState>((set) => ({
   ...DEFAULT_SETTINGS,
   isLoaded: false,
 
@@ -194,47 +209,47 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setTheme: (theme) => {
     set({ theme });
-    persist(get());
+    persist();
   },
 
   setAccent: (accent) => {
     set({ accent });
-    persist(get());
+    persist();
   },
 
   setLastTab: (lastTab) => {
     set({ lastTab });
-    persist(get());
+    persist();
   },
 
   setOnboardingDone: (onboardingDone) => {
     set({ onboardingDone });
-    persist(get());
+    persist();
   },
 
   setProfileSectionOrder: (profileSectionOrder) => {
     set({ profileSectionOrder });
-    persist(get());
+    persist();
   },
 
   setAutoUpdateCheck: (autoUpdateCheck) => {
     set({ autoUpdateCheck });
-    persist(get());
+    persist();
   },
 
   setSkippedUpdateVersion: (skippedUpdateVersion) => {
     set({ skippedUpdateVersion });
-    persist(get());
+    persist();
   },
 
   setNotificationsEnabled: (notificationsEnabled) => {
     set({ notificationsEnabled });
-    persist(get());
+    persist();
   },
 
   markNotificationsSent: (day, keys) => {
     const unique = [...new Set(keys)].slice(-200);
     set({ notificationLog: { day, keys: unique } });
-    persist(get());
+    persist();
   },
 }));

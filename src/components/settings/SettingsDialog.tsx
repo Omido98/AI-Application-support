@@ -190,10 +190,14 @@ export default function SettingsDialog({
         return;
       }
 
-      await restoreBackupBundle(bundle);
+      const restored = await restoreBackupBundle(bundle);
       // A backup without drafts means "no drafts", not "keep the old ones".
       if (!("drafts.json" in bundle.files)) {
-        await deleteFile("drafts.json");
+        if (!(await deleteFile("drafts.json"))) {
+          throw new Error(
+            "The restore was written, but the old drafts file could not be removed.",
+          );
+        }
       }
       // Reload every store so the restored data shows immediately.
       await useApplicationStore.getState().loadApplications();
@@ -212,7 +216,7 @@ export default function SettingsDialog({
       await useSettingsStore.getState().loadSettings();
       setConfigFormKey((key) => key + 1);
       setBackupStatus(
-        `Import complete — ${count} files restored. A safety copy of the previous data was kept as backup-before-import.json.`,
+        `Import complete — ${restored.length} files restored. A safety copy of the previous data was kept as backup-before-import.json.`,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

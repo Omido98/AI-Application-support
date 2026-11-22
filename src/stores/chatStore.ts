@@ -528,12 +528,17 @@ interface ChatState {
     updater: (msg: ChatMessage) => ChatMessage,
   ) => void;
   /** Append a message to a thread, active or not (loads it when needed). */
-  appendMessageToThread: (threadId: string, msg: ChatMessage) => Promise<void>;
+  appendMessageToThread: (
+    threadId: string,
+    msg: ChatMessage,
+    signal?: AbortSignal,
+  ) => Promise<void>;
   /** Replace a message in a thread, active or not. */
   updateMessageInThread: (
     threadId: string,
     messageId: string,
     updater: (msg: ChatMessage) => ChatMessage,
+    signal?: AbortSignal,
   ) => Promise<void>;
   /** Remove one message from a thread (discarding a suggestion or review). */
   removeMessageInThread: (threadId: string, messageId: string) => Promise<void>;
@@ -645,8 +650,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (changed) scheduleThreadSave(threadId);
   },
 
-  appendMessageToThread: async (threadId, msg) => {
+  appendMessageToThread: async (threadId, msg, signal) => {
     await loadThread(threadId);
+    if (signal?.aborted) return;
     set((s) => {
       const thread = s.threads[threadId] ?? emptyThread();
       return {
@@ -663,8 +669,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     scheduleThreadSave(threadId);
   },
 
-  updateMessageInThread: async (threadId, messageId, updater) => {
+  updateMessageInThread: async (threadId, messageId, updater, signal) => {
     await loadThread(threadId);
+    if (signal?.aborted) return;
     let changed = false;
     set((s) => {
       const thread = s.threads[threadId];

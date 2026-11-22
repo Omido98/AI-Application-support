@@ -29,6 +29,7 @@ import {
 } from "@/utils/contextBudget";
 import { estimateUsageCost, isFreeModel } from "@/utils/zenPricing";
 import { createStreamBatcher } from "@/utils/streamBuffer";
+import { resetChatActions } from "@/utils/chatActions";
 import type { WebSource } from "@/types";
 import ChatSettings from "@/components/chat/ChatSettings";
 import MessageList from "@/components/chat/MessageList";
@@ -234,6 +235,9 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
       generationControllers.get(activeThreadId)?.abort();
       summaryControllers.get(activeThreadId)?.abort();
       summaryControllers.delete(activeThreadId);
+      // Review/improve/deslop actions live in MessageList; abort them before
+      // clearing the thread so their result cannot reappear afterwards.
+      resetChatActions(activeThreadId);
     }
     setSummarizingThreadId((current) =>
       current === activeThreadId ? null : current,
@@ -330,16 +334,21 @@ export default function ChatTab({ onOpenSettings }: ChatTabProps) {
             sourceKey: lastDropped.id,
             timestamp: new Date().toISOString(),
           }),
+          controller.signal,
         );
       } else {
-        await appendMessageToThread(threadId, {
-          id: newMessageId(),
-          role: "assistant",
-          content: result.content,
-          timestamp: new Date().toISOString(),
-          kind: "summary",
-          sourceKey: lastDropped.id,
-        });
+        await appendMessageToThread(
+          threadId,
+          {
+            id: newMessageId(),
+            role: "assistant",
+            content: result.content,
+            timestamp: new Date().toISOString(),
+            kind: "summary",
+            sourceKey: lastDropped.id,
+          },
+          controller.signal,
+        );
       }
     } catch (err) {
       if (controller.signal.aborted) return;
