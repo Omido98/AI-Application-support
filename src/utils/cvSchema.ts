@@ -21,6 +21,7 @@ import {
   groupWorkExperience,
   mergeAdjacentExperienceGroups,
 } from "@/utils/cvExperience";
+import { CV_UI_TEXT } from "@/utils/cvLanguage";
 
 const MONTHS: Record<CvLanguage, string[]> = {
   en: [
@@ -69,8 +70,8 @@ const ENGLISH_MONTHS = [
 ];
 
 export const CV_PRESENT_LABEL: Record<CvLanguage, string> = {
-  en: "Present",
-  sv: "Nuvarande",
+  en: CV_UI_TEXT.en.present,
+  sv: CV_UI_TEXT.sv.present,
 };
 
 /** Hash of the profile snapshot used to detect stale CV drafts. */

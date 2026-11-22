@@ -186,7 +186,7 @@ describe("sortCvRoles and experienceRange", () => {
         current: true,
       },
     ]);
-    expect(experienceRangeLabel(item, "sv")).toBe("Jan 2019 – Nuvarande");
+    expect(experienceRangeLabel(item, "sv")).toBe("Jan 2019 – Idag");
   });
 
   it("handles an employer group with no roles", () => {
@@ -222,7 +222,7 @@ describe("sortCvRoles and experienceRange", () => {
       },
     ]);
 
-    expect(roleDateRange(item.roles[0], "sv")).toBe("Jan 2019 – Nuvarande");
+    expect(roleDateRange(item.roles[0], "sv")).toBe("Jan 2019 – Idag");
   });
 });
 

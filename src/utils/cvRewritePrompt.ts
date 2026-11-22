@@ -1,7 +1,7 @@
 import type { JobApplication, ProfileData } from "@/types";
 import type { CvDocument, CvLanguage, CvRewriteTarget } from "@/types/cv";
 import { extractJobKeywords } from "@/utils/cvAts";
-import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
+import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import {
   experienceRangeLabel,
   roleDateRange,
@@ -19,7 +19,7 @@ function dateRange(
   current: boolean,
   language: CvLanguage,
 ): string {
-  return [start, current ? (language === "sv" ? "Nuvarande" : "Present") : end]
+  return [start, current ? CV_UI_TEXT[language].present : end]
     .filter(Boolean)
     .join(" – ");
 }

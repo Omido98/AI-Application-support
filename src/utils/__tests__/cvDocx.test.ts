@@ -211,7 +211,7 @@ describe("renderCvDocx", () => {
     expect(text).toContain("Profil");
     expect(text).toContain("Arbetslivserfarenhet");
     expect(text).toContain("Utbildning");
-    expect(text).toContain("Nuvarande");
+    expect(text).toContain("Idag");
   });
 
   it("uses uppercase compact headings without losing content", async () => {

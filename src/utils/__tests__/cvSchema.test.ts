@@ -250,7 +250,7 @@ describe("createCvDocumentFromProfile", () => {
       "jul 2022 – jun 2024",
     );
     expect(cvDateRange("July", "2022", "", "", true, "sv")).toBe(
-      "jul 2022 – Nuvarande",
+      "jul 2022 – Idag",
     );
   });
 });

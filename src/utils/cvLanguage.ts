@@ -40,7 +40,7 @@ export const CV_UI_TEXT: Record<
     pageLetter: "Letter",
   },
   sv: {
-    present: "Nuvarande",
+    present: "Idag",
     pageA4: "A4",
     pageLetter: "Letter",
   },
