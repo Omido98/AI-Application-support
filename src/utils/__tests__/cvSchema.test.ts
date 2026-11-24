@@ -142,16 +142,22 @@ describe("createCvDocumentFromProfile", () => {
       portfolioUrl: "https://jane.example",
       githubUrl: "https://github.com/jane",
     });
+    expect(document.schemaVersion).toBe(2);
     expect(document.experience).toHaveLength(1);
     expect(document.experience[0]).toMatchObject({
       sourceId: "work-1",
       company: "Fjordline",
-      role: "Frontend Engineer",
-      startDate: "Jul 2022",
-      endDate: "Present",
-      current: true,
       included: true,
     });
+    expect(document.experience[0].roles).toEqual([
+      expect.objectContaining({
+        sourceId: "work-1",
+        title: "Frontend Engineer",
+        startDate: "Jul 2022",
+        endDate: "Present",
+        current: true,
+      }),
+    ]);
     expect(document.experience[0].bullets).toEqual([
       "Reduced reporting time by 30%",
       "Mentored two engineers",
@@ -179,6 +185,64 @@ describe("createCvDocumentFromProfile", () => {
     expect(hasCvContent(document)).toBe(true);
   });
 
+  it("groups consecutive roles at the same employer into one experience", () => {
+    const grouped = createCvDocumentFromProfile(
+      {
+        ...profile,
+        workExperience: [
+          {
+            id: "work-2",
+            company: "EY",
+            role: "Senior Management Consultant",
+            startMonth: "January",
+            startYear: "2021",
+            isCurrent: true,
+            jobDescription: "Lead the transformation programme.",
+            achievements: ["Grew the account"],
+            projects: [],
+          },
+          {
+            id: "work-1",
+            company: "EY",
+            role: "Management Consultant",
+            startMonth: "January",
+            startYear: "2019",
+            isCurrent: false,
+            endMonth: "December",
+            endYear: "2020",
+            jobDescription: "Delivered operating-model work.",
+            achievements: [],
+            projects: [],
+          },
+        ],
+      },
+      application,
+      { language: "en", pageSize: "a4" },
+    );
+
+    expect(grouped.experience).toHaveLength(1);
+    expect(grouped.experience[0].sourceId).toBe("work-2");
+    expect(grouped.experience[0].roles.map((role) => role.title)).toEqual([
+      "Senior Management Consultant",
+      "Management Consultant",
+    ]);
+    expect(grouped.experience[0].bullets[0]).toBe("Grew the account");
+  });
+
+  it("treats title-and-date employer groups as CV content", () => {
+    const document = makeDocument();
+    document.summary = "";
+    document.skills = [];
+    document.education = [];
+    document.projects = [];
+    document.certifications = [];
+    document.languages = [];
+    document.otherEngagements = [];
+    document.experience[0].bullets = [];
+
+    expect(hasCvContent(document)).toBe(true);
+  });
+
   it("localizes dates for Swedish and handles missing end dates", () => {
     expect(formatCvDate("July", "2022", "sv")).toBe("jul 2022");
     expect(formatCvDate("", "2022", "sv")).toBe("2022");
@@ -186,7 +250,7 @@ describe("createCvDocumentFromProfile", () => {
       "jul 2022 – jun 2024",
     );
     expect(cvDateRange("July", "2022", "", "", true, "sv")).toBe(
-      "jul 2022 – Nuvarande",
+      "jul 2022 – Idag",
     );
   });
 });
@@ -209,7 +273,7 @@ describe("normalizeCvDocument", () => {
   });
 
   it("rejects unknown schemas and drops malformed entries", () => {
-    expect(normalizeCvDocument({ schemaVersion: 2 })).toBeNull();
+    expect(normalizeCvDocument({ schemaVersion: 3 })).toBeNull();
     expect(normalizeCvDocument(null)).toBeNull();
 
     const normalized = normalizeCvDocument({
@@ -219,11 +283,56 @@ describe("normalizeCvDocument", () => {
       experience: ["bad", { company: "Acme" }],
       education: null,
     });
+    expect(normalized?.schemaVersion).toBe(2);
     expect(normalized?.language).toBe("sv");
     expect(normalized?.pageSize).toBe("letter");
     expect(normalized?.experience).toHaveLength(1);
+    expect(normalized?.experience[0].roles).toEqual([]);
     expect(normalized?.education).toEqual([]);
     expect(normalized?.template).toBe("classic");
+  });
+
+  it("migrates adjacent v1 roles at the same employer into one group", () => {
+    const normalized = normalizeCvDocument({
+      schemaVersion: 1,
+      language: "en",
+      pageSize: "a4",
+      experience: [
+        {
+          id: "cv-1",
+          sourceId: "work-1",
+          company: "EY",
+          role: "Senior Management Consultant",
+          startDate: "Jan 2021",
+          endDate: "Present",
+          current: true,
+          bullets: ["Led delivery."],
+          included: true,
+        },
+        {
+          id: "cv-2",
+          sourceId: "work-2",
+          company: "EY",
+          role: "Management Consultant",
+          startDate: "Jan 2019",
+          endDate: "Dec 2020",
+          current: false,
+          bullets: ["Delivered analysis."],
+          included: true,
+        },
+      ],
+    });
+
+    expect(normalized?.schemaVersion).toBe(2);
+    expect(normalized?.experience).toHaveLength(1);
+    expect(normalized?.experience[0].roles.map((role) => role.title)).toEqual([
+      "Senior Management Consultant",
+      "Management Consultant",
+    ]);
+    expect(normalized?.experience[0].bullets).toEqual([
+      "Led delivery.",
+      "Delivered analysis.",
+    ]);
   });
 
   it("preserves the compact template", () => {

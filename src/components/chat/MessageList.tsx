@@ -20,6 +20,7 @@ import Markdown from "@/components/chat/Markdown";
 import ReviewCard from "@/components/chat/ReviewCard";
 import StreamingBubble from "@/components/chat/StreamingBubble";
 import SuggestionCard from "@/components/chat/SuggestionCard";
+import AiLikenessDialog from "@/components/chat/AiLikenessDialog";
 import { Button } from "@/components/ui/button";
 import { formatTokenCount } from "@/utils/tokens";
 import { openExternalUrl } from "@/utils/links";
@@ -44,6 +45,7 @@ import {
   RefreshCw,
   Link2,
   FileDown,
+  Gauge,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -182,6 +184,10 @@ function MessageList({
     string | null
   >(null);
   const [openRefineKey, setOpenRefineKey] = useState<string | null>(null);
+  const [aiCheckTarget, setAiCheckTarget] = useState<{
+    key: string;
+    content: string;
+  } | null>(null);
   const [exporting, setExporting] = useState<{
     key: string;
     format: ExportFormat;
@@ -263,6 +269,12 @@ function MessageList({
       }),
     [],
   );
+
+  // A modal opened for one application's draft must not survive a switch to
+  // another application: it would show a draft the user is no longer editing.
+  useEffect(() => {
+    setAiCheckTarget(null);
+  }, [activeThreadId]);
 
   useEffect(() => {
     if (!anyActionPending) return;
@@ -976,6 +988,15 @@ function MessageList({
                       }}
                     />
                     <RefineItem
+                      icon={Gauge}
+                      label="Check AI-likeness"
+                      disabled={actionsBlocked}
+                      onClick={() => {
+                        setOpenRefineKey(null);
+                        setAiCheckTarget({ key, content: msg.content });
+                      }}
+                    />
+                    <RefineItem
                       icon={Wand2}
                       label="Improve draft"
                       pending={improvePendingId === key}
@@ -1036,6 +1057,16 @@ function MessageList({
           </div>
         );
       })}
+
+      <AiLikenessDialog
+        open={aiCheckTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setAiCheckTarget(null);
+        }}
+        text={aiCheckTarget?.content ?? ""}
+        config={config}
+        chatBusy={isSending}
+      />
 
       <StreamingBubble />
 

@@ -39,8 +39,12 @@ export default function CvGenerationReviewDialog({
     [proposal, profile],
   );
   const pages = proposal ? estimateCvPages(proposal).pages : 0;
-  const includedRoles =
+  const includedEmployers =
     proposal?.experience.filter((item) => item.included).length ?? 0;
+  const includedRoles =
+    proposal?.experience
+      .filter((item) => item.included)
+      .reduce((sum, item) => sum + item.roles.length, 0) ?? 0;
 
   return (
     <Dialog open={open} onOpenChange={(value) => !value && onDiscard()}>
@@ -63,6 +67,8 @@ export default function CvGenerationReviewDialog({
                 ~{pages} {pages === 1 ? "page" : "pages"}
               </span>
               <span>
+                {includedEmployers}{" "}
+                {includedEmployers === 1 ? "employer" : "employers"} ·{" "}
                 {includedRoles} {includedRoles === 1 ? "role" : "roles"}
               </span>
               <span>{proposal.skills.length} skills</span>
@@ -89,6 +95,11 @@ export default function CvGenerationReviewDialog({
             )}
 
             <CvProposalDetails proposal={proposal} />
+
+            <p className="text-[11px] text-text-muted">
+              Every employer and role is kept for a complete timeline; only the
+              amount of description is tailored to this job.
+            </p>
 
             {grounding && <CvGroundingPanel report={grounding} />}
 

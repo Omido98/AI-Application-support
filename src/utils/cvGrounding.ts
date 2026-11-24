@@ -111,7 +111,7 @@ function claimWarnings(
       .filter((item) => item.included)
       .flatMap((item) =>
         item.bullets.map((bullet, index) => ({
-          label: `${item.role || "Role"} bullet ${index + 1}`,
+          label: `${item.company || "Employer"} bullet ${index + 1}`,
           text: bullet,
         })),
       ),

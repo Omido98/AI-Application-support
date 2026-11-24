@@ -37,7 +37,7 @@ const profile: ProfileData = {
 
 function makeDocument(): CvDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     language: "en",
     pageSize: "a4",
     generatedAt: "2026-01-01T00:00:00.000Z",
@@ -62,11 +62,16 @@ function makeDocument(): CvDocument {
       {
         id: "cv-work-1",
         company: "Fjordline",
-        role: "Frontend Engineer",
         location: "",
-        startDate: "Jan 2022",
-        endDate: "",
-        current: true,
+        roles: [
+          {
+            id: "cv-role-1",
+            title: "Frontend Engineer",
+            startDate: "Jan 2022",
+            endDate: "",
+            current: true,
+          },
+        ],
         bullets: ["Cut delivery costs by 42%."],
         included: true,
       },

@@ -144,6 +144,22 @@ describe("analyzeCvAts", () => {
     expect(warnings[0]).toContain("bullet");
   });
 
+  it("includes every role title and date in the plain text", () => {
+    const doc = document();
+    doc.experience[0].roles.push({
+      id: "role-2",
+      title: "Senior Management Consultant",
+      startDate: "Jan 2024",
+      endDate: "Present",
+      current: true,
+    });
+
+    const text = cvPlainText(doc);
+    expect(text).toContain("Frontend Engineer");
+    expect(text).toContain("Senior Management Consultant");
+    expect(text).toContain("Jan 2024");
+  });
+
   it("flags missing contact details and short skills", () => {
     const doc = document();
     doc.contact.email = "";

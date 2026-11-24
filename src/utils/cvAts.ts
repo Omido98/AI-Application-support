@@ -281,14 +281,11 @@ export function cvPlainText(document: CvDocument): string {
 
   for (const item of document.experience) {
     if (!item.included) continue;
-    lines.push(
-      item.role,
-      item.company,
-      item.location,
-      item.startDate,
-      item.endDate,
-      ...item.bullets,
-    );
+    lines.push(item.company, item.location);
+    for (const role of item.roles) {
+      lines.push(role.title, role.startDate, role.endDate);
+    }
+    lines.push(...item.bullets);
   }
   for (const item of document.education) {
     if (!item.included) continue;
@@ -560,7 +557,7 @@ export function findUnverifiedNumbers(
       .filter((item) => item.included)
       .flatMap((item) =>
         item.bullets.map((bullet, index) => ({
-          label: `${item.role || "Role"} bullet ${index + 1}`,
+          label: `${item.company || "Employer"} bullet ${index + 1}`,
           text: bullet,
         })),
       ),
@@ -720,7 +717,9 @@ export function analyzeCvAts(
     (sum, item) => sum + item.bullets.length,
     0,
   );
-  const hasDates = experience.every((item) => item.startDate.trim().length > 0);
+  const hasDates = experience.every((item) =>
+    item.roles.every((role) => role.startDate.trim().length > 0),
+  );
   const contact = document.contact;
 
   const checks: CvAtsCheck[] = [

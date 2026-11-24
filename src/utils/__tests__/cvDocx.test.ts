@@ -111,6 +111,57 @@ describe("renderCvDocx", () => {
     expect(text).toContain("English");
   });
 
+  it("renders one employer block with all of its role titles", async () => {
+    const document = createCvDocumentFromProfile(
+      {
+        ...profile,
+        workExperience: [
+          {
+            id: "w2",
+            company: "EY",
+            role: "Senior Management Consultant",
+            startMonth: "January",
+            startYear: "2021",
+            isCurrent: true,
+            jobDescription: "Lead the programme.",
+            achievements: [],
+            projects: [],
+          },
+          {
+            id: "w1",
+            company: "EY",
+            role: "Management Consultant",
+            startMonth: "January",
+            startYear: "2019",
+            isCurrent: false,
+            endMonth: "December",
+            endYear: "2020",
+            jobDescription: "Delivered analysis.",
+            achievements: [],
+            projects: [],
+          },
+        ],
+      },
+      application,
+      { language: "en", pageSize: "a4", extraContext: "" },
+    );
+    document.summary = "Grouped experience.";
+
+    const bytes = await renderCvDocx(document);
+    const text = await extractText(bytes);
+    expect(text).toContain("EY");
+    expect(text).toContain("Senior Management Consultant");
+    expect(text).toContain("Management Consultant");
+    expect(text).toContain("Jan 2019 – Present");
+    expect(text.match(/\bEY\b/g)).toHaveLength(1);
+
+    const { default: JSZip } = await import("jszip");
+    const zip = await JSZip.loadAsync(bytes);
+    const body = await zip.file("word/document.xml")?.async("string");
+    expect(body).toContain("<w:tabs>");
+    expect(body).toContain('w:val="right"');
+  });
+
   it("uses exact line spacing instead of Word's 1.1-line default", async () => {
     const document = createCvDocumentFromProfile(profile, application, {
       language: "en",
@@ -160,7 +211,7 @@ describe("renderCvDocx", () => {
     expect(text).toContain("Profil");
     expect(text).toContain("Arbetslivserfarenhet");
     expect(text).toContain("Utbildning");
-    expect(text).toContain("Nuvarande");
+    expect(text).toContain("Idag");
   });
 
   it("uses uppercase compact headings without losing content", async () => {

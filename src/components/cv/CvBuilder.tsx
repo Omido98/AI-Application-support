@@ -28,6 +28,7 @@ import type {
   CvDocument,
   CvEducation,
   CvExperience,
+  CvExperienceRole,
   CvLanguage,
   CvLanguageSkill,
   CvOtherEngagement,
@@ -56,6 +57,7 @@ import { splitLines as lines } from "@/utils/lines";
 import { estimateCvPages } from "@/utils/cvPageEstimate";
 import { flushPendingEdits } from "@/utils/pendingEdits";
 import { clearAiSection } from "@/utils/cvProvenance";
+import { experienceRangeLabel, sortCvRoles } from "@/utils/cvExperience";
 import { buildChatContextBlock, mergeChatContext } from "@/utils/cvChatContext";
 import { CV_SECTION_LABELS, CV_UI_TEXT } from "@/utils/cvLanguage";
 import { exportCvDocx } from "@/utils/cvDocx";
@@ -102,6 +104,16 @@ function moveItem<T>(items: T[], index: number, direction: -1 | 1): T[] {
   const next = [...items];
   [next[index], next[target]] = [next[target], next[index]];
   return next;
+}
+
+function createEmptyExperienceRole(): CvExperienceRole {
+  return {
+    id: newMessageId(),
+    title: "",
+    startDate: "",
+    endDate: "",
+    current: false,
+  };
 }
 
 function SectionCard({
@@ -460,6 +472,45 @@ export default function CvBuilder({
           ...current,
           experience: current.experience.map((item) =>
             item.id === id ? { ...item, ...next } : item,
+          ),
+        },
+        "experience",
+      ),
+    );
+  };
+  const updateExperienceRole = (
+    experienceId: string,
+    roleId: string,
+    next: Partial<CvExperienceRole>,
+  ) => {
+    patch((current) =>
+      clearAiSection(
+        {
+          ...current,
+          experience: current.experience.map((item) =>
+            item.id === experienceId
+              ? {
+                  ...item,
+                  roles: item.roles.map((role) =>
+                    role.id === roleId ? { ...role, ...next } : role,
+                  ),
+                }
+              : item,
+          ),
+        },
+        "experience",
+      ),
+    );
+  };
+  const addExperienceRole = (experienceId: string) => {
+    patch((current) =>
+      clearAiSection(
+        {
+          ...current,
+          experience: current.experience.map((item) =>
+            item.id === experienceId
+              ? { ...item, roles: [...item.roles, createEmptyExperienceRole()] }
+              : item,
           ),
         },
         "experience",
@@ -1056,150 +1107,256 @@ export default function CvBuilder({
       case "experience":
         return card(
           <div className="space-y-3">
-            {document.experience.map((item, itemIndex) => (
-              <div
-                key={item.id}
-                className="space-y-2 rounded-md border border-border bg-field/40 p-3"
-              >
-                <EntryControls
-                  include={item.included}
-                  onInclude={(included) =>
-                    updateExperience(item.id, { included })
-                  }
-                  onMove={(direction) =>
-                    patch((current) => ({
-                      ...current,
-                      experience: moveItem(
-                        current.experience,
-                        itemIndex,
-                        direction,
-                      ),
-                    }))
-                  }
-                  canMoveUp={itemIndex > 0}
-                  canMoveDown={itemIndex < document.experience.length - 1}
-                  onDelete={() =>
-                    void removeEntry(
-                      `${item.role || "experience"} at ${
-                        item.company || "company"
-                      }`,
-                      (current) => ({
+            {document.experience.map((item, itemIndex) => {
+              const roles = sortCvRoles(item.roles);
+              const groupLabel =
+                item.company || roles[0]?.title || "this employer";
+              return (
+                <div
+                  key={item.id}
+                  className="space-y-2 rounded-md border border-border bg-field/40 p-3"
+                >
+                  <EntryControls
+                    include={item.included}
+                    onInclude={(included) =>
+                      updateExperience(item.id, { included })
+                    }
+                    onMove={(direction) =>
+                      patch((current) => ({
                         ...current,
-                        experience: current.experience.filter(
-                          (entry) => entry.id !== item.id,
+                        experience: moveItem(
+                          current.experience,
+                          itemIndex,
+                          direction,
                         ),
-                      }),
-                    )
-                  }
-                  label={`${item.role || "experience"} at ${
-                    item.company || "company"
-                  }`}
-                />
-                {rewriteAction(
-                  { kind: "experience", id: item.id },
-                  `${item.role || "role"} bullets`,
-                )}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <BufferedInput
-                    value={item.role}
-                    onCommit={(value) =>
-                      updateExperience(item.id, { role: value })
+                      }))
                     }
-                    placeholder="Role"
-                    className={fieldClass}
-                    aria-label={`Role for ${item.company || "experience"}`}
-                  />
-                  <BufferedInput
-                    value={item.company}
-                    onCommit={(value) =>
-                      updateExperience(item.id, { company: value })
+                    canMoveUp={itemIndex > 0}
+                    canMoveDown={itemIndex < document.experience.length - 1}
+                    onDelete={() =>
+                      void removeEntry(
+                        `the employer group "${groupLabel}"`,
+                        (current) => ({
+                          ...current,
+                          experience: current.experience.filter(
+                            (entry) => entry.id !== item.id,
+                          ),
+                        }),
+                      )
                     }
-                    placeholder="Company"
-                    className={fieldClass}
-                    aria-label={`Company for ${item.role || "experience"}`}
+                    label={groupLabel}
                   />
-                  <BufferedInput
-                    value={item.location}
-                    onCommit={(value) =>
-                      updateExperience(item.id, { location: value })
-                    }
-                    placeholder="Location (optional)"
-                    className={fieldClass}
-                  />
-                  <div className="grid grid-cols-2 gap-2">
+                  {rewriteAction(
+                    { kind: "experience", id: item.id },
+                    `${groupLabel} bullets`,
+                  )}
+                  <div className="grid gap-2 sm:grid-cols-2">
                     <BufferedInput
-                      value={item.startDate}
+                      value={item.company}
                       onCommit={(value) =>
-                        updateExperience(item.id, { startDate: value })
+                        updateExperience(item.id, { company: value })
                       }
-                      placeholder="Start"
+                      placeholder="Employer"
                       className={fieldClass}
+                      aria-label={`Company for ${groupLabel}`}
                     />
                     <BufferedInput
-                      value={item.endDate}
+                      value={item.location}
                       onCommit={(value) =>
-                        updateExperience(item.id, { endDate: value })
+                        updateExperience(item.id, { location: value })
                       }
-                      placeholder="End"
+                      placeholder="Location (optional)"
                       className={fieldClass}
-                      disabled={item.current}
+                      aria-label={`Location for ${groupLabel}`}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-text-secondary text-xs">
+                        Roles (newest first)
+                      </Label>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-primary hover:text-primary/80 h-6 px-2 text-xs"
+                        onClick={() => addExperienceRole(item.id)}
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Add role
+                      </Button>
+                    </div>
+                    {roles.map((role, roleIndex) => (
+                      <div
+                        key={role.id}
+                        className="space-y-2 rounded-md border border-border bg-surface p-2.5"
+                      >
+                        <div className="flex items-start gap-2">
+                          <div className="grid flex-1 gap-1.5">
+                            <Label
+                              htmlFor={`cv-role-${role.id}`}
+                              className="text-text-secondary text-xs"
+                            >
+                              Role title
+                            </Label>
+                            <BufferedInput
+                              id={`cv-role-${role.id}`}
+                              value={role.title}
+                              onCommit={(value) =>
+                                updateExperienceRole(item.id, role.id, {
+                                  title: value,
+                                })
+                              }
+                              placeholder="e.g. Senior Management Consultant"
+                              className={fieldClass}
+                              aria-label={`Role ${roleIndex + 1} for ${groupLabel}`}
+                            />
+                          </div>
+                          {roles.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void removeEntry(
+                                  `the role "${role.title || "role"}" at ${groupLabel}`,
+                                  (current) =>
+                                    clearAiSection(
+                                      {
+                                        ...current,
+                                        experience: current.experience.map(
+                                          (entry) => {
+                                            if (entry.id !== item.id) {
+                                              return entry;
+                                            }
+                                            const roles = entry.roles.filter(
+                                              (entryRole) =>
+                                                entryRole.id !== role.id,
+                                            );
+                                            return {
+                                              ...entry,
+                                              sourceId:
+                                                sortCvRoles(roles)[0]?.sourceId,
+                                              roles,
+                                            };
+                                          },
+                                        ),
+                                      },
+                                      "experience",
+                                    ),
+                                )
+                              }
+                              className="text-destructive hover:text-red-400 transition-colors shrink-0 mt-6"
+                              title="Remove role"
+                              aria-label={`Remove role ${
+                                role.title || roleIndex + 1
+                              } from ${groupLabel}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <BufferedInput
+                            value={role.startDate}
+                            onCommit={(value) =>
+                              updateExperienceRole(item.id, role.id, {
+                                startDate: value,
+                              })
+                            }
+                            placeholder="Start"
+                            className={fieldClass}
+                            aria-label={`Start date for ${role.title || "role"}`}
+                          />
+                          <BufferedInput
+                            value={role.endDate}
+                            onCommit={(value) =>
+                              updateExperienceRole(item.id, role.id, {
+                                endDate: value,
+                              })
+                            }
+                            placeholder="End"
+                            className={fieldClass}
+                            disabled={role.current}
+                            aria-label={`End date for ${role.title || "role"}`}
+                          />
+                        </div>
+                        <label className="flex items-center gap-2 text-xs text-text-secondary">
+                          <Checkbox
+                            checked={role.current}
+                            aria-label={`Current role: ${
+                              role.title || roleIndex + 1
+                            }`}
+                            onCheckedChange={(checked) => {
+                              const present =
+                                CV_UI_TEXT[document.language].present;
+                              const presentLabels = [
+                                CV_UI_TEXT.en.present,
+                                CV_UI_TEXT.sv.present,
+                              ];
+                              updateExperienceRole(item.id, role.id, {
+                                current: checked === true,
+                                endDate:
+                                  checked === true
+                                    ? present
+                                    : presentLabels.includes(role.endDate)
+                                      ? ""
+                                      : role.endDate,
+                              });
+                            }}
+                          />
+                          Current role
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="text-[11px] text-text-muted">
+                    Employer dates:{" "}
+                    {experienceRangeLabel(item, document.language) ||
+                      "add role dates"}
+                  </p>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Bullets (one per line)</Label>
+                    <BufferedTextarea
+                      value={item.bullets.join("\n")}
+                      onCommit={(value) =>
+                        updateExperience(item.id, {
+                          bullets: lines(value),
+                        })
+                      }
+                      className={textareaClass}
+                      aria-label={`Bullets for ${groupLabel}`}
                     />
                   </div>
                 </div>
-                <label className="flex items-center gap-2 text-xs text-text-secondary">
-                  <Checkbox
-                    checked={item.current}
-                    onCheckedChange={(checked) =>
-                      updateExperience(item.id, {
-                        current: checked === true,
-                        endDate:
-                          checked === true
-                            ? CV_UI_TEXT[document.language].present
-                            : item.endDate,
-                      })
-                    }
-                  />
-                  Current role
-                </label>
-                <div className="space-y-1">
-                  <Label className="text-xs">Bullets (one per line)</Label>
-                  <BufferedTextarea
-                    value={item.bullets.join("\n")}
-                    onCommit={(value) =>
-                      updateExperience(item.id, {
-                        bullets: lines(value),
-                      })
-                    }
-                    className={textareaClass}
-                    aria-label={`Bullets for ${item.role || "experience"}`}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
             <Button
               variant="outline"
               size="sm"
               onClick={() =>
-                patch((current) => ({
-                  ...current,
-                  experience: [
-                    ...current.experience,
+                patch((current) =>
+                  clearAiSection(
                     {
-                      id: newMessageId(),
-                      company: "",
-                      role: "",
-                      location: "",
-                      startDate: "",
-                      endDate: "",
-                      current: false,
-                      bullets: [],
-                      included: true,
+                      ...current,
+                      experience: [
+                        ...current.experience,
+                        {
+                          id: newMessageId(),
+                          company: "",
+                          location: "",
+                          roles: [createEmptyExperienceRole()],
+                          bullets: [],
+                          included: true,
+                        },
+                      ],
                     },
-                  ],
-                }))
+                    "experience",
+                  ),
+                )
               }
             >
-              <Plus className="size-3.5" /> Add role
+              <Plus className="size-3.5" /> Add employer
             </Button>
           </div>,
         );

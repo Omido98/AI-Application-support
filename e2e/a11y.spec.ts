@@ -35,7 +35,7 @@ test.describe("WCAG 2.2 AA", () => {
 
   test("Generation review proposal details", async ({ page }, testInfo) => {
     const proposal = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       language: "en",
       pageSize: "a4",
       template: "classic",
@@ -60,11 +60,16 @@ test.describe("WCAG 2.2 AA", () => {
         {
           id: "role-1",
           company: "Acme",
-          role: "Platform Engineer",
           location: "Remote",
-          startDate: "Jan 2022",
-          endDate: "Present",
-          current: true,
+          roles: [
+            {
+              id: "title-1",
+              title: "Platform Engineer",
+              startDate: "Jan 2022",
+              endDate: "Present",
+              current: true,
+            },
+          ],
           bullets: ["Reduced reporting time."],
           included: true,
         },
@@ -164,6 +169,20 @@ test.describe("WCAG 2.2 AA", () => {
     ).toBeVisible();
 
     await scan(page, testInfo, { label: "tab-chat" });
+  });
+
+  test("AI-likeness modal", async ({ page }, testInfo) => {
+    await openApp(page, {
+      applications: [application],
+      lastTab: "chat",
+      withChat: true,
+    });
+
+    await page.getByRole("button", { name: "Draft actions" }).click();
+    await page.getByRole("menuitem", { name: "Check AI-likeness" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+
+    await scan(page, testInfo, { label: "ai-likeness-modal" });
   });
 
   test("Profile tab", async ({ page }, testInfo) => {

@@ -45,7 +45,7 @@ Also asserted:
   is also used as a text colour. Button label ink is chosen by contrast ratio
   instead of a luminance threshold. The stored preference is unchanged.
 - Light-theme amber text (`text-amber-500` → `text-amber-700 dark:text-amber-400`)
-  in the tracker, overview, chat and matrix.
+  in the tracker, overview and chat.
 - Light-theme interview/offer chips use amber-800/green-800 labels.
 - The chat Stop button uses `text-destructive-foreground` instead of white.
 

@@ -62,12 +62,60 @@ describe("buildCvGenerationPrompt", () => {
     expect(prompt).toContain("2. React");
     expect(prompt).toContain("3. Accessibility");
     expect(prompt).toContain("Recurring keywords:");
-    expect(prompt).toContain("two or three most relevant roles");
+    expect(prompt).toContain("every employer group");
+    expect(prompt).toContain("no fixed number of bullets");
+    expect(prompt).not.toContain("3-6 bullets");
     expect(prompt).toContain("at most 15 skills");
     expect(prompt).toContain(
       "without inventing numbers, tools, scope, non-numeric outcomes",
     );
     expect(prompt).toContain("Accessibility is a core interest.");
+  });
+
+  it("lists grouped employer roles with the group source id", () => {
+    const prompt = buildCvGenerationPrompt(
+      application,
+      {
+        ...profile,
+        workExperience: [
+          {
+            id: "work-2",
+            company: "EY",
+            role: "Senior Management Consultant",
+            startMonth: "January",
+            startYear: "2021",
+            isCurrent: true,
+            jobDescription: "Lead the programme.",
+            achievements: ["Grew the account"],
+            projects: [],
+          },
+          {
+            id: "work-1",
+            company: "EY",
+            role: "Management Consultant",
+            startMonth: "January",
+            startYear: "2019",
+            isCurrent: false,
+            endMonth: "December",
+            endYear: "2020",
+            jobDescription: "Delivered analysis.",
+            achievements: [],
+            projects: [],
+          },
+        ],
+      },
+      { language: "en", pageSize: "a4", extraContext: "" },
+    );
+
+    // Keep the bracketed ID split: Tailwind scans source strings as CSS
+    // classes and would try to parse the bracket syntax as an arbitrary
+    // property.
+    const groupLabel = "[" + "work:" + "work-2]";
+    expect(prompt).toContain(`${groupLabel} EY`);
+    expect(prompt).toContain("Roles:");
+    expect(prompt).toContain("Senior Management Consultant");
+    expect(prompt).toContain("Management Consultant");
+    expect(prompt).toContain("Grew the account");
   });
 
   it("still asks for strict JSON and source IDs", () => {

@@ -2,6 +2,11 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { CvDocument, CvSectionId } from "@/types/cv";
 import { CV_SECTION_LABELS } from "@/utils/cvLanguage";
 import { getCvLayout, type CvLayout } from "@/utils/cvLayout";
+import {
+  experienceRangeLabel,
+  roleDateRange,
+  sortCvRoles,
+} from "@/utils/cvExperience";
 import HighlightedText from "@/components/cv/HighlightedText";
 
 function hasSection(document: CvDocument, section: CvSectionId): boolean {
@@ -191,39 +196,80 @@ export default function CvPreview({
               <Section key={section} title={labels[section]} layout={layout}>
                 {document.experience
                   .filter((item) => item.included)
-                  .map((item) => (
-                    <div key={item.id} className="break-inside-avoid">
-                      <p className="font-bold">
-                        <HighlightedText
-                          text={[item.role, item.company]
-                            .filter(Boolean)
-                            .join(" — ")}
-                          terms={highlightTerms}
-                        />
-                      </p>
-                      <p
-                        className="italic text-neutral-600"
-                        style={{
-                          fontSize: `${layout.metaPx}px`,
-                          lineHeight: `${layout.metaPx * 1.3}px`,
-                        }}
-                      >
-                        {[item.startDate, item.endDate, item.location]
-                          .filter(Boolean)
-                          .join("  ·  ")}
-                      </p>
-                      <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                        {item.bullets.map((bullet, index) => (
-                          <li key={`${item.id}-${index}`}>
+                  .map((item) => {
+                    const roles = sortCvRoles(item.roles);
+                    const range = experienceRangeLabel(item, document.language);
+                    const employer = [item.company, item.location]
+                      .filter(Boolean)
+                      .join(" · ");
+                    return (
+                      <div key={item.id} className="break-inside-avoid">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <p className="min-w-0 font-bold">
                             <HighlightedText
-                              text={bullet}
+                              text={employer}
                               terms={highlightTerms}
                             />
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                          </p>
+                          {range && (
+                            <p
+                              className="shrink-0 italic text-neutral-600"
+                              style={{
+                                fontSize: `${layout.metaPx}px`,
+                                lineHeight: `${layout.metaPx * 1.3}px`,
+                              }}
+                            >
+                              {range}
+                            </p>
+                          )}
+                        </div>
+                        {roles.map((role) => {
+                          const dates = roleDateRange(role, document.language);
+                          const showDates = roles.length > 1 ? dates : "";
+                          if (!role.title.trim() && !showDates) return null;
+                          return (
+                            <div
+                              key={role.id}
+                              className="flex items-baseline justify-between gap-3"
+                              style={{
+                                paddingLeft: `${layout.roleIndentPx}px`,
+                              }}
+                            >
+                              <p className="min-w-0">
+                                <HighlightedText
+                                  text={role.title}
+                                  terms={highlightTerms}
+                                />
+                              </p>
+                              {showDates && (
+                                <p
+                                  className="shrink-0 italic text-neutral-600"
+                                  style={{
+                                    fontSize: `${layout.metaPx}px`,
+                                    lineHeight: `${layout.metaPx * 1.3}px`,
+                                  }}
+                                >
+                                  {showDates}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {item.bullets.length > 0 && (
+                          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                            {item.bullets.map((bullet, index) => (
+                              <li key={`${item.id}-${index}`}>
+                                <HighlightedText
+                                  text={bullet}
+                                  terms={highlightTerms}
+                                />
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
               </Section>
             );
           }

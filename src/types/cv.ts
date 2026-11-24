@@ -37,16 +37,29 @@ export interface CvContact {
   githubUrl: string;
 }
 
-export interface CvExperience {
+/** One job title inside an employer group. */
+export interface CvExperienceRole {
   id: string;
-  /** Profile work-experience id when this entry came from the profile. */
+  /** Profile work-experience id when this role came from the profile. */
   sourceId?: string;
-  company: string;
-  role: string;
-  location: string;
+  title: string;
   startDate: string;
   endDate: string;
   current: boolean;
+}
+
+/**
+ * One employer block in the CV. Consecutive profile roles at the same employer
+ * are grouped here so the employer and its overall dates appear once, followed
+ * by the individual roles and one description.
+ */
+export interface CvExperience {
+  id: string;
+  /** Profile work-experience id of the newest role in this group. */
+  sourceId?: string;
+  company: string;
+  location: string;
+  roles: CvExperienceRole[];
   bullets: string[];
   included: boolean;
 }
@@ -114,7 +127,7 @@ export interface CvAiUsage {
 }
 
 export interface CvDocument {
-  schemaVersion: 1;
+  schemaVersion: 2;
   language: CvLanguage;
   /** Language the body prose was generated in; can differ after a headings-only switch. */
   contentLanguage?: CvLanguage;

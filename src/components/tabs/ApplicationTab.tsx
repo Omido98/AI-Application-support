@@ -52,7 +52,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import FitMatrixCard from "@/components/tracker/FitMatrixCard";
 import BufferedTextarea from "@/components/common/BufferedTextarea";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 
@@ -1163,11 +1162,6 @@ export default function ApplicationTab() {
                     </div>
                   </CardContent>
                 </Card>
-
-                <FitMatrixCard
-                  application={selected}
-                  onOpenChat={() => setActiveTab("chat")}
-                />
 
                 {/* Company Name */}
                 <Card className="bg-surface border-border transition-[border-color] hover:border-primary/20">

@@ -28,34 +28,38 @@ no AI call.
 2. Pick **English** or **Svenska** and A4 or US Letter.
 3. Optionally add extra context.
 4. **Generate tailored CV**. The model receives the profile and job context,
-   a compact set of ATS priorities, and relevance rules; it selects the two or
-   three most relevant roles and writes a headline, summary, skills order and
-   role bullets. The finished draft is kept per application until you review or
-   discard it, so switching tabs or applications while it is being generated
-   does not lose it. **Stop** cancels the request and keeps the previous CV.
+   a compact set of ATS priorities, and relevance rules; it writes a headline,
+   summary, skills order and the description for each employer group. The
+   experience section is a complete timeline: every employer group and every
+   role is kept. Relevance only controls how much is written about each group;
+   a less relevant role may have no bullets, and there is no fixed bullet count.
+   The finished draft is kept per application until you review or discard it, so
+   switching tabs or applications while it is being generated does not lose it.
+   **Stop** cancels the request and keeps the previous CV.
 5. Review the generated CV before accepting. The dialog shows the estimated
-   page count, selected roles and skills, education/projects, headline and
-   summary, token/cost usage and the full Grounding review. **Discard** keeps
-   the current draft; **Accept generated CV** snapshots the old CV in Versions
-   and replaces it.
+   page count, the kept employers/roles and their bullet counts, skills,
+   education/projects, headline and summary, token/cost usage and the full
+   Grounding review. **Discard** keeps the current draft; **Accept generated
+   CV** snapshots the old CV in Versions and replaces it.
 6. Review and edit any section. Check the **Grounding review**
    panel for unsupported skills, education details, low-evidence claims and
    numbers before exporting. The editor supports:
    - contact details and headline;
    - summary;
    - skills (one per line);
-   - role/company/dates/location and bullet editing, inclusion, ordering and
-     deletion;
+   - employer groups with company/location, any number of roles (title and
+     dates each) and one group-level description;
+   - inclusion, ordering and deletion of entries;
    - education, projects, certifications, languages and other experience;
    - section order and entry order.
 7. Switch to **Preview** for a formatted page view that matches the Word
    layout, including measured page-break markers, then back to **Edit**.
-8. Use **AI rewrite** on the summary, a role, a project or other experience to
-   rewrite only that section. Pick a preset such as **Shorter**, **More
-   senior**, **More technical**, **Stronger verbs** or **Match requirements**,
-   or add your own guidance. The rest of the CV stays untouched. The model's
-   result is not applied automatically: review the before/after diff, any
-   numbers that could not be grounded in the profile, then **Accept**,
+8. Use **AI rewrite** on the summary, an employer group, a project or other
+   experience to rewrite only that section. Pick a preset such as **Shorter**,
+   **More senior**, **More technical**, **Stronger verbs** or **Match
+   requirements**, or add your own guidance. The rest of the CV stays untouched.
+   The model's result is not applied automatically: review the before/after
+   diff, any numbers that could not be grounded in the profile, then **Accept**,
    **Discard** or **Try again**.
 9. **Export Word** or **Export PDF** saves the selected format through the
    native save dialog. The Word export uses an explicit exact line height
@@ -87,11 +91,11 @@ tools or scope. If the profile has responsibilities but no quantified
 achievements, it may reframe them as contribution bullets without adding
 numbers.
 
-The model returns `sourceId` references for profile entries. The app fills the
-identifying fields (employer, role, dates, school, certification, language)
-from the referenced profile entry and discards unknown references. You can
-still edit every field afterwards, so generated content is always a draft, not
-an automatic export.
+The model returns `sourceId` references for profile entries. For experience it
+returns one reference per **employer group**; the app fills the employer, every
+role title and every date from the profile and discards unknown references. You
+can still edit every field afterwards, so generated content is always a draft,
+not an automatic export.
 
 The ATS panel uses deterministic phrase, keyword and curated-synonym matching
 against the job title, description and requirements. It shows matched and
@@ -116,8 +120,31 @@ The checks are advisory and can produce false positives, especially after you
 rewrite or manually paraphrase a bullet. They never remove content or block
 export. Review the flags, then correct the CV, add a true profile detail or
 dismiss the wording as supported. Generation uses a compact set of ATS
-priorities from the job description and requirements, and asks the model to
-prefer the two or three most relevant roles rather than including everything.
+priorities from the job description and requirements. It keeps every employer
+and role for a complete timeline and asks the model to allocate description
+space by relevance instead of following a fixed bullet count.
+
+## Employer groups and complete history
+
+Work-experience entries for the same employer are grouped in the CV when they
+are consecutive in the profile timeline, with no other employer between them.
+The CV shows the employer and its overall dates once, then each role with its
+own dates, then one description. The editor calls this an employer group; it is
+separate from the **Projects** section, which remains optional and can still
+omit projects that do not fit the job.
+
+Every employer group and every role from the profile is kept. The model cannot
+drop a role or reorder the timeline; it only decides how much to write about
+each group. A group with little relevant evidence can have no bullets, so its
+titles and dates still close the timeline without giving an old role the same
+space as a recent, relevant one. If the model leaves a group out entirely, it is
+kept as titles and dates only; if the whole experience response is unusable, the
+CV falls back to the profile-derived descriptions. You can still manually
+include, exclude, reorder or delete an employer group or a role in the editor.
+
+Existing CV drafts are migrated when loaded: an older flat role becomes a
+one-role group, and adjacent entries at the same employer are combined. The
+stored profile is never changed by this grouping.
 
 ## Templates, exports and cross-checks
 

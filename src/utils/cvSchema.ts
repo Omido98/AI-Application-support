@@ -7,6 +7,7 @@ import {
   type CvDocument,
   type CvEducation,
   type CvExperience,
+  type CvExperienceRole,
   type CvLanguage,
   type CvLanguageSkill,
   type CvOtherEngagement,
@@ -16,6 +17,11 @@ import {
   type CvTemplate,
 } from "@/types/cv";
 import { newMessageId } from "@/utils/ids";
+import {
+  groupWorkExperience,
+  mergeAdjacentExperienceGroups,
+} from "@/utils/cvExperience";
+import { CV_UI_TEXT } from "@/utils/cvLanguage";
 
 const MONTHS: Record<CvLanguage, string[]> = {
   en: [
@@ -64,8 +70,8 @@ const ENGLISH_MONTHS = [
 ];
 
 export const CV_PRESENT_LABEL: Record<CvLanguage, string> = {
-  en: "Present",
-  sv: "Nuvarande",
+  en: CV_UI_TEXT.en.present,
+  sv: CV_UI_TEXT.sv.present,
 };
 
 /** Hash of the profile snapshot used to detect stale CV drafts. */
@@ -151,22 +157,31 @@ export function createCvDocumentFromProfile(
   const now = options.now ?? new Date();
   const language = options.language;
 
-  const experience: CvExperience[] = profile.workExperience.map((work) => {
-    const bullets = cleanList([
-      ...(work.achievements ?? []),
-      ...splitLines(work.jobDescription),
-    ]).slice(0, 8);
-    return {
+  const experience: CvExperience[] = groupWorkExperience(
+    profile.workExperience,
+  ).map((group) => {
+    const roles: CvExperienceRole[] = group.map((work) => ({
       id: newMessageId(),
       sourceId: work.id,
-      company: work.company.trim(),
-      role: work.role.trim(),
-      location: "",
+      title: work.role.trim(),
       startDate: formatCvDate(work.startMonth, work.startYear, language),
       endDate: work.isCurrent
         ? CV_PRESENT_LABEL[language]
         : formatCvDate(work.endMonth ?? "", work.endYear ?? "", language),
       current: work.isCurrent,
+    }));
+    const bullets = cleanList(
+      group.flatMap((work) => [
+        ...(work.achievements ?? []),
+        ...splitLines(work.jobDescription),
+      ]),
+    ).slice(0, 10);
+    return {
+      id: newMessageId(),
+      sourceId: group[0]?.id,
+      company: group[0]?.company.trim() || "",
+      location: "",
+      roles,
       bullets,
       included: true,
     };
@@ -248,7 +263,7 @@ export function createCvDocumentFromProfile(
   );
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     language,
     contentLanguage: language,
     pageSize: options.pageSize,
@@ -324,19 +339,54 @@ function normalizeContact(value: unknown): CvContact {
   };
 }
 
-function normalizeExperience(value: unknown): CvExperience | null {
+function normalizeExperienceRole(value: unknown): CvExperienceRole | null {
   const record = asObject(value);
   if (!record) return null;
   return {
     id: asString(record.id) || newMessageId(),
     sourceId: asString(record.sourceId) || undefined,
-    company: asString(record.company),
-    role: asString(record.role),
-    location: asString(record.location),
+    title: asString(record.title) || asString(record.role),
     startDate: asString(record.startDate),
     endDate: asString(record.endDate),
     current: asBool(record.current, false),
-    bullets: asStringList(record.bullets, 12),
+  };
+}
+
+function normalizeExperience(value: unknown): CvExperience | null {
+  const record = asObject(value);
+  if (!record) return null;
+  const roleRecords = Array.isArray(record.roles)
+    ? record.roles
+        .map(normalizeExperienceRole)
+        .filter((item): item is CvExperienceRole => item !== null)
+        .slice(0, 20)
+    : [];
+  const legacyRole = asString(record.role);
+  const legacyStart = asString(record.startDate);
+  const legacyEnd = asString(record.endDate);
+  const legacyCurrent = asBool(record.current, false);
+  const roles: CvExperienceRole[] =
+    roleRecords.length > 0
+      ? roleRecords
+      : legacyRole || legacyStart || legacyEnd || legacyCurrent
+        ? [
+            {
+              id: newMessageId(),
+              sourceId: asString(record.sourceId) || undefined,
+              title: legacyRole,
+              startDate: legacyStart,
+              endDate: legacyEnd,
+              current: legacyCurrent,
+            },
+          ]
+        : [];
+  return {
+    id: asString(record.id) || newMessageId(),
+    sourceId: asString(record.sourceId) || roles[0]?.sourceId,
+    company: asString(record.company),
+    location: asString(record.location),
+    roles,
+    bullets: asStringList(record.bullets, 20),
     included: asBool(record.included, true),
   };
 }
@@ -454,7 +504,10 @@ function normalizeUsage(value: unknown): CvAiUsage | undefined {
 /** Defensive normalizer for CV files written by older/newer app versions. */
 export function normalizeCvDocument(value: unknown): CvDocument | null {
   const record = asObject(value);
-  if (!record || record.schemaVersion !== 1) return null;
+  if (!record || (record.schemaVersion !== 1 && record.schemaVersion !== 2)) {
+    return null;
+  }
+  const version = record.schemaVersion;
   const language: CvLanguage = record.language === "sv" ? "sv" : "en";
   const pageSize: CvPageSize = record.pageSize === "letter" ? "letter" : "a4";
   const now = new Date().toISOString();
@@ -465,8 +518,16 @@ export function normalizeCvDocument(value: unknown): CvDocument | null {
       : undefined;
   const template: CvTemplate =
     record.template === "compact" ? "compact" : "classic";
+  const normalizedExperience = normalizeArray(
+    record.experience,
+    normalizeExperience,
+  );
+  const experience =
+    version === 1
+      ? mergeAdjacentExperienceGroups(normalizedExperience)
+      : normalizedExperience;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     language,
     ...(contentLanguage ? { contentLanguage } : {}),
     pageSize,
@@ -480,7 +541,7 @@ export function normalizeCvDocument(value: unknown): CvDocument | null {
     headline: asString(record.headline),
     summary: asString(record.summary),
     skills: asStringList(record.skills),
-    experience: normalizeArray(record.experience, normalizeExperience),
+    experience,
     education: normalizeArray(record.education, normalizeEducation),
     projects: normalizeArray(record.projects, normalizeProject),
     certifications: normalizeArray(
@@ -500,7 +561,10 @@ export function hasCvContent(document: CvDocument): boolean {
     document.headline.trim() ||
     document.summary.trim() ||
     document.skills.length ||
-    document.experience.some((item) => item.included && item.bullets.length) ||
+    document.experience.some(
+      (item) =>
+        item.included && (item.bullets.length > 0 || item.roles.length > 0),
+    ) ||
     document.education.some((item) => item.included) ||
     document.projects.some((item) => item.included) ||
     document.certifications.some((item) => item.included) ||

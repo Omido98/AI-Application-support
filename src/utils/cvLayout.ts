@@ -24,6 +24,7 @@ interface TemplateMetrics {
   bodyAfterPt: number;
   metaAfterPt: number;
   bulletAfterPt: number;
+  roleIndentPt: number;
 }
 
 const TEMPLATE_METRICS: Record<CvTemplate, TemplateMetrics> = {
@@ -42,6 +43,7 @@ const TEMPLATE_METRICS: Record<CvTemplate, TemplateMetrics> = {
     bodyAfterPt: 3,
     metaAfterPt: 2,
     bulletAfterPt: 1.5,
+    roleIndentPt: 12,
   },
   compact: {
     marginPt: 30,
@@ -58,6 +60,7 @@ const TEMPLATE_METRICS: Record<CvTemplate, TemplateMetrics> = {
     bodyAfterPt: 2,
     metaAfterPt: 1.5,
     bulletAfterPt: 1,
+    roleIndentPt: 9,
   },
 };
 
@@ -82,6 +85,7 @@ export interface CvLayout extends TemplateMetrics {
   bodyAfterPx: number;
   metaAfterPx: number;
   bulletAfterPx: number;
+  roleIndentPx: number;
 }
 
 /**
@@ -117,5 +121,6 @@ export function getCvLayout(
     bodyAfterPx: toPx(metrics.bodyAfterPt),
     metaAfterPx: toPx(metrics.metaAfterPt),
     bulletAfterPx: toPx(metrics.bulletAfterPt),
+    roleIndentPx: toPx(metrics.roleIndentPt),
   };
 }

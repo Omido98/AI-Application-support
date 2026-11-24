@@ -313,11 +313,16 @@ test("@perf CV typing stays responsive with a long document", async ({
     const extraRoles = Array.from({ length: 8 }, (_, roleIndex) => ({
       id: `perf-role-${roleIndex}`,
       company: `Perf Company ${roleIndex}`,
-      role: `Engineer ${roleIndex}`,
       location: "Remote",
-      startDate: "Jan 2020",
-      endDate: "Dec 2022",
-      current: false,
+      roles: [
+        {
+          id: `perf-title-${roleIndex}`,
+          title: `Engineer ${roleIndex}`,
+          startDate: "Jan 2020",
+          endDate: "Dec 2022",
+          current: false,
+        },
+      ],
       bullets: Array.from(
         { length: 8 },
         (_, bulletIndex) =>
@@ -331,7 +336,7 @@ test("@perf CV typing stays responsive with a long document", async ({
     }));
   }, application.id);
   await expect(
-    page.getByRole("textbox", { name: "Company for Engineer 7" }),
+    page.getByRole("textbox", { name: "Company for Perf Company 7" }),
   ).toHaveValue("Perf Company 7");
 
   const before = await page.evaluate(
@@ -349,7 +354,7 @@ test("@perf CV typing stays responsive with a long document", async ({
   // A short plain input is buffered too, so this must not write/save the whole
   // document for every character.
   const companyInput = page.getByRole("textbox", {
-    name: "Company for Engineer 7",
+    name: "Company for Perf Company 7",
   });
   await companyInput.click();
   await companyInput.press("End");

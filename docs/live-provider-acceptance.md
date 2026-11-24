@@ -13,7 +13,12 @@ model quality or a real provider's structured-output behavior.
 
 1. **Generate**
    - Generate a CV and confirm the review dialog appears.
-   - Confirm page estimate, role/skill counts, usage and grounding warnings.
+   - Confirm page estimate, employer/role counts, per-group bullet counts, usage
+     and grounding warnings.
+   - Confirm every profile employer and role appears in the generated CV, in
+     timeline order, including roles with no bullets.
+   - Confirm bullet counts follow relevance rather than a fixed per-group count:
+     a strong group should carry more detail than an unrelated older group.
    - Choose **Discard** once and confirm the old CV is unchanged.
    - Generate again, choose **Accept**, and confirm Versions contains the old CV.
 2. **Grounding**
@@ -26,7 +31,9 @@ model quality or a real provider's structured-output behavior.
    - Confirm matched terms are highlighted in Preview.
    - Confirm no keyword is inserted automatically.
 4. **Rewrite**
-   - Rewrite one role with a preset and custom guidance.
+   - Rewrite one employer group with a preset and custom guidance.
+   - Confirm the number of bullets stays roughly the same unless the guidance
+     asks to shorten or expand.
    - Review the diff and number warnings; Accept and Undo.
    - Try again and Discard.
 5. **Language**

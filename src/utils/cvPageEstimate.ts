@@ -47,9 +47,9 @@ export function estimateCvPages(document: CvDocument): CvPageEstimate {
           items.reduce(
             (sum, item) =>
               sum +
-              line * 2 +
-              item.bullets.length * line +
-              (item.location ? line * 0.5 : 0),
+              line * 1.4 +
+              item.roles.length * line * 1.1 +
+              item.bullets.length * line,
             0,
           ),
         );

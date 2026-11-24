@@ -116,8 +116,9 @@ function baseSourceId(sourceId: string, prefix: string): string {
 }
 
 /**
- * Merge model output into the profile-derived base. Identifying fields always
- * come from the profile; the model only selects order and writes prose.
+ * Merge model output into the profile-derived base. Identifying fields and the
+ * complete experience timeline come from the profile; the model writes prose
+ * and decides description depth.
  */
 export function mergeGeneratedCv(
   content: GeneratedCvContent,
@@ -128,25 +129,42 @@ export function mergeGeneratedCv(
   const headline = cleanProse(asString(content.headline));
   const summary = cleanProse(asString(content.summary));
 
-  const experienceById = new Map(
-    base.experience.map((item) => [item.sourceId ?? "", item]),
-  );
   const generatedExperience = asRecords(content.experience);
-  const experience: CvExperience[] = Array.isArray(content.experience)
-    ? generatedExperience.flatMap((item) => {
-        const source = baseSourceId(sourceIdOf(item.sourceId), "work");
-        const baseItem = experienceById.get(source);
-        if (!baseItem) return [];
-        const bullets = asStringList(item.bullets, 10);
-        return [
-          {
-            ...baseItem,
-            bullets: bullets.length > 0 ? bullets : baseItem.bullets,
-            included: true,
-          },
-        ];
-      })
-    : base.experience;
+  const groupBySource = new Map<string, CvExperience>();
+  const groupByRoleSource = new Map<string, CvExperience>();
+  for (const group of base.experience) {
+    if (group.sourceId) groupBySource.set(group.sourceId, group);
+    for (const role of group.roles) {
+      if (role.sourceId) groupByRoleSource.set(role.sourceId, group);
+    }
+  }
+  const generatedByGroup = new Map<string, Record<string, unknown>>();
+  for (const item of generatedExperience) {
+    const source = plainSourceId(sourceIdOf(item.sourceId), "work");
+    const group = groupBySource.get(source) ?? groupByRoleSource.get(source);
+    // One object per employer group is expected. The first one wins; unknown
+    // IDs can never create an employer that is not in the profile.
+    if (group && !generatedByGroup.has(group.id)) {
+      generatedByGroup.set(group.id, item);
+    }
+  }
+  // The experience section is a complete timeline. The model only supplies
+  // description depth: every base employer group survives, in profile order.
+  // A group the model leaves out is kept as titles and dates only; using the
+  // profile-derived bullets for it would over-describe a role the model chose
+  // not to discuss. A completely empty/unknown experience response is treated
+  // as unusable and falls back to the profile-derived descriptions.
+  const experience: CvExperience[] =
+    Array.isArray(content.experience) && generatedByGroup.size > 0
+      ? base.experience.map((group) => {
+          const generated = generatedByGroup.get(group.id);
+          if (!generated) return { ...group, bullets: [] };
+          const bullets = Array.isArray(generated.bullets)
+            ? asStringList(generated.bullets, 10)
+            : group.bullets;
+          return { ...group, bullets };
+        })
+      : base.experience;
 
   const educationById = new Map(
     base.education.map((item) => [item.sourceId ?? "", item]),
