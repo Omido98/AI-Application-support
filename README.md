@@ -41,6 +41,10 @@ Built with **Tauri 2**, **React 19**, **TypeScript**, **Vite**, **Zustand**,
     are omitted from requests, and can be summarized into a compact hidden
     context note when needed.
   - Choose between the built-in standard prompt or your own custom prompt.
+- **AI-likeness check** — a transient, non-conclusive review of how AI-like
+  a draft reads, using the AI provider you already configured. The draft is
+  sent only to that provider, the result never enters the chat history, and it
+  is discarded when the dialog closes.
 - **Tailored CV builder** — generate an editable, ATS-friendly Word or PDF CV
   from your profile and one application's job description. Consecutive roles at
   the same employer are grouped under one employer header, with every role kept

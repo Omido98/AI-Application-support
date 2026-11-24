@@ -171,6 +171,20 @@ test.describe("WCAG 2.2 AA", () => {
     await scan(page, testInfo, { label: "tab-chat" });
   });
 
+  test("AI-likeness modal", async ({ page }, testInfo) => {
+    await openApp(page, {
+      applications: [application],
+      lastTab: "chat",
+      withChat: true,
+    });
+
+    await page.getByRole("button", { name: "Draft actions" }).click();
+    await page.getByRole("menuitem", { name: "Check AI-likeness" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+
+    await scan(page, testInfo, { label: "ai-likeness-modal" });
+  });
+
   test("Profile tab", async ({ page }, testInfo) => {
     await openApp(page, {
       applications: [application],

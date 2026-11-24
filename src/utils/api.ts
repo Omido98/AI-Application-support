@@ -3,12 +3,17 @@ import type { ApiConfig } from "@/stores/chatStore";
 import type { ChatMessage } from "@/stores/chatStore";
 import type { ProviderId } from "@/utils/providers";
 import {
+  buildAiLikenessPrompt,
   buildDeslopPrompt,
   buildDraftReviewPrompt,
   buildDraftRevisionPrompt,
   buildDraftVerifyPrompt,
 } from "@/utils/systemPrompt";
 import type { ApplicationContext } from "@/utils/systemPrompt";
+import {
+  parseAiLikenessReview,
+  type AiLikenessReview,
+} from "@/utils/aiLikeness";
 import { newMessageId } from "@/utils/ids";
 import type { ProfileData, TokenUsage, WebSource } from "@/types";
 
@@ -344,6 +349,62 @@ export async function deslopText(
     buildDeslopPrompt(),
     options,
   );
+}
+
+/** Result of one stateless AI-likeness review. */
+export interface AiLikenessEvaluation {
+  /** Parsed review; absent when the model replied with unstructured text. */
+  review?: AiLikenessReview;
+  /** The model's raw answer, kept for a readable fallback. */
+  raw: string;
+  error?: string;
+  stopped?: boolean;
+  finishReason?: string | null;
+  usage?: TokenUsage;
+}
+
+/**
+ * Run the "Check AI-likeness" pass on a cover-letter draft. This is a
+ * stateless one-off request: the conversation history is deliberately NOT
+ * sent, and the answer is returned to the caller instead of being appended to
+ * the chat. That keeps the evaluation out of the thread and out of the
+ * context budget for later turns.
+ */
+export async function evaluateAiLikeness(
+  draft: string,
+  config: ApiConfig,
+  options: SendMessageOptions = {},
+): Promise<AiLikenessEvaluation> {
+  const response = await sendMessage(
+    [
+      {
+        id: newMessageId(),
+        role: "user",
+        content: "Assess the cover letter above.",
+        timestamp: new Date().toISOString(),
+      },
+    ],
+    { ...config, webSearchEnabled: false },
+    buildAiLikenessPrompt(draft),
+    options,
+  );
+
+  if (response.error || response.stopped) {
+    return {
+      raw: response.content,
+      error: response.error,
+      stopped: response.stopped,
+      finishReason: response.finishReason,
+      usage: response.usage,
+    };
+  }
+
+  return {
+    raw: response.content,
+    review: parseAiLikenessReview(response.content) ?? undefined,
+    finishReason: response.finishReason,
+    usage: response.usage,
+  };
 }
 
 /**

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   sendMessage,
   deslopText,
+  evaluateAiLikeness,
   reviewDraft,
   reviseDraft,
   improveDraft,
@@ -778,6 +779,89 @@ describe("deslopText", () => {
     const result = await deslopText("Draft.", { ...baseConfig, apiKey: "" });
     expect(result.content).toBe("");
     expect(result.error).toMatch(/API key/i);
+  });
+});
+
+describe("evaluateAiLikeness", () => {
+  const reviewJson = JSON.stringify({
+    likelihood: 72,
+    confidence: "high",
+    reasons: [
+      {
+        signal: "Generic phrasing",
+        evidence: "passionate about leveraging",
+        direction: "ai",
+      },
+    ],
+    caveats: ["Short sample."],
+  });
+
+  it("sends one stateless user message and parses the review", async () => {
+    mockChatSequence([
+      { kind: "stream", data: openaiMessage({ content: reviewJson }) },
+    ]);
+
+    const result = await evaluateAiLikeness(
+      "Dear Acme Corp, I am writing to express my interest.",
+      baseConfig,
+    );
+
+    expect(result.review).toMatchObject({
+      likelihood: 72,
+      band: "ai-leaning",
+      confidence: "high",
+    });
+
+    const chatCalls = mockedInvoke.mock.calls.filter(
+      (call) => call[0] === "zen_chat_stream",
+    );
+    expect(chatCalls).toHaveLength(1);
+
+    const payload = (
+      chatCalls[0][1] as {
+        payload: {
+          messages: Array<{ role: string; content?: string | null }>;
+          tools?: unknown;
+        };
+      }
+    ).payload;
+
+    // No thread history, no tools: just the review prompt and one user turn.
+    expect(payload.messages).toHaveLength(2);
+    expect(payload.tools).toBeUndefined();
+    expect(payload.messages[0].role).toBe("system");
+    expect(payload.messages[0].content).toContain("<cover_letter>");
+    expect(payload.messages[0].content).toContain(
+      "Dear Acme Corp, I am writing to express my interest.",
+    );
+    expect(payload.messages[1]).toEqual({
+      role: "user",
+      content: "Assess the cover letter above.",
+    });
+  });
+
+  it("keeps the raw answer when the model is not structured", async () => {
+    mockChatSequence([
+      {
+        kind: "stream",
+        data: openaiMessage({ content: "Looks human to me." }),
+      },
+    ]);
+
+    const result = await evaluateAiLikeness("Draft.", baseConfig);
+
+    expect(result.review).toBeUndefined();
+    expect(result.raw).toBe("Looks human to me.");
+    expect(result.error).toBeUndefined();
+  });
+
+  it("returns an error when the API key is missing", async () => {
+    const result = await evaluateAiLikeness("Draft.", {
+      ...baseConfig,
+      apiKey: "",
+    });
+    expect(result.error).toMatch(/API key/i);
+    expect(result.review).toBeUndefined();
   });
 });
 
